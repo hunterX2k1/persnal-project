@@ -1,158 +1,166 @@
-import googlesearch
+import kivy
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.image import Image, AsyncImage
+from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.clock import Clock
 import requests
-import webbrowser
 import os
-from bs4 import BeautifulSoup
-from rich.console import Console
-from rich.prompt import Prompt, IntPrompt
-from rich.progress import Progress
-from urllib.parse import urljoin, unquote, urlparse
+import threading
 
-console = Console()
+kivy.require('2.1.0')
 
-def search_websites(query: str, num_results: int = 10) -> list[str]:
-    """
-    Searches Google for a given query and returns a list of URLs.
-    """
-    console.print(f"Searching for websites about '{query}'...")
-    try:
-        search_results = googlesearch.search(query, num_results=num_results)
-        urls = [str(result) for result in search_results]
-        return urls
-    except Exception as e:
-        console.print(f"[bold red]An error occurred during search: {e}[/bold red]")
-        return []
+class SearchScreen(Screen):
+    def __init__(self, **kwargs):
+        super(SearchScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-def scrape_for_media(url: str, content_type: str) -> list[str]:
-    """
-    Scrapes a website for media links (images or videos).
+        layout.add_widget(Label(text='Reverse Face Search', font_size='24sp', size_hint_y=None, height=50))
+        self.image_preview = Image(source='', size_hint_y=None, height=300, allow_stretch=True)
+        layout.add_widget(self.image_preview)
+        self.url_input = TextInput(hint_text='Enter image URL here', multiline=False, size_hint_y=None, height=40)
+        self.url_input.bind(on_text_validate=self.load_image_from_url)
+        layout.add_widget(self.url_input)
 
-    Args:
-        url: The URL of the website to scrape.
-        content_type: The type of media to search for ('images' or 'videos').
+        button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        load_url_button = Button(text='Load from URL')
+        load_url_button.bind(on_press=self.load_image_from_url)
+        button_layout.add_widget(load_url_button)
+        load_file_button = Button(text='Load from File')
+        load_file_button.bind(on_press=self.open_file_chooser)
+        button_layout.add_widget(load_file_button)
+        layout.add_widget(button_layout)
 
-    Returns:
-        A list of absolute URLs to the found media.
-    """
-    console.print(f"\nScraping '{url}' for {content_type}...")
-    try:
-        response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()
-    except requests.RequestException as e:
-        console.print(f"[bold red]Error fetching website: {e}[/bold red]")
-        return []
+        search_button = Button(text='Search', background_color=(0.2, 0.6, 1, 1), size_hint_y=None, height=50)
+        search_button.bind(on_press=self.start_search)
+        layout.add_widget(search_button)
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    media_urls = set()
+        self.status_label = Label(text='Please enter an image URL or load a file to begin.', size_hint_y=None, height=40, markup=True)
+        layout.add_widget(self.status_label)
 
-    if content_type == 'images':
-        tags = soup.find_all('img')
-        for tag in tags:
-            # Also check for 'data-src' for lazy-loaded images
-            src = tag.get('src') or tag.get('data-src')
-            if src:
-                media_urls.add(urljoin(url, src))
-    elif content_type == 'videos':
-        # Find video tags
-        video_tags = soup.find_all('video')
-        for tag in video_tags:
-            # Check for a 'src' attribute on the video tag itself
-            if tag.get('src'):
-                media_urls.add(urljoin(url, tag.get('src')))
-            # Check for source tags within the video tag
-            for source in tag.find_all('source'):
-                if source.get('src'):
-                    media_urls.add(urljoin(url, source.get('src')))
+        self.add_widget(layout)
 
-    return list(media_urls)
+    def load_image_from_url(self, instance):
+        url = self.url_input.text
+        if not url:
+            self.status_label.text = "[color=ff0000]URL cannot be empty.[/color]"
+            return
+        self.status_label.text = f"Downloading image..."
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, stream=True, timeout=10)
+            response.raise_for_status()
+            if not os.path.exists("temp"):
+                os.makedirs("temp")
+            temp_image_path = "temp/preview_image.jpg"
+            with open(temp_image_path, 'wb') as f:
+                f.write(response.content)
+            self.image_preview.source = temp_image_path
+            self.image_preview.reload()
+            self.status_label.text = "[color=00ff00]Image loaded successfully.[/color]"
+        except Exception as e:
+            self.status_label.text = f"[color=ff0000]Error: Could not load image.[/color]\n{e}"
+            self.image_preview.source = ''
 
+    def open_file_chooser(self, instance):
+        from kivy.uix.popup import Popup
+        from kivy.uix.filechooser import FileChooserListView
+        filechooser = FileChooserListView(filters=['*.png', '*.jpg', '*.jpeg'])
+        popup = Popup(title="Choose an image", content=filechooser, size_hint=(0.9, 0.9))
+        filechooser.bind(on_submit=lambda *args: self.load_image_from_file(filechooser.selection, popup))
+        popup.open()
 
-def download_file(url: str, folder: str = "downloads"):
-    """
-    Downloads a file from a URL to a specified folder.
-    """
-    os.makedirs(folder, exist_ok=True)
-    try:
-        with requests.get(url, stream=True, timeout=15, headers={'User-Agent': 'Mozilla/5.0'}) as r:
-            r.raise_for_status()
+    def load_image_from_file(self, selection, popup):
+        if not selection:
+            return
+        filepath = selection[0]
+        self.image_preview.source = filepath
+        self.image_preview.reload()
+        self.status_label.text = "[color=00ff00]Image loaded successfully.[/color]"
+        popup.dismiss()
 
-            # Try to get filename from Content-Disposition header
-            content_disposition = r.headers.get('content-disposition')
-            if content_disposition:
-                import re
-                fname = re.findall('filename="?(.+)"?', content_disposition)[0]
-                filename = os.path.join(folder, unquote(fname))
-            else:
-                # Fallback to URL parsing
-                path = urlparse(url).path
-                filename = os.path.join(folder, unquote(os.path.basename(path)))
+    def start_search(self, instance):
+        if not self.image_preview.source or not os.path.exists(self.image_preview.source):
+            self.status_label.text = "[color=ff0000]Please load a valid image before searching.[/color]"
+            return
+        self.status_label.text = "[color=ffff00]Search starting... This can take several minutes.[/color]"
+        threading.Thread(target=self.run_search_thread).start()
 
-            if not os.path.basename(filename): # If no filename found
-                 console.print("[yellow]Could not determine filename. Using 'downloaded_file'.[/yellow]")
-                 filename = os.path.join(folder, "downloaded_file")
+    def run_search_thread(self):
+        from scraping.web_scraper import WebScraper
+        from vision.face_analyzer import FaceAnalyzer
 
-            total_size = int(r.headers.get('content-length', 0))
+        def update_status(text):
+            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', f"[color=ffff00]{text}[/color]"))
 
-            with Progress() as progress:
-                task = progress.add_task(f"[cyan]Downloading {os.path.basename(filename)}...", total=total_size)
-                with open(filename, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        progress.update(task, advance=len(chunk))
+        update_status("Step 1/3: Searching for potential images...")
+        image_path = os.path.abspath(self.image_preview.source)
+        scraper = WebScraper()
+        result_urls = scraper.search_by_image(image_path)
 
-            console.print(f"\n[bold green]File downloaded successfully to '{filename}'[/bold green]")
+        if not result_urls:
+            update_status("Search complete. No potential images found.")
+            return
 
-    except requests.RequestException as e:
-        console.print(f"[bold red]Download failed: {e}[/bold red]")
-    except Exception as e:
-        console.print(f"[bold red]An unexpected error occurred during download: {e}[/bold red]")
+        update_status(f"Step 2/3: Found {len(result_urls)} potential images. Analyzing faces...")
+        analyzer = FaceAnalyzer()
+        matching_urls = analyzer.find_matching_faces(image_path, result_urls)
 
+        update_status(f"Step 3/3: Analysis complete. Found {len(matching_urls)} matches.")
 
-def main():
-    """
-    Main function to run the content aggregator CLI.
-    """
-    console.print("[bold green]Welcome to the Content Aggregator Tool![/bold green]")
+        Clock.schedule_once(lambda dt: self.show_results(matching_urls))
 
-    topic = Prompt.ask("What topic are you interested in? (e.g., 'free stock photos')")
-    urls = search_websites(topic)
+    def show_results(self, matching_urls):
+        self.manager.current = 'results'
+        self.manager.get_screen('results').display_matches(matching_urls)
 
-    if not urls:
-        console.print("[yellow]No websites found. Please try another topic.[/yellow]")
-        return
+class ResultsScreen(Screen):
+    def __init__(self, **kwargs):
+        super(ResultsScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-    console.print("\n[bold]Here are the top websites I found:[/bold]")
-    for i, url in enumerate(urls, 1):
-        console.print(f"{i}. {url}")
+        # Header
+        header = BoxLayout(size_hint_y=None, height=50)
+        self.results_label = Label(text="Found 0 Matches", font_size='20sp')
+        header.add_widget(self.results_label)
+        back_button = Button(text="< Back to Search", size_hint_x=None, width=150)
+        back_button.bind(on_press=self.go_back)
+        header.add_widget(back_button)
+        layout.add_widget(header)
 
-    while True:
-        choice = IntPrompt.ask("\nChoose a website to search within (enter number)", choices=[str(i) for i in range(1, len(urls) + 1)])
-        selected_url = urls[choice - 1]
+        # Scrollable grid for images
+        scroll_view = ScrollView()
+        self.grid = GridLayout(cols=3, spacing=10, size_hint_y=None)
+        self.grid.bind(minimum_height=self.grid.setter('height'))
+        scroll_view.add_widget(self.grid)
+        layout.add_widget(scroll_view)
 
-        # This part will be fully implemented in the next step
-        content_type = Prompt.ask("What do you want to find?", choices=["images", "videos"], default="images")
+        self.add_widget(layout)
 
-        media_links = scrape_for_media(selected_url, content_type)
+    def display_matches(self, urls):
+        self.grid.clear_widgets()
+        self.results_label.text = f"Found {len(urls)} Matches"
+        if not urls:
+            self.grid.add_widget(Label(text="No matching faces were found."))
+            return
+        for url in urls:
+            image = AsyncImage(source=url, size_hint_y=None, height=200, allow_stretch=True)
+            self.grid.add_widget(image)
 
-        console.print(f"\n[bold]Found {len(media_links)} {content_type}:[/bold]")
-        if not media_links:
-            console.print(f"[yellow]No {content_type} found on this page.[/yellow]")
-        else:
-            for i, link in enumerate(media_links, 1):
-                # Truncate long links for display
-                display_link = link if len(link) < 100 else link[:97] + "..."
-                console.print(f"{i}. {display_link}")
+    def go_back(self, instance):
+        self.manager.current = 'search'
 
-            action = Prompt.ask("\nWhat next?", choices=["download", "nothing"], default="nothing")
-            if action == "download":
-                link_num = IntPrompt.ask("Enter link number to download", choices=[str(i) for i in range(1, len(media_links) + 1)])
-                link_to_download = media_links[link_num - 1]
-                download_file(link_to_download)
+class FaceSearchApp(App):
+    def build(self):
+        sm = ScreenManager()
+        sm.add_widget(SearchScreen(name='search'))
+        sm.add_widget(ResultsScreen(name='results'))
+        return sm
 
-        if Prompt.ask("\nSearch another website?", choices=["y", "n"], default="n") == 'n':
-            break
-
-    console.print("\n[bold green]Thank you for using the Content Aggregator Tool![/bold green]")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    FaceSearchApp().run()

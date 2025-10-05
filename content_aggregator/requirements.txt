@@ -1,4 +1,7 @@
+kivy==2.1.0
 requests
 beautifulsoup4
-googlesearch-python
-rich
+opencv-python
+deepface
+Pillow
+pyinstaller
