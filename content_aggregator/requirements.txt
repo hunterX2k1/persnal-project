@@ -1,4 +1,4 @@
-kivy==2.1.0
+kivy
 requests
 beautifulsoup4
 opencv-python
