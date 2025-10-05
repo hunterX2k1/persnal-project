@@ -122,7 +122,7 @@ class MainScreen(Screen):
             self.update_results_display("Please provide an image URL or upload a file.")
             return
 
-        enabled_engines = [engine for engine, active in App.get().search_engines.items() if active]
+        enabled_engines = [engine for engine, active in App.get_running_app().search_engines.items() if active]
         if not enabled_engines:
             self.update_results_display("Please enable at least one search engine in Settings.")
             return
@@ -215,7 +215,7 @@ class MainScreen(Screen):
 class SettingsScreen(Screen):
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
-        self.app = App.get()
+        self.app = App.get_running_app()
 
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
         layout.add_widget(Label(text="Settings Panel", size_hint_y=0.1))
