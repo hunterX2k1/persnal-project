@@ -5,17 +5,21 @@ from PIL import Image
 import numpy as np
 
 class FaceAnalyzer:
-    def __init__(self):
+    def __init__(self, logger=print):
         """
         Initializes the face analyzer using the DeepFace library.
+        Args:
+            logger (function): A function to call for logging messages. Defaults to print.
         """
+        self.logger = logger
         # The first call to DeepFace downloads required models, so we can do it here
         # to ensure they are ready when needed. This is a silent pre-loading.
         try:
+            self.logger("Loading facial recognition models...")
             _ = DeepFace.build_model("VGG-Face")
-            print("DeepFace models loaded successfully.")
+            self.logger("Models loaded successfully.")
         except Exception as e:
-            print(f"Could not pre-load DeepFace models: {e}")
+            self.logger(f"Could not pre-load DeepFace models: {e}")
 
     def find_matching_faces(self, source_image_path, image_urls_to_check):
         """
@@ -29,40 +33,36 @@ class FaceAnalyzer:
             list[str]: A list of URLs that were verified as a match.
         """
         if not os.path.exists(source_image_path):
-            print(f"Source image not found: {source_image_path}")
+            self.logger(f"Error: Source image not found: {source_image_path}")
             return []
 
         matching_urls = []
+        total_images = len(image_urls_to_check)
 
-        for url in image_urls_to_check:
+        for i, url in enumerate(image_urls_to_check):
+            self.logger(f"Analyzing image {i+1} of {total_images}: {url[:70]}...")
             try:
-                # DeepFace's verify function can take a url or a numpy array.
-                # It's generally more reliable to download the image first and pass the array.
                 headers = {'User-Agent': 'Mozilla/5.0'}
                 response = requests.get(url, headers=headers, timeout=15, stream=True)
                 response.raise_for_status()
 
-                # Convert the downloaded image content to a numpy array
                 img_array = np.array(Image.open(response.raw).convert('RGB'))
 
-                # The core of our logic: verify the face
                 result = DeepFace.verify(
                     img1_path=source_image_path,
                     img2_path=img_array,
-                    enforce_detection=False, # Don't raise error if face isn't found
-                    detector_backend='retinaface' # Specify a lightweight detector
+                    enforce_detection=False,
+                    detector_backend='retinaface'
                 )
 
-                # If the result confirms a match, add the URL to our list
                 if result.get("verified"):
-                    print(f"MATCH FOUND: {url}")
+                    self.logger(f"  -> MATCH FOUND!")
                     matching_urls.append(url)
                 else:
-                    print(f"No match: {url}")
+                    self.logger(f"  -> No match.")
 
             except Exception as e:
-                # This can happen if the URL is broken, not an image, or if DeepFace fails
-                print(f"Could not verify image at {url}. Error: {e}")
+                self.logger(f"  -> Could not verify image. Error: {e}")
                 continue
 
         return matching_urls

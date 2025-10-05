@@ -3,11 +3,13 @@ from bs4 import BeautifulSoup
 import os
 
 class WebScraper:
-    def __init__(self):
+    def __init__(self, logger=print):
         """
         Initializes the scraper.
+        Args:
+            logger (function): A function to call for logging messages. Defaults to print.
         """
-        pass
+        self.logger = logger
 
     def search_by_image(self, image_path):
         """
@@ -20,10 +22,10 @@ class WebScraper:
             list[str]: A list of URLs from the search results page.
         """
         if not os.path.exists(image_path):
-            print(f"Error: Image path does not exist: {image_path}")
+            self.logger(f"Error: Image path does not exist: {image_path}")
             return []
 
-        print(f"Searching Google for image at: {image_path}")
+        self.logger(f"Uploading image to search engine...")
 
         # This is the endpoint for Google's reverse image search upload
         search_url = "https://images.google.com/searchbyimage/upload"

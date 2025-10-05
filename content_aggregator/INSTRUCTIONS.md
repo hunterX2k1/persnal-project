@@ -54,7 +54,7 @@ pip install pyinstaller
 This is the final step. Run the following command in the same command prompt window. This tells `PyInstaller` to build your application.
 
 ```
-pyinstaller --onefile --windowed --name FaceSearchApp --hidden-import=win32timezone main.py
+pyinstaller --onefile --windowed --name FaceSearchApp --hidden-import=win32timezone --hidden-import=plyer.platforms.win.filechooser main.py
 ```
 
 -   `--onefile`: Bundles everything into a single `.exe` file.

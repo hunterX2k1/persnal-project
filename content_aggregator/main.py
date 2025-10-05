@@ -12,32 +12,7 @@ from kivy.clock import Clock
 import requests
 import os
 import threading
-from kivy.properties import StringProperty
-from kivy.factory import Factory
-
 kivy.require('2.1.0')
-
-class IconEntry(BoxLayout):
-    path = StringProperty()
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.size_hint_y = None
-        self.height = 150
-        # Create widgets but don't set their content yet
-        self.image = AsyncImage(size_hint_y=0.8)
-        self.label = Label(size_hint_y=0.2, font_size='10sp', halign='center', shorten=True)
-        self.add_widget(self.image)
-        self.add_widget(self.label)
-
-    def on_path(self, instance, path):
-        # When the path property changes, update the image source and label
-        self.image.source = path
-        self.label.text = os.path.basename(path)
-
-# Register the custom widget so the filechooser can use it
-Factory.register('IconEntry', cls=IconEntry)
 
 class SearchScreen(Screen):
     def __init__(self, **kwargs):
@@ -64,8 +39,13 @@ class SearchScreen(Screen):
         search_button.bind(on_press=self.start_search)
         layout.add_widget(search_button)
 
-        self.status_label = Label(text='Please enter an image URL or load a file to begin.', size_hint_y=None, height=40, markup=True)
+        self.status_label = Label(text='Please enter an image URL or load a file to begin.', size_hint_y=None, height=30, markup=True)
         layout.add_widget(self.status_label)
+
+        # Live Log Area
+        layout.add_widget(Label(text="Live Log", size_hint_y=None, height=20, font_size='16sp'))
+        self.log_box = TextInput(text="", readonly=True, background_color=(0.1, 0.1, 0.1, 1), foreground_color=(0.8, 0.8, 0.8, 1))
+        layout.add_widget(self.log_box)
 
         self.add_widget(layout)
 
@@ -92,27 +72,30 @@ class SearchScreen(Screen):
             self.image_preview.source = ''
 
     def open_file_chooser(self, instance):
-        from kivy.uix.popup import Popup
-        from kivy.uix.filechooser import FileChooserIconView
+        from plyer import filechooser
+        try:
+            file_paths = filechooser.open_file(
+                title="Pick an Image",
+                filters=[("Image files", "*.jpg;*.jpeg;*.png")]
+            )
+            if file_paths:
+                self.load_image_from_file(file_paths[0])
+        except Exception as e:
+            self.status_label.text = f"[color=ff0000]Error: Could not open file dialog: {e}[/color]"
 
-        filechooser = FileChooserIconView(filters=['*.png', '*.jpg', '*.jpeg'], entry_template='IconEntry')
-        popup = Popup(title="Choose an image", content=filechooser, size_hint=(0.9, 0.9))
-        filechooser.bind(on_submit=lambda *args: self.load_image_from_file(filechooser.selection, popup))
-        popup.open()
-
-    def load_image_from_file(self, selection, popup):
-        if not selection:
+    def load_image_from_file(self, filepath):
+        if not filepath:
             return
-        filepath = selection[0]
         self.image_preview.source = filepath
         self.image_preview.reload()
         self.status_label.text = "[color=00ff00]Image loaded successfully.[/color]"
-        popup.dismiss()
 
     def start_search(self, instance):
         if not self.image_preview.source or not os.path.exists(self.image_preview.source):
             self.status_label.text = "[color=ff0000]Please load a valid image before searching.[/color]"
             return
+
+        self.log_box.text = "" # Clear the log box
         self.status_label.text = "[color=ffff00]Search starting... This can take several minutes.[/color]"
         threading.Thread(target=self.run_search_thread).start()
 
@@ -120,25 +103,34 @@ class SearchScreen(Screen):
         from scraping.web_scraper import WebScraper
         from vision.face_analyzer import FaceAnalyzer
 
-        def update_status(text):
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', f"[color=ffff00]{text}[/color]"))
+        # Create a logger function that safely updates the UI from the thread
+        def log_to_gui(message):
+            Clock.schedule_once(lambda dt: self.update_log_box(message))
 
-        update_status("Step 1/3: Searching for potential images...")
+        log_to_gui("Search process started.")
         image_path = os.path.abspath(self.image_preview.source)
-        scraper = WebScraper()
+
+        log_to_gui("Step 1/3: Searching for potential images...")
+        scraper = WebScraper(logger=log_to_gui)
         result_urls = scraper.search_by_image(image_path)
 
         if not result_urls:
-            update_status("Search complete. No potential images found.")
+            log_to_gui("Search complete. No potential images found.")
+            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "Search complete."))
             return
 
-        update_status(f"Step 2/3: Found {len(result_urls)} potential images. Analyzing faces...")
-        analyzer = FaceAnalyzer()
+        log_to_gui(f"Step 2/3: Found {len(result_urls)} potential images. Analyzing faces...")
+        analyzer = FaceAnalyzer(logger=log_to_gui)
         matching_urls = analyzer.find_matching_faces(image_path, result_urls)
 
-        update_status(f"Step 3/3: Analysis complete. Found {len(matching_urls)} matches.")
+        final_message = f"Step 3/3: Analysis complete. Found {len(matching_urls)} matches."
+        log_to_gui(final_message)
+        Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', final_message))
 
         Clock.schedule_once(lambda dt: self.show_results(matching_urls))
+
+    def update_log_box(self, message):
+        self.log_box.text += f"{message}\n"
 
     def show_results(self, matching_urls):
         self.manager.current = 'results'
