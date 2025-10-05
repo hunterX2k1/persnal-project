@@ -1,10 +1,11 @@
 from kivy.app import App
+from kivy.lang import Builder
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
-from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.filechooser import FileChooserIconView
 import os
 from search import reverse_image_search, scrape_page_summary, analyze_text_for_details
 from kivy.uix.scrollview import ScrollView
@@ -90,9 +91,51 @@ class MainScreen(Screen):
     def go_to_settings(self, instance):
         self.manager.current = 'settings'
 
+# Define a custom template for the file chooser entries to show thumbnails
+Builder.load_string('''
+<ThumbnailFileChooserEntry@BoxLayout>:
+    orientation: 'vertical'
+    padding: 5
+
+    # These properties are passed by the FileChooser
+    path: ctx.path
+    filename: ctx.name
+    isdir: ctx.isdir
+    controller: ctx.controller
+
+    canvas.before:
+        Color:
+            rgba: (.6, .6, .6, .3) if self.selected else (0, 0, 0, 0)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    Image:
+        source: 'atlas://data/images/defaulttheme/filechooser_folder' if ctx.isdir else ctx.path
+        keep_ratio: True
+        allow_stretch: True
+    Label:
+        text: ctx.name
+        size_hint_y: None
+        height: '20dp'
+        halign: 'center'
+        shorten: True
+        shorten_from: 'middle'
+''')
+
+...
+
     def show_file_chooser(self, instance):
         content = BoxLayout(orientation='vertical', spacing=10)
-        self.file_chooser = FileChooserListView(path=os.path.expanduser("~"))
+
+        app = App.get_running_app()
+        enabled_filters = [f"*{ext}" for ext, is_active in app.file_filters.items() if is_active]
+
+        self.file_chooser = FileChooserIconView(
+            path=os.path.expanduser("~"),
+            filters=enabled_filters,
+            entry_template='ThumbnailFileChooserEntry'
+        )
         content.add_widget(self.file_chooser)
 
         button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
@@ -218,26 +261,38 @@ class SettingsScreen(Screen):
         self.app = App.get_running_app()
 
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        layout.add_widget(Label(text="Settings Panel", size_hint_y=0.1))
+        layout.add_widget(Label(text="Settings Panel", size_hint_y=0.1, font_size='20sp'))
 
         # Search engine options
-        engines_layout = GridLayout(cols=2, size_hint_y=0.8)
-
+        layout.add_widget(Label(text="Search Engines", size_hint_y=None, height=40, bold=True))
+        engines_layout = GridLayout(cols=2, size_hint_y=0.4)
         for engine_name in sorted(self.app.search_engines.keys()):
             engines_layout.add_widget(Label(text=engine_name.capitalize()))
             cb = CheckBox(active=self.app.search_engines[engine_name])
-            cb.bind(active=lambda instance, value, name=engine_name: self.on_checkbox_active(instance, value, name))
+            cb.bind(active=lambda instance, value, name=engine_name: self.on_engine_checkbox_active(instance, value, name))
             engines_layout.add_widget(cb)
-
         layout.add_widget(engines_layout)
+
+        # File type filter options
+        layout.add_widget(Label(text="File Type Filters", size_hint_y=None, height=40, bold=True))
+        filters_layout = GridLayout(cols=4, size_hint_y=0.4)
+        for ext_filter in sorted(self.app.file_filters.keys()):
+            filters_layout.add_widget(Label(text=ext_filter))
+            cb = CheckBox(active=self.app.file_filters[ext_filter])
+            cb.bind(active=lambda instance, value, name=ext_filter: self.on_filter_checkbox_active(instance, value, name))
+            filters_layout.add_widget(cb)
+        layout.add_widget(filters_layout)
 
         back_button = Button(text="Back to Main Screen", size_hint_y=0.1)
         back_button.bind(on_press=self.go_to_main)
         layout.add_widget(back_button)
         self.add_widget(layout)
 
-    def on_checkbox_active(self, checkbox, value, engine_name):
+    def on_engine_checkbox_active(self, checkbox, value, engine_name):
         self.app.search_engines[engine_name] = value
+
+    def on_filter_checkbox_active(self, checkbox, value, filter_name):
+        self.app.file_filters[filter_name] = value
 
     def go_to_main(self, instance):
         self.manager.current = 'main'
@@ -245,6 +300,7 @@ class SettingsScreen(Screen):
 class FaceFinderApp(App):
     def build(self):
         self.search_engines = {'google': True, 'yandex': True}
+        self.file_filters = {'.jpg': True, '.jpeg': True, '.png': True, '.bmp': False}
 
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))

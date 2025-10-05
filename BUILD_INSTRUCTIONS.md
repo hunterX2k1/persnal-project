@@ -34,13 +34,17 @@ pip install pyinstaller
 Now, run the following command in the same window. This will start the packaging process. It may take several minutes to complete, and you will see a lot of output in the console.
 
 ```
-pyinstaller --name FaceFinder --onefile --windowed main.py
+pyinstaller --name FaceSearchApp --onefile --windowed --hidden-import=win32timezone main.py
 ```
 
 ## Step 5: Find Your Executable
 
-Once the command finishes, you will find a new folder named `dist` inside your project directory. Open it, and you will see `FaceFinder.exe`.
+Once the command finishes, you will find a new folder named `dist` inside your project directory. Open it, and you will see `FaceSearchApp.exe`.
 
-You can now run this file to start the application! You can move this `.exe` file to another location on your computer, but it must be accompanied by the other files and folders that PyInstaller created in the `dist` directory if you did not use the `--onefile` flag. If you used `--onefile`, the single `.exe` is all you need.
+You can now run this file to start the application! Since we are using the `--onefile` flag, you can move this single `.exe` file to any location on your computer.
+
+### Troubleshooting
+
+If you still encounter issues, it might be because PyInstaller sometimes has trouble with Kivy's dependencies. The command above using `--hidden-import=win32timezone` should solve the most common error.
 
 That's it! You have successfully built the application.
