@@ -12,8 +12,32 @@ from kivy.clock import Clock
 import requests
 import os
 import threading
+from kivy.properties import StringProperty
+from kivy.factory import Factory
 
 kivy.require('2.1.0')
+
+class IconEntry(BoxLayout):
+    path = StringProperty()
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.size_hint_y = None
+        self.height = 150
+        # Create widgets but don't set their content yet
+        self.image = AsyncImage(size_hint_y=0.8)
+        self.label = Label(size_hint_y=0.2, font_size='10sp', halign='center', shorten=True)
+        self.add_widget(self.image)
+        self.add_widget(self.label)
+
+    def on_path(self, instance, path):
+        # When the path property changes, update the image source and label
+        self.image.source = path
+        self.label.text = os.path.basename(path)
+
+# Register the custom widget so the filechooser can use it
+Factory.register('IconEntry', cls=IconEntry)
 
 class SearchScreen(Screen):
     def __init__(self, **kwargs):
@@ -69,8 +93,9 @@ class SearchScreen(Screen):
 
     def open_file_chooser(self, instance):
         from kivy.uix.popup import Popup
-        from kivy.uix.filechooser import FileChooserListView
-        filechooser = FileChooserListView(filters=['*.png', '*.jpg', '*.jpeg'])
+        from kivy.uix.filechooser import FileChooserIconView
+
+        filechooser = FileChooserIconView(filters=['*.png', '*.jpg', '*.jpeg'], entry_template='IconEntry')
         popup = Popup(title="Choose an image", content=filechooser, size_hint=(0.9, 0.9))
         filechooser.bind(on_submit=lambda *args: self.load_image_from_file(filechooser.selection, popup))
         popup.open()
