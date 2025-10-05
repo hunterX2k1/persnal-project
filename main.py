@@ -1,14 +1,15 @@
 from kivy.app import App
-from kivy.lang import Builder
+from kivy.uix.image import Image
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
-from kivy.uix.filechooser import FileChooserIconView
 import os
 from search import reverse_image_search, scrape_page_summary, analyze_text_for_details
 from kivy.uix.scrollview import ScrollView
+import tkinter as tk
+from tkinter import filedialog
 from kivy.uix.gridlayout import GridLayout
 from kivy.core.window import Window
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
@@ -17,34 +18,6 @@ import threading
 from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.checkbox import CheckBox
-
-# Define a custom template for the file chooser entries to show thumbnails
-Builder.load_string('''
-<ThumbnailFileChooserEntry@BoxLayout>:
-    orientation: 'vertical'
-    padding: 5
-    path: ctx.path
-    filename: ctx.name
-    isdir: ctx.isdir
-    controller: ctx.controller
-    canvas.before:
-        Color:
-            rgba: (.6, .6, .6, .3) if self.selected else (0, 0, 0, 0)
-        Rectangle:
-            pos: self.pos
-            size: self.size
-    Image:
-        source: 'atlas://data/images/defaulttheme/filechooser_folder' if ctx.isdir else ctx.path
-        keep_ratio: True
-        allow_stretch: True
-    Label:
-        text: ctx.name
-        size_hint_y: None
-        height: '20dp'
-        halign: 'center'
-        shorten: True
-        shorten_from: 'middle'
-''')
 
 class MainScreen(Screen):
     def __init__(self, **kwargs):
@@ -68,8 +41,12 @@ class MainScreen(Screen):
         input_layout.add_widget(upload_layout)
         self.main_layout.add_widget(input_layout)
 
+        # Image Preview
+        self.preview_image = Image(source='', allow_stretch=True, keep_ratio=True, size_hint_y=0.4)
+        self.main_layout.add_widget(self.preview_image)
+
         # 2. Results Display Area
-        self.results_panel = TabbedPanel(do_default_tab=False, tab_pos='top_mid', size_hint=(1, 0.8))
+        self.results_panel = TabbedPanel(do_default_tab=False, tab_pos='top_mid', size_hint=(1, 0.4))
         self.links_tab = TabbedPanelItem(text='Links')
         self.results_scrollview = ScrollView()
         self.results_layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
@@ -91,6 +68,16 @@ class MainScreen(Screen):
         self.analysis_scroll.add_widget(self.analysis_layout)
         self.analysis_tab.add_widget(self.analysis_scroll)
         self.results_panel.add_widget(self.analysis_tab)
+
+        # Log Tab
+        self.log_tab = TabbedPanelItem(text='Log')
+        log_scroll = ScrollView()
+        self.log_output = Label(text="", size_hint_y=None, markup=True)
+        self.log_output.bind(texture_size=self.log_output.setter('size'))
+        log_scroll.add_widget(self.log_output)
+        self.log_tab.add_widget(log_scroll)
+        self.results_panel.add_widget(self.log_tab)
+
         self.main_layout.add_widget(self.results_panel)
 
         # 3. Action Buttons
@@ -106,32 +93,20 @@ class MainScreen(Screen):
         self.manager.current = 'settings'
 
     def show_file_chooser(self, instance):
-        content = BoxLayout(orientation='vertical', spacing=10)
-        app = App.get_running_app()
-        enabled_filters = [f"*{ext}" for ext, is_active in app.file_filters.items() if is_active]
-        self.file_chooser = FileChooserIconView(
-            path=os.path.expanduser("~"),
-            filters=enabled_filters,
-            entry_template='ThumbnailFileChooserEntry'
-        )
-        content.add_widget(self.file_chooser)
-        button_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        select_button = Button(text="Select")
-        select_button.bind(on_press=self.select_file)
-        cancel_button = Button(text="Cancel")
-        cancel_button.bind(on_press=lambda x: self.popup.dismiss())
-        button_layout.add_widget(select_button)
-        button_layout.add_widget(cancel_button)
-        content.add_widget(button_layout)
-        self.popup = Popup(title="Choose an Image", content=content, size_hint=(0.9, 0.9))
-        self.popup.open()
+        """
+        Opens the native Windows file explorer to select an image.
+        """
+        root = tk.Tk()
+        root.withdraw()  # Hide the main tkinter window
 
-    def select_file(self, instance):
-        if self.file_chooser.selection:
-            filepath = self.file_chooser.selection[0]
+        file_types = [('Image Files', '*.png *.jpg *.jpeg *.bmp')]
+        filepath = filedialog.askopenfilename(filetypes=file_types)
+
+        if filepath:
             self.upload_label.text = os.path.basename(filepath)
             self.selected_filepath = filepath
-            self.popup.dismiss()
+            self.preview_image.source = filepath
+            self.preview_image.reload()
 
     def perform_search(self, instance):
         image_url = self.url_input.text
@@ -147,23 +122,36 @@ class MainScreen(Screen):
         threading.Thread(target=self.search_and_process_results, args=(image_path, image_url, enabled_engines)).start()
 
     def search_and_process_results(self, image_path, image_url, engines):
-        results = reverse_image_search(image_path=image_path, image_url=image_url, engines=engines)
-        Clock.schedule_once(lambda dt: self.display_links(results))
-        self.process_scraped_data(results)
+        # Clear previous results
+        Clock.schedule_once(lambda dt: self.clear_all_results())
+
+        # Process the generator from reverse_image_search
+        all_links = []
+        for item in reverse_image_search(image_path=image_path, image_url=image_url, engines=engines):
+            if isinstance(item, str): # It's a log or error message
+                self.log_message(item)
+            elif isinstance(item, dict) and item.get('type') == 'result':
+                url = item['url']
+                all_links.append(url)
+                Clock.schedule_once(lambda dt, u=url: self.add_link_widget(u))
+
+        self.log_message("LOG: --- Search complete. Starting content scraping... ---")
+        self.process_scraped_data(all_links)
 
     def process_scraped_data(self, links):
-        Clock.schedule_once(lambda dt: self.summary_layout.clear_widgets())
-        Clock.schedule_once(lambda dt: self.analysis_layout.clear_widgets())
-        for link in links:
-            full_text, error = scrape_page_summary(link)
-            if error:
-                summary, details = error, {}
-            else:
-                summary = full_text[:500] + '...' if len(full_text) > 500 else full_text
-                details = analyze_text_for_details(full_text)
-            Clock.schedule_once(lambda dt, l=link, s=summary: self.add_summary_widget(l, s))
-            if details:
-                Clock.schedule_once(lambda dt, l=link, d=details: self.add_analysis_widget(l, d))
+        for i, link in enumerate(links):
+            for item in scrape_page_summary(link):
+                if isinstance(item, str): # Log or error
+                    self.log_message(f"LOG: [URL {i+1}/{len(links)}] {item}")
+                elif isinstance(item, dict) and item.get('type') == 'scrape_result':
+                    full_text = item['text']
+                    summary = full_text[:500] + '...' if len(full_text) > 500 else full_text
+                    details = analyze_text_for_details(full_text)
+
+                    Clock.schedule_once(lambda dt, l=link, s=summary: self.add_summary_widget(l, s))
+                    if details:
+                        Clock.schedule_once(lambda dt, l=link, d=details: self.add_analysis_widget(l, d))
+        self.log_message("LOG: --- All scraping complete. ---")
 
     def add_analysis_widget(self, link, details):
         box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=5, padding=5)
@@ -196,27 +184,33 @@ class MainScreen(Screen):
         box.add_widget(summary_label)
         self.summary_layout.add_widget(box)
 
-    def display_links(self, links):
-        self.results_layout.clear_widgets()
-        if not links:
-            self.results_layout.add_widget(Label(text="No results found."))
-            return
-        for link in links:
-            btn = Button(text=link, size_hint_y=None, height=40, on_release=self.open_link)
-            btn.text = link[:100] + '...' if len(link) > 100 else link
-            btn.link_data = link
-            self.results_layout.add_widget(btn)
+    def add_link_widget(self, link):
+        btn = Button(text=link, size_hint_y=None, height=40, on_release=self.open_link)
+        btn.text = link[:100] + '...' if len(link) > 100 else link
+        btn.link_data = link
+        self.results_layout.add_widget(btn)
 
     def open_link(self, instance):
         webbrowser.open(instance.link_data)
 
-    def update_results_display(self, message):
+    def log_message(self, message):
+        # Color code the message
+        if message.startswith("ERROR:"):
+            log_line = f"[color=ff3333]{message}[/color]\n"
+        else:
+            log_line = f"[color=ffffff]{message}[/color]\n"
+
+        Clock.schedule_once(lambda dt: self.log_output.setter('text')(self.log_output, self.log_output.text + log_line))
+
+    def clear_all_results(self):
         self.results_layout.clear_widgets()
-        self.results_layout.add_widget(Label(text=message))
         self.summary_layout.clear_widgets()
-        self.summary_layout.add_widget(Label(text=''))
         self.analysis_layout.clear_widgets()
-        self.analysis_layout.add_widget(Label(text=''))
+        self.log_output.text = ""
+
+    def update_results_display(self, message):
+        self.clear_all_results()
+        self.log_message(f"LOG: {message}")
 
 class SettingsScreen(Screen):
     def __init__(self, **kwargs):
@@ -225,21 +219,13 @@ class SettingsScreen(Screen):
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
         layout.add_widget(Label(text="Settings Panel", size_hint_y=0.1, font_size='20sp'))
         layout.add_widget(Label(text="Search Engines", size_hint_y=None, height=40, bold=True))
-        engines_layout = GridLayout(cols=2, size_hint_y=0.4)
+        engines_layout = GridLayout(cols=2, size_hint_y=0.8) # Adjusted size
         for engine_name in sorted(self.app.search_engines.keys()):
             engines_layout.add_widget(Label(text=engine_name.capitalize()))
             cb = CheckBox(active=self.app.search_engines[engine_name])
             cb.bind(active=lambda instance, value, name=engine_name: self.on_engine_checkbox_active(instance, value, name))
             engines_layout.add_widget(cb)
         layout.add_widget(engines_layout)
-        layout.add_widget(Label(text="File Type Filters", size_hint_y=None, height=40, bold=True))
-        filters_layout = GridLayout(cols=4, size_hint_y=0.4)
-        for ext_filter in sorted(self.app.file_filters.keys()):
-            filters_layout.add_widget(Label(text=ext_filter))
-            cb = CheckBox(active=self.app.file_filters[ext_filter])
-            cb.bind(active=lambda instance, value, name=ext_filter: self.on_filter_checkbox_active(instance, value, name))
-            filters_layout.add_widget(cb)
-        layout.add_widget(filters_layout)
         back_button = Button(text="Back to Main Screen", size_hint_y=0.1)
         back_button.bind(on_press=self.go_to_main)
         layout.add_widget(back_button)
@@ -248,16 +234,12 @@ class SettingsScreen(Screen):
     def on_engine_checkbox_active(self, checkbox, value, engine_name):
         self.app.search_engines[engine_name] = value
 
-    def on_filter_checkbox_active(self, checkbox, value, filter_name):
-        self.app.file_filters[filter_name] = value
-
     def go_to_main(self, instance):
         self.manager.current = 'main'
 
 class FaceFinderApp(App):
     def build(self):
         self.search_engines = {'google': True, 'yandex': True}
-        self.file_filters = {'.jpg': True, '.jpeg': True, '.png': True, '.bmp': False}
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))
         sm.add_widget(SettingsScreen(name='settings'))
