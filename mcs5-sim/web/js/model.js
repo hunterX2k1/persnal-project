@@ -12,7 +12,7 @@
 'use strict';
 
 const MODEL = (() => {
-  const NMAX = 2100, NIDLE = 600, GEAR = 2.2;
+  const NMAX = 2100, NIDLE = 500, GEAR = 2.2;
 
   // ---------------- tag helpers ----------------
   const sysOf = tag => { const m = /^[A-Z]{2}(\d{3})/.exec(tag); return m ? +m[1] : 0; };
@@ -47,7 +47,7 @@ const MODEL = (() => {
   const LIMITS = [
     [/^p-lube oil pt21/, 1.0, null, null, null],
     [/^p-lube oil/, 3.0, 2.5, null, null],
-    [/^p-coolant/, 1.0, 0.7, null, null],
+    [/^p-coolant/, 0.25, 0.15, null, null],
     [/^t-coolant/, null, null, 95, 99],
     [/^t-lube oil/, null, null, 93, 98],
     [/^t-charge air seq/, null, null, 160, 180],
@@ -59,14 +59,14 @@ const MODEL = (() => {
     [/^etc \d speed/, null, null, 88, 95],
     [/^ecu power supply/, 20, 18, 32, 34],
     [/^t-ecu/, null, null, 80, 85],
-    [/^t-exhaust/, 150, null, 680, 720],
-    [/^p-raw water/, 0.5, null, null, null],
+    [/^t-exhaust/, null, null, 680, 720],
+    [/^p-raw water/, 0.1, null, null, null],
     [/^t-bearing/, null, null, 110, 120],
     [/^t-splash oil/, null, null, 120, 130],
     [/^engine speed/, null, null, 2250, 2350],
     [/^ul engine speed/, null, null, 2250, 2350],
     [/^p-gear control oil/, 15, 12, null, null],
-    [/^p-gear lube oil/, 1.5, 1.0, null, null],
+    [/^p-gear lube oil/, 1.2, 0.8, null, null],
     [/^t-gear oil/, null, null, 85, 90],
     [/^t-gear thrust/, null, null, 90, 95],
     [/^p-hydraulic oil/, 60, null, null, null],
@@ -87,8 +87,8 @@ const MODEL = (() => {
       station: 'MCC', estop: false, override: false,
       lines: [1, 2, 3].map(i => ({
         i, eng: 'STOP', n: 0, dem: 0, crank: 0, clutch: false, lever: 0, steer: 0,
-        rev: 0, revCmd: 0, steerPos: 0, hydPump: true, load: 0, hours: 12000 + i * 317,
-        tlo: 32, tcw: 38, tgo: 30, fuelTrip: 0, fuelTot: 4.1e5 + i * 1e4, reduce: false,
+        rev: 0, revCmd: 0, steerPos: 0, hydPump: true, load: 0, hours: [10898, 10893, 10790][i - 1],
+        tlo: 30, tcw: 32, tgo: 30, texh: 40, fuelTrip: 4547, tripH: 16.07, fuelTot: [912120, 905310, 898000][i - 1], reduce: false, local: false, ctl: false,
         startFail: 0, stopCause: ''
       })),
       gens: [1, 2, 3].map(i => ({ i, run: i <= 2, n: i <= 2 ? 1500 : 0, cb: i <= 2, tlo: 82, tcw: 80 })),
@@ -98,7 +98,7 @@ const MODEL = (() => {
       pbnFail: {},    // pbn -> true
       force: {},      // tag -> 1 (binary force) / number (analog force)
       phys: {},       // line -> {plo:-x, ...} physical fault offsets
-      fire: false, bilge: false, door: false, ramps: [],
+      fire: false, bilge: false, door: false, ramps: [], nLines: 2,
       hist: [], alarms: new Map(), seq: 0,
     };
     st.tanks.forEach((t, k) => t.vol = t.cap * (0.55 + 0.08 * k % 0.4));
@@ -169,6 +169,8 @@ const MODEL = (() => {
     let dem = NIDLE + (NMAX - NIDLE) * lev;
     if (L.reduce) dem = Math.min(dem, NIDLE + (NMAX - NIDLE) * 0.6);
     if (!L.clutch) dem = Math.min(dem, NIDLE + 200 * lev);
+    const nClutched = st.lines.slice(0, st.nLines).filter(x => x.clutch).length;
+    if (L.clutch && (L.lever < 0 || nClutched < 2)) dem = Math.min(dem, 1200);   // 'ENGINE RPM RESTRICTED TO 1200 RPM FOR SINGLE ENGINE AND ASTERN MODE'
     L.dem = dem;
     // waterjet bucket: lever sign -> ahead/astern ; steering
     L.revCmd = L.clutch ? (L.lever >= 0 ? 100 : -100) * Math.min(1, Math.abs(L.lever) / 10) : 0;
@@ -200,13 +202,14 @@ const MODEL = (() => {
     L.load = running ? clamp((L.clutch ? Math.pow(r, 3) : 0.02) * (1 + (ph.load || 0)), 0, 1.2) : 0;
     const ld = L.load;
     // thermal
-    L.tcw = approach(L.tcw, running ? 79 + 6 * ld + (ph.tcw || 0) : 38, running ? 90 : 600, dt);
-    L.tlo = approach(L.tlo, running ? 72 + 14 * ld + (ph.tlo || 0) : 35, running ? 120 : 700, dt);
-    L.tgo = approach(L.tgo, running && L.clutch ? 58 + 16 * ld + (ph.tgo || 0) : 32, 150, dt);
-    const fuel = running ? 22 + 690 * ld : 0;   // l/h
+    L.tcw = approach(L.tcw, running ? 52 + 34 * ld + (ph.tcw || 0) : 32, running ? 240 : 900, dt);
+    L.tlo = approach(L.tlo, running ? 50 + 38 * ld + (ph.tlo || 0) : 30, running ? 260 : 900, dt);
+    L.tgo = approach(L.tgo, running ? 42 + (L.clutch ? 16 + 14 * ld : 0) + (ph.tgo || 0) : 30, 200, dt);
+    L.texh = approach(L.texh, running ? 105 + 560 * ld : 40, running ? 25 : 180, dt);
+    const fuel = running ? 8 + 700 * ld : 0;   // l/h
     L.fuelNow = fuel;
     L.fuelTrip += fuel * dt / 3600; L.fuelTot += fuel * dt / 3600;
-    if (running) L.hours += dt / 3600;
+    if (running) { L.hours += dt / 3600; L.tripH += dt / 3600; }
     L.runT = L.eng === 'RUN' ? (L.runT || 0) + dt : 0;
     L.shaft = L.clutch ? L.n / GEAR : 0;
   }
@@ -219,41 +222,42 @@ const MODEL = (() => {
       const ph = st.phys[i] || {}, r = L.n / NMAX, ld = L.load, run = L.eng === 'RUN', turn = L.n > 50;
       if (/^engine speed .*%|0-100%/.test(q)) return r * 100;
       if (/engine speed|speed camshaft|speed crankshaft/.test(q)) return L.n;
-      if (/^p-lube oil before filter/.test(q)) return turn ? 3.4 + 3.6 * r + (ph.plo || 0) + 0.6 : 0;
-      if (/^p-lube oil/.test(q)) return turn ? Math.max(0, 2.8 + 3.4 * r + (ph.plo || 0)) : 0;
+      if (/^p-lube oil before filter/.test(q)) return turn ? 3.9 + 3.4 * r + (ph.plo || 0) : 0;
+      if (/^p-lube oil/.test(q)) return turn ? Math.max(0, 2.65 + 3.4 * r + (ph.plo || 0)) : 0;
       if (/^p-oil re-fill/.test(q)) return 0;
-      if (/^p-coolant/.test(q)) return turn ? Math.max(0, 1.4 + 1.6 * r + (ph.pcw || 0)) : 0.2;
+      if (/^p-coolant/.test(q)) return turn ? Math.max(0, 0.1 + 1.25 * r + (ph.pcw || 0)) : 0.1;
       if (/^t-coolant/.test(q)) return L.tcw;
       if (/^t-lube oil/.test(q)) return L.tlo;
-      if (/^p-charge air/.test(q)) return 1.0 + (run ? 3.1 * ld : 0);
-      if (/^t-charge air seq/.test(q)) return run ? 40 + 90 * ld : 30;
-      if (/^t-charge air/.test(q)) return run ? 44 + 10 * ld + (ph.tca || 0) : 30;
-      if (/^t-intake air/.test(q)) return 32;
+      if (/^p-charge air/.test(q)) return 0.96 + (run ? 3.1 * ld : 0);
+      if (/^t-charge air seq/.test(q)) return run ? 36 + 90 * ld : 29;
+      if (/^t-charge air/.test(q)) return run ? 38 + 30 * ld + (ph.tca || 0) : 29;
+      if (/^t-intake air/.test(q)) return 29 + (run ? 2 * ld : 0);
       if (/^p-fuel \(common rail\)/.test(q)) return run ? 800 + 1000 * ld : 0;
       if (/^p-fuel/.test(q)) return turn ? Math.max(0, 5.2 + 0.6 * r + (ph.pfuel || 0)) : 0;
-      if (/^t-fuel/.test(q)) return run ? 38 + 6 * ld : 30;
+      if (/^t-fuel/.test(q)) return run ? 30 + 12 * ld : 29;
       if (/^p-crankcase/.test(q)) return run ? 1.5 + 2 * ld + (ph.pcc || 0) : 0;
       const etc = /^etc (\d) speed/.exec(q);
-      if (etc) { const k = +etc[1], cut = [0, 0, 0.3, 0.55, 0.75][k] || 0;
+      if (etc) { const k = +etc[1], cut = [0, 0.05, 0.05, 0.5, 0.7][k] || 0;
         return run && ld >= cut ? 18 + 64 * Math.min(1, (ld - cut) / (1 - cut + 1e-6) * 0.6 + ld * 0.4) : 0; }
-      if (/^ecu power supply/.test(q)) return 27.4 + (ph.volt || 0);
-      if (/^t-ecu/.test(q)) return 46;
+      if (/^ecu power supply/.test(q)) return 25.6 + (ph.volt || 0);
+      if (/^t-ecu/.test(q)) return 38 + 8 * r;
       if (/operat\.hours/.test(q)) return L.hours;
-      if (/^trip duration/.test(q)) return L.hours % 24;
-      if (/^actual fuel consumption|mean trip fuel/.test(q)) return L.fuelNow;
+      if (/^trip duration/.test(q)) return L.tripH;
+      if (/^mean trip fuel/.test(q)) return L.tripH > 0.01 ? L.fuelTrip / L.tripH : 0;
+      if (/^actual fuel consumption/.test(q)) return L.fuelNow || 0;
       if (/^trip fuel/.test(q)) return L.fuelTrip;
       if (/^total fuel/.test(q)) return L.fuelTot;
-      if (/^actual p-grade|injection in relation/.test(q)) return ld * 100;
+      if (/^actual p-grade|injection in relation/.test(q)) return run ? 24 + 76 * ld : 0;
       const cyl = /^t-exhaust ([ab])(\d+)/.exec(q);
       if (cyl) { const k = (cyl[1] === 'a' ? 0 : 10) + (+cyl[2]);
         const off = Math.sin(k * 2.3) * 14, f = (ph.cyl && ph.cyl[cyl[1].toUpperCase() + cyl[2]]) || 0;
-        return run ? 255 + 335 * ld + off + f : Math.max(30, L.tcw - 5); }
-      if (/^t-exhaust (mean|combined)/.test(q)) return run ? 255 + 335 * ld : 35;
-      if (/^t-exhaust max/.test(q)) return run ? 255 + 335 * ld + 14 + maxCylFault(ph) : 35;
-      if (/^t-exhaust min/.test(q)) return run ? 255 + 335 * ld - 14 : 35;
-      if (/^p-raw water/.test(q)) return turn ? 0.3 + 1.6 * r + (ph.praw || 0) : 0;
+        return L.texh + (run ? off + f : 0); }
+      if (/^t-exhaust (mean|combined)/.test(q)) return L.texh + (run ? (cylMean(ph)) : 0);
+      if (/^t-exhaust max/.test(q)) return L.texh + (run ? 14 + maxCylFault(ph) : 0);
+      if (/^t-exhaust min/.test(q)) return L.texh - (run ? 14 : 0);
+      if (/^p-raw water/.test(q)) return turn ? 0.05 + 0.7 * r + (ph.praw || 0) : 0;
       const brg = /^t-bearing (\d+|mean)/.exec(q);
-      if (brg) return (run ? 72 + 28 * ld : L.tlo) + (brg[1] !== 'mean' ? Math.sin(+brg[1]) * 3 + (ph.brg && ph.brg[brg[1]] || 0) : 0);
+      if (brg) return (run ? L.tlo + 4 + 24 * ld : L.tlo) + (brg[1] !== 'mean' ? Math.sin(+brg[1]) * 3 + (ph.brg && ph.brg[brg[1]] || 0) : 0);
       const so = /^t-splash oil b(\d+)/.exec(q);
       if (so) return (run ? 84 + 24 * ld : L.tlo) + Math.cos(+so[1]) * 2 + (ph.splash && ph.splash[so[1]] || 0);
       if (/power_supply emu/.test(q)) return 1.0;
@@ -261,10 +265,10 @@ const MODEL = (() => {
     }
     if (s.dom === 'G' && L) {
       const ph = st.phys[i] || {}, turn = L.n > 50;
-      if (/^p-gear control oil/.test(q)) return s.u === 'mA' ? 4 + 16 * (turn ? 22 : 0) / 40 : (turn ? 22 + (ph.pgc || 0) : 0);
-      if (/^p-gear lube oil/.test(q)) { const p = turn ? Math.max(0, 3.1 + (ph.pgl || 0)) : 0; return s.u === 'mA' ? 4 + 16 * p / 10 : p; }
+      if (/^p-gear control oil/.test(q)) { const p = turn ? (L.clutch ? 22 : 4.2) + (ph.pgc || 0) : 0; return s.u === 'mA' ? 4 + 16 * p / 45 : p; }
+      if (/^p-gear lube oil/.test(q)) { const p = turn ? Math.max(0, 1.0 + 2.8 * (L.n / NMAX) + (ph.pgl || 0)) : 0; return s.u === 'mA' ? 4 + 16 * p / 10 : p; }
       if (/^t-gear oil/.test(q)) return L.tgo;
-      if (/^t-gear thrust/.test(q)) return L.tgo - 4 + 18 * L.load;
+      if (/^t-gear thrust/.test(q)) return L.tgo - 4 + 12 * L.load;
       if (/instr range max/.test(q)) return 1000;
       if (/instr range half/.test(q)) return 500;
       if (/instr range min/.test(q)) return 0;
@@ -306,6 +310,7 @@ const MODEL = (() => {
     if (s.dom === 'R' && /autopilot/.test(q)) return 12;
     return null;
   }
+  function cylMean(ph) { return ph.cyl ? Object.values(ph.cyl).reduce((a, b) => a + b, 0) / 20 : 0; }
   function maxCylFault(ph) { if (!ph.cyl) return 0; return Math.max(0, ...Object.values(ph.cyl)); }
 
   function limitValue(st, s, IX) {
@@ -332,7 +337,7 @@ const MODEL = (() => {
       if (v == null || Number.isNaN(v)) return s.kind === 'SD';
       const lim = limitsFor(src.q);
       const G = s.dom === 'D' ? st.gens[s.line - 1] : null;
-      const engRun = G ? (G.run && G.n > 1200) : (!L || (s.dom !== 'E' && s.dom !== 'G' && s.dom !== 'W') || (L.eng === 'RUN' && L.runT > 8 && (s.dom !== 'W' || L.clutch)));   // low-pressure alarms wait for engine start-up (8 s) / clutch
+      const engRun = G ? (G.run && G.n > 1200) : (!L || (s.dom !== 'E' && s.dom !== 'G' && s.dom !== 'W') || (L.eng === 'RUN' && L.runT > 8 && (s.dom === 'E' || L.clutch)));   // low-pressure alarms wait for engine start-up (8 s) / clutch
       const isLow = s.kind === 'LO' || s.kind === 'LOLO' || (s.kind === 'SS' && PRESSLIKE.test(src.bq));
       if (s.kind === 'SD' || s.kind === 'WB' || s.kind === 'WF') return sensorBad(st, src, IX);
       if (sensorBad(st, src, IX)) return false;          // defective sensor: limit alarms suppressed, SD alarm raised
@@ -351,6 +356,13 @@ const MODEL = (() => {
     // keyword driven status / alarm logic
     const q = s.bq;
     if (L) {
+      if (/ready for operation/.test(q) && !/not ready/.test(q)) return !st.estop;
+      if (/^start interlock$/.test(q)) return L.clutch || (L.eng === 'STOP' && L.n > 20);
+      if (/gear not neutral/.test(q)) return L.clutch;
+      if (/^request local$/.test(q)) return !!L.local;
+      if (/^neutral\/out$/.test(q)) return !L.clutch;
+      if (/^ahead\/in$/.test(q)) return L.clutch && L.lever >= 0;
+      if (/^astern$/.test(q)) return L.clutch && L.lever < 0;
       if (/^stop activated/.test(q)) return L.eng === 'STOP';
       if (/overspeed/.test(q)) return L.n > 2300;
       if (/el\. hydraulic pump\d?, running/.test(q)) return L.hydPump;
@@ -449,6 +461,12 @@ const MODEL = (() => {
         else { const v = value(s); on = Number.isNaN(v) ? false : (s.hi != null ? v >= s.hi : false); }
         if (Number.isNaN(value(s))) on = false;
         let a = st.alarms.get(s.tag);
+        if (/^Evt\s/.test(s.n)) {
+          st.evt = st.evt || {};
+          if (on && !st.evt[s.tag]) { st.evt[s.tag] = 1; st.hist.unshift({ t: now, tag: s.tag, n: s.n, g: s.g, red: false, ev: 'EVENT' }); }
+          else if (!on) st.evt[s.tag] = 0;
+          continue;
+        }
         if (on && (!a || !a.active)) {
           if (!a) { a = { s, ack: false, active: true, t: now, seq: ++st.seq }; st.alarms.set(s.tag, a); }
           else { a.active = true; a.ack = false; a.t = now; a.seq = ++st.seq; }

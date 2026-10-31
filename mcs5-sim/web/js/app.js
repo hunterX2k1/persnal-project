@@ -11,6 +11,7 @@ let cur = 1;               // selected propulsion line
 let upd = [];              // updaters of current screen
 let ctl = {};              // per-screen state (filters etc.)
 let muted = false, audio = null;
+window.toggleHorn = () => { muted = !muted; };
 
 // ---------------------------------------------------------------- helpers
 const S = t => M.IX.byTag.get(t);
@@ -25,7 +26,7 @@ function fmt(v, s) {
 }
 function running(s) {
   const st = M.st;
-  if (s.dom === 'E' || s.dom === 'G' || s.dom === 'W') { const L = st.lines[s.line - 1]; return L && (s.dom === 'W' ? L.shaft > 20 : L.eng === 'RUN' || L.n > 50); }
+  if (s.dom === 'E' || s.dom === 'G' || s.dom === 'W') { const L = st.lines[s.line - 1]; return L && (s.dom === 'W' ? L.shaft > 20 : s.dom === 'G' ? L.clutch : L.eng === 'RUN' || L.n > 50); }
   if (s.dom === 'D') { const G = st.gens[s.line - 1]; return G && G.n > 100; }
   return true;
 }
@@ -410,6 +411,7 @@ function start(data) {
   setInterval(refresh, 250);
   go(screen);
   window.__M = M;
+  if (typeof BV !== 'undefined') { BV.init(M); document.body.dataset.mode = 'bv'; const d = document.getElementById('toDisplay'); if (d) d.onclick = () => BV.show(); }
 }
 async function boot() {
   $('#file').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const t = await f.text(); const d = JSON.parse(t); try { localStorage.setItem('mcs5ship', t); } catch (x) { } try { if (window.AndroidStore) AndroidStore.save(t); } catch (x) { } start(d); } catch (x) { $('#loaderMsg').textContent = 'Could not read file: ' + x.message; } };

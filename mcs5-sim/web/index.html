@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MCS-5 Trainer</title>
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/bv.css">
 </head>
 <body>
 <header id="top">
@@ -12,11 +13,13 @@
   <button id="alarmbar" class="alarmbar" title="Open alarm list"><span id="abRed" class="cnt red">0</span><span id="abYel" class="cnt yel">0</span><span id="abTxt">No alarms</span></button>
   <div class="tools">
     <select id="speed" title="Simulation speed"><option value="1">1x</option><option value="2">2x</option><option value="5">5x</option><option value="10">10x</option></select>
+    <button id="toDisplay" title="Back to the bluevision display">Display</button>
     <button id="mute" title="Alarm horn">🔔</button>
     <span id="clock"></span>
   </div>
 </header>
 <main id="view"></main>
+<div id="bv" hidden></div>
 <nav id="nav"></nav>
 
 <div id="loader" hidden>
@@ -30,6 +33,7 @@
 </div>
 
 <script src="js/model.js"></script>
+<script src="js/bv.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
