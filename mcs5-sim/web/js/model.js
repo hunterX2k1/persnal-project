@@ -98,7 +98,7 @@ const MODEL = (() => {
       pbnFail: {},    // pbn -> true
       force: {},      // tag -> 1 (binary force) / number (analog force)
       phys: {},       // line -> {plo:-x, ...} physical fault offsets
-      fire: false, bilge: false, door: false,
+      fire: false, bilge: false, door: false, ramps: [],
       hist: [], alarms: new Map(), seq: 0,
     };
     st.tanks.forEach((t, k) => t.vol = t.cap * (0.55 + 0.08 * k % 0.4));
@@ -207,6 +207,7 @@ const MODEL = (() => {
     L.fuelNow = fuel;
     L.fuelTrip += fuel * dt / 3600; L.fuelTot += fuel * dt / 3600;
     if (running) L.hours += dt / 3600;
+    L.runT = L.eng === 'RUN' ? (L.runT || 0) + dt : 0;
     L.shaft = L.clutch ? L.n / GEAR : 0;
   }
 
@@ -331,9 +332,10 @@ const MODEL = (() => {
       if (v == null || Number.isNaN(v)) return s.kind === 'SD';
       const lim = limitsFor(src.q);
       const G = s.dom === 'D' ? st.gens[s.line - 1] : null;
-      const engRun = G ? (G.run && G.n > 1200) : (!L || (s.dom !== 'E' && s.dom !== 'G' && s.dom !== 'W') || L.eng === 'RUN');
+      const engRun = G ? (G.run && G.n > 1200) : (!L || (s.dom !== 'E' && s.dom !== 'G' && s.dom !== 'W') || (L.eng === 'RUN' && L.runT > 8 && (s.dom !== 'W' || L.clutch)));   // low-pressure alarms wait for engine start-up (8 s) / clutch
       const isLow = s.kind === 'LO' || s.kind === 'LOLO' || (s.kind === 'SS' && PRESSLIKE.test(src.bq));
       if (s.kind === 'SD' || s.kind === 'WB' || s.kind === 'WF') return sensorBad(st, src, IX);
+      if (sensorBad(st, src, IX)) return false;          // defective sensor: limit alarms suppressed, SD alarm raised
       if (isLow) {
         if (!engRun) return false;                     // LO alarms interlocked with "engine running"
         const l = (s.kind === 'SS' || s.kind === 'LOLO') ? (lim.lo2 ?? lim.lo1) : lim.lo1;
@@ -425,6 +427,7 @@ const MODEL = (() => {
     function step(dtReal) {
       const dt = Math.min(0.5, dtReal) * st.speed;
       st.t += dt; st.clock += dt * 1000;
+      for (const r of st.ramps) { const v = (r.obj[r.key] || 0) + r.rate * dt / 60; r.obj[r.key] = r.rate < 0 ? Math.max(v, r.limit) : Math.min(v, r.limit); }
       for (const L of st.lines) stepLine(st, L, dt, IX);
       for (const G of st.gens) {
         const ph = st.phys['g' + G.i] || {};
@@ -499,7 +502,9 @@ const MODEL = (() => {
       ackAll(filter) { for (const [k, a] of [...st.alarms]) if (!filter || filter(a)) { a.ack = true; if (!a.active) st.alarms.delete(k); } },
     };
 
-    return { st, IX, data, value, step, cmd, limitsFor, invalid, NMAX, NIDLE };
+    // gradual degradation: obj[key] moves by `rate` per minute until `limit`
+    function ramp(obj, key, rate, limit) { const r = { obj, key, rate, limit }; st.ramps.push(r); return () => { st.ramps.splice(st.ramps.indexOf(r), 1); delete obj[key]; }; }
+    return { st, IX, data, value, step, cmd, ramp, limitsFor, invalid, NMAX, NIDLE };
   }
 
   return { create, limitsFor, stripPrio, lineOf, domainOf };
