@@ -1,0 +1,10 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.mcs5.trainer'
+    compileSdk 34
+    defaultConfig { applicationId 'com.mcs5.trainer'; minSdk 24; targetSdk 34; versionCode 1; versionName '0.1' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    // the web app (mcs5-sim/web) is bundled as-is; ship data is NOT bundled - it is loaded on the phone
+    sourceSets { main { assets.srcDirs = ['../../web'] } }
+    buildTypes { release { minifyEnabled false } }
+}

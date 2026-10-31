@@ -363,6 +363,7 @@ function buildInfo(root) {
   const d = M.data, p = d.project;
   const c = el('div', 'card'); root.appendChild(c);
   c.innerHTML = `<h2>${esc(p.name)}</h2><div class="cols">${[['Order / project', p.order], ['Plant', p.plant], ['PU part number', p.puNumber], ['InTouch version', p.intouchVer], ['Process bus', (p.busType || '') + ' ' + (p.canBaud || '') + ' kbit/s'], ['MPC software', (p.mpc || '') + ' ' + (p.mpcEd || '')], ['Data generated', p.generated], ['Signals', d.signals.length], ['Alarms', d.signals.filter(s => s.pri != null).length], ['Parameters', d.params.reduce((a, x) => a + x.params.length, 0)]].map(([k, v]) => `<div class="cell"><span class="lbl">${k}</span><b>${esc(v ?? '')}</b></div>`).join('')}</div>`;
+  const lb = el('div', 'row'); c.appendChild(lb); btn(lb, 'Load different ship data…', () => { $('#loaderMsg').textContent = ''; $('#loader').hidden = false; }, 'sm');
   const t = el('div', 'card'); root.appendChild(t); t.innerHTML = '<h2>Hardware</h2>' + d.deviceTypes.map(x => `<span class="pill">${esc(x.type)} × ${x.count}</span>`).join('');
   const n = el('div', 'card'); root.appendChild(n); n.innerHTML = '<h2>Controller nodes (software CRC)</h2><table><tr><th>PBN</th><th>Name</th><th>Device</th><th>Blocks</th><th>CRC</th><th>Loaded</th></tr>' + d.nodes.map(x => `<tr><td>${x.pbn}</td><td>${esc(x.name)}</td><td class="mono">${esc(x.id)}</td><td>${x.blocks ?? ''}</td><td class="mono">${x.crc ?? ''}</td><td>${esc(x.date || '')}</td></tr>`).join('') + '</table>';
   const sw = el('div', 'card'); root.appendChild(sw); sw.innerHTML = '<h2>Software versions</h2><div class="scroll"><table><tr><th>Group</th><th>Name</th><th>Var</th><th>Edition</th><th>Date</th></tr>' + d.software.map(x => `<tr><td>${esc(x.group)}</td><td>${esc(x.name)}</td><td>${esc(x.var)}</td><td>${esc(x.ed)}</td><td>${esc(x.date)}</td></tr>`).join('') + '</table></div>';
@@ -411,9 +412,10 @@ function start(data) {
   window.__M = M;
 }
 async function boot() {
-  $('#file').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const t = await f.text(); const d = JSON.parse(t); try { localStorage.setItem('mcs5ship', t); } catch (x) { } start(d); } catch (x) { $('#loaderMsg').textContent = 'Could not read file: ' + x.message; } };
+  $('#file').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const t = await f.text(); const d = JSON.parse(t); try { localStorage.setItem('mcs5ship', t); } catch (x) { } try { if (window.AndroidStore) AndroidStore.save(t); } catch (x) { } start(d); } catch (x) { $('#loaderMsg').textContent = 'Could not read file: ' + x.message; } };
   let data = null;
-  try { const r = await fetch('ship.json'); if (r.ok) data = await r.json(); } catch (e) { }
+  if (window.AndroidStore) { try { const t = AndroidStore.load(); if (t) data = JSON.parse(t); } catch (e) { } }
+  if (!data) try { const r = await fetch('ship.json'); if (r.ok) data = await r.json(); } catch (e) { }
   if (!data) { try { const t = localStorage.getItem('mcs5ship'); if (t) data = JSON.parse(t); } catch (e) { } }
   if (data) start(data); else $('#loader').hidden = false;
 }
