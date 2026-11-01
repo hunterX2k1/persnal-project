@@ -39,6 +39,25 @@ Chrome ──"where is ads.tracker.com?"──► BlockBridge (on your phone, uB
 Android's VPN feature is used **only to capture DNS lookups**. There is no external VPN server,
 and page/video traffic never passes through the app.
 
+## Full-traffic mode (default)
+
+With **Settings › Send all app traffic through BlockBridge** on, every connection from every app
+goes through BlockBridge:
+
+```
+any app ─► VPN tunnel ─► hev-socks5-tunnel (native, MIT) ─► BlockBridge SOCKS5 relay ─► internet
+                                                            │ DNS to *any* server → uBO filter
+                                                            │ connection to a blocked host → refused
+```
+
+* Apps that skip Android's DNS (hard-coded 8.8.8.8, DNS over TCP) are filtered too.
+* Connections to hosts the filters block are refused even if the app cached the IP.
+* The status line shows open connections and data used.
+* Turn the switch off for DNS-only mode (lowest battery use).
+
+The native engine lives in the `app/src/main/jni/hev-socks5-tunnel` git submodule — clone with
+`git clone --recursive`, or run `git submodule update --init --recursive`.
+
 ## Install
 
 1. Download `BlockBridge.apk` (GitHub › Releases › *BlockBridge (latest build)*, or the Actions artifact).

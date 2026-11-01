@@ -357,6 +357,8 @@ object HevTunnel {
     @JvmStatic private external fun TProxyStartService(configPath: String, fd: Int): Boolean
     @JvmStatic private external fun TProxyStopService(): Boolean
     @JvmStatic private external fun TProxyIsRunning(): Boolean
+    // hev registers all four methods at load time; every one must exist or loading fails.
+    @JvmStatic private external fun TProxyGetStats(): LongArray
 
     fun config(socks: Socks5Server, ipv6: Boolean) = buildString {
         appendLine("tunnel:")
@@ -380,4 +382,6 @@ object HevTunnel {
     fun start(configPath: String, fd: Int) = available && TProxyStartService(configPath, fd)
     fun stop() { if (available) runCatching { TProxyStopService() } }
     fun isRunning() = available && runCatching { TProxyIsRunning() }.getOrDefault(false)
+    /** [txPackets, txBytes, rxPackets, rxBytes] seen on the tunnel. */
+    fun stats(): LongArray? = if (available) runCatching { TProxyGetStats() }.getOrNull() else null
 }
