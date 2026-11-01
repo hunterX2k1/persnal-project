@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@drawable/notif_bg" android:padding="14dp">
+    <TextView android:id="@+id/w_title" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textSize="16sp" android:textStyle="bold" android:text="BlockBridge" />
+    <TextView android:id="@+id/w_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textSize="12sp" android:textColor="#FF8A94B3" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="10dp">
+        <TextView android:id="@+id/w_power" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="36dp" android:gravity="center" android:textSize="12sp" android:textStyle="bold"
+            android:layout_marginEnd="6dp" android:maxLines="1" />
+        <TextView android:id="@+id/w_vpn" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="36dp" android:gravity="center" android:textSize="12sp" android:textStyle="bold"
+            android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

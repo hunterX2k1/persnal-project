@@ -132,6 +132,13 @@ class Settings(ctx: Context) {
     var dohGuard: Boolean
         get() = p.getBoolean("doh_guard", true)
         set(v) = p.edit().putBoolean("doh_guard", v).apply()
+    /** Tor bridges for networks that block Tor. */
+    var torBridges: TorClient.Bridges
+        get() = runCatching { TorClient.Bridges.valueOf(p.getString("tor_bridges", "OFF")!!) }.getOrDefault(TorClient.Bridges.OFF)
+        set(v) = p.edit().putString("tor_bridges", v.name).apply()
+    var torBridgeLines: String
+        get() = p.getString("tor_bridge_lines", "")!!
+        set(v) = p.edit().putString("tor_bridge_lines", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()
@@ -147,7 +154,11 @@ class Settings(ctx: Context) {
     fun setExpiresDays(key: String, days: Int) = p.edit().putInt("exp_$key", days).apply()
 
     /** Same idea as uBO's "Back up to file": selected lists, my filters, trusted sites, DNS. */
-    fun backup(ctx: Context): String = JSONObject().apply {
+    fun backup(ctx: Context, password: String? = null): String = JSONObject().apply {
+        if (!password.isNullOrEmpty()) {
+            val servers = JSONArray(VpnProfiles.all(ctx).map { it.toJson() }).toString()
+            put("vpnServers", BackupCrypto.encrypt(servers, password))
+        }
         put("app", "BlockBridge")
         put("selectedFilterLists", JSONArray(Catalog.all(ctx).filter { isEnabled(it) }.map { it.key }))
         put("userFilters", myFilters)
@@ -155,8 +166,21 @@ class Settings(ctx: Context) {
         put("dns", JSONArray(listOf(upstream1, upstream2)))
     }.toString(2)
 
-    fun restore(ctx: Context, text: String) {
+    /** True if this backup holds password-protected VPN servers. */
+    fun hasEncryptedServers(text: String) = runCatching { JSONObject(text).has("vpnServers") }.getOrDefault(false)
+
+    /** Restores settings; returns how many VPN servers were added. Throws on a wrong password. */
+    fun restore(ctx: Context, text: String, password: String? = null): Int {
         val o = JSONObject(text)
+        var added = 0
+        if (o.has("vpnServers") && !password.isNullOrEmpty()) {
+            val arr = JSONArray(BackupCrypto.decrypt(o.getJSONObject("vpnServers"), password))
+            val existing = VpnProfiles.all(ctx).map { it.conf }.toSet()
+            for (i in 0 until arr.length()) {
+                val p = VpnProfile.fromJson(arr.getJSONObject(i))
+                if (p.conf !in existing) { VpnProfiles.add(ctx, p.name, p.conf); added++ }
+            }
+        }
         o.optJSONArray("selectedFilterLists")?.let { arr ->
             val keys = (0 until arr.length()).map { arr.getString(it) }.toSet()
             for (l in Catalog.all(ctx)) setEnabled(l, l.key in keys)
@@ -169,6 +193,7 @@ class Settings(ctx: Context) {
             trustedSites = if (w is JSONArray) (0 until w.length()).joinToString("\n") { w.getString(it) } else w.toString()
         }
         o.optJSONArray("dns")?.let { if (it.length() > 0) upstream1 = it.getString(0); if (it.length() > 1) upstream2 = it.getString(1) }
+        return added
     }
 }
 

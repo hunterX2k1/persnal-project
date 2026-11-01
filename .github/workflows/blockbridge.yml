@@ -35,25 +35,44 @@ jobs:
         working-directory: BlockBridge/wg
         run: go test -race ./...
 
+      - name: Release signing key (from secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.BB_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "BB_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::BB_KEYSTORE_B64 secret not set — building with a throwaway debug key and not publishing a release."
+          fi
+
       - name: Test and build
+        env:
+          BB_KEYSTORE_PASSWORD: ${{ secrets.BB_KEYSTORE_PASSWORD }}
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk BlockBridge.apk
+      - name: Rename APKs
+        run: |
+          cp app/build/outputs/apk/release/app-universal-release.apk BlockBridge.apk
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk BlockBridge-arm64.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: BlockBridge-apk
-          path: BlockBridge/BlockBridge.apk
+          path: |
+            BlockBridge/BlockBridge.apk
+            BlockBridge/BlockBridge-arm64.apk
 
       # Phone-friendly download link: Releases › "BlockBridge (latest build)"
       - name: Publish latest release
+        if: env.SIGNED == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete blockbridge-latest --yes --cleanup-tag || true
-          gh release create blockbridge-latest BlockBridge.apk \
+          gh release create blockbridge-latest BlockBridge.apk BlockBridge-arm64.apk \
             --target "$GITHUB_SHA" \
             --title "BlockBridge (latest build)" \
-            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Download BlockBridge.apk on your phone and open it to install." \
+            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Download BlockBridge.apk on your phone and open it to install. versionCode=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)" \
             --prerelease

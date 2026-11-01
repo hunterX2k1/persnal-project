@@ -39,8 +39,10 @@ class MainActivity : Activity() {
         const val TAB_HOME = 0
         const val TAB_FILTERS = 1
         const val TAB_VPN = 2
-        const val TAB_LOGGER = 3
-        const val TAB_SETTINGS = 4
+        const val TAB_NETWORK = 3
+        const val TAB_LOGGER = TAB_NETWORK
+        const val TAB_SPEED = 4
+        const val TAB_SETTINGS = 5
         private const val REQ_VPN = 1
         private const val REQ_IMPORT = 2
         private const val REQ_NOTIF = 3
@@ -49,11 +51,13 @@ class MainActivity : Activity() {
         private val AMBER = Palette.WARN
         private val NAV = listOf(
             "Home" to R.drawable.ic_home, "Filters" to R.drawable.ic_filter, "VPN" to R.drawable.ic_globe,
-            "Logger" to R.drawable.ic_log, "Settings" to R.drawable.ic_tune,
+            "Network" to R.drawable.ic_network, "Speed" to R.drawable.ic_speed, "Settings" to R.drawable.ic_tune,
         )
     }
 
-    private lateinit var settings: Settings
+    internal lateinit var settings: Settings
+    internal val networkPage by lazy { NetworkPage(this) }
+    internal val speedPage by lazy { SpeedPage(this) }
     private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
     private lateinit var navBar: LinearLayout
@@ -74,6 +78,8 @@ class MainActivity : Activity() {
     private lateinit var tileData: TextView
     private lateinit var tileDataLabel: TextView
     private lateinit var spark: Sparkline
+    private lateinit var weekBars: WeekBars
+    private lateinit var lifetimeText: TextView
     private lateinit var recentBlocked: LinearLayout
     private lateinit var warnText: TextView
     private var lastTotal = -1L
@@ -141,8 +147,8 @@ class MainActivity : Activity() {
                 addView(ImageView(context).apply {
                     setImageResource(icon)
                     setPadding(dp(14), dp(4), dp(14), dp(4))
-                }, LinearLayout.LayoutParams(-2, dp(32)))
-                addView(TextView(context).apply { text = label; textSize = 11f; gravity = Gravity.CENTER })
+                }, LinearLayout.LayoutParams(-2, dp(30)))
+                addView(TextView(context).apply { text = label; textSize = 10.5f; gravity = Gravity.CENTER; maxLines = 1 })
                 setOnClickListener { showTab(i) }
             }, LinearLayout.LayoutParams(0, -2, 1f))
         }
@@ -162,6 +168,8 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
         }
         ControlService.show(this)
+        ListUpdateJob.schedule(this)
+        Updates.checkDaily(this) { u -> runOnUiThread { offerUpdate(u) } }
         handleIntent(intent)
     }
 
@@ -209,7 +217,8 @@ class MainActivity : Activity() {
                 TAB_HOME -> buildHomePage()
                 TAB_FILTERS -> buildFiltersPage()
                 TAB_VPN -> buildVpnPage()
-                TAB_LOGGER -> buildLoggerPage()
+                TAB_NETWORK -> networkPage.build()
+                TAB_SPEED -> speedPage.build()
                 else -> buildSettingsPage()
             }
         })
@@ -289,6 +298,15 @@ class MainActivity : Activity() {
         tileLookups = tile("LOOKUPS", Palette.CYAN, true).first
         tile("DATA", Palette.VIOLET, true).let { tileData = it.first; tileDataLabel = it.second }
         page.addView(tiles, cardParams())
+
+        // lifetime + last 7 days
+        val week = card()
+        week.addView(cardTitle("Last 7 days"))
+        lifetimeText = small("")
+        week.addView(lifetimeText)
+        weekBars = WeekBars(this)
+        week.addView(weekBars, LinearLayout.LayoutParams(-1, dp(90)).apply { topMargin = dp(8) })
+        page.addView(week, cardParams())
 
         // live chart
         val chart = card()
@@ -425,6 +443,13 @@ class MainActivity : Activity() {
             tileData.text = "—"; tileDataLabel.text = "DATA"
         }
         if (lastTotal >= 0) spark.push((total - lastTotal).toFloat(), (blocked - lastBlocked).toFloat())
+        if (ticks % 5 == 0) {
+            LifetimeStats.flush(this)
+            val (lb, lt) = LifetimeStats.lifetime(this)
+            val (tb, _) = LifetimeStats.today(this)
+            lifetimeText.text = "Today ${"%,d".format(tb)} blocked · all time ${"%,d".format(lb)} of ${"%,d".format(lt)} lookups"
+            weekBars.set(LifetimeStats.lastDays(this))
+        }
         lastTotal = total; lastBlocked = blocked
 
         if (Stats.version != shownVersion || recentBlocked.childCount == 0) {
@@ -449,7 +474,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun compact(n: Long) = when {
+    internal fun compact(n: Long) = when {
         n >= 1_000_000 -> "%.1fM".format(n / 1e6)
         n >= 10_000 -> "%.1fk".format(n / 1e3)
         else -> "%,d".format(n)
@@ -719,9 +744,8 @@ class MainActivity : Activity() {
 
     // ---------------- Logger ----------------
 
-    private fun buildLoggerPage(): View {
+    internal fun buildLoggerPage(): View {
         val page = vbox()
-        page.addView(pageTitle("Logger", "Every hostname your phone looks up, live"))
         page.addView(small("Every hostname looked up on this phone. Tap one to allow, block or trust it."))
         val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("All", "Blocked", "Allowed").forEachIndexed { i, label ->
@@ -857,15 +881,46 @@ class MainActivity : Activity() {
         page.addView(small("Selected lists, My filters and Trusted sites. Restore also accepts the " +
             "\"userFilters\" / \"whitelist\" parts of a uBlock Origin backup file."))
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(button("Back up") {
-            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "BlockBridge backup")
-                putExtra(Intent.EXTRA_TEXT, settings.backup(this@MainActivity))
-            }, "Save backup to…"))
-        }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(button("Back up") { backupDialog() }, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(button("Restore") { restoreDialog() }, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(row)
+
+        page.addView(header("Updates"))
+        page.addView(button("Check for updates") {
+            toast("Checking…")
+            thread {
+                val r = runCatching { Updates.check(this) }
+                runOnUiThread {
+                    r.onSuccess { u -> if (u != null) offerUpdate(u) else toast("You have the latest version") }
+                        .onFailure { toast("Couldn't check: ${it.message}") }
+                }
+            }
+        })
+        page.addView(small("Looks at the \"BlockBridge (latest build)\" release on github.com/${Updates.REPO}."))
+
+        page.addView(header("Diagnostics"))
+        val diag = body("").apply { typeface = Typeface.MONOSPACE; textSize = 12f }
+        fun renderDiag() { diag.text = diagnostics() }
+        renderDiag()
+        page.addView(diag)
+        val dRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        dRow.addView(button("Refresh") { renderDiag() }, LinearLayout.LayoutParams(0, -2, 1f))
+        dRow.addView(button("Copy log") {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("BlockBridge log", diagnostics() + "\n\n" + DiagLog.text()))
+            toast("Debug log copied")
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        dRow.addView(button("Share log") {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "BlockBridge debug log")
+                putExtra(Intent.EXTRA_TEXT, diagnostics() + "\n\n" + DiagLog.text())
+            }, "Share debug log"))
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        page.addView(dRow)
+        page.addView(button("Keep BlockBridge running (battery)") { askBatteryExemption(force = true) })
+        page.addView(small("Phones from Samsung, Xiaomi, Oppo and others stop background apps. Allowing " +
+            "\"unrestricted\" battery keeps protection and the VPN alive."))
 
         page.addView(header("Make sure Chrome uses it"))
         page.addView(body(
@@ -887,21 +942,68 @@ class MainActivity : Activity() {
         return page
     }
 
+    private fun backupDialog() {
+        val pw = singleLine("", "Password (optional)").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val box = vbox().apply { setPadding(dp(16), dp(8), dp(16), 0) }
+        box.addView(small("Set a password to include your VPN servers (they contain private keys). " +
+            "They're encrypted with AES-256; without the password they can't be restored."))
+        box.addView(pw)
+        AlertDialog.Builder(this)
+            .setTitle("Back up")
+            .setView(box)
+            .setPositiveButton("Back up") { _, _ ->
+                val password = pw.text.toString()
+                thread {
+                    val text = settings.backup(this, password.ifEmpty { null })
+                    runOnUiThread {
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "BlockBridge backup")
+                            putExtra(Intent.EXTRA_TEXT, text)
+                        }, "Save backup to…"))
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun restoreDialog() {
         val input = multiline("", "Paste backup text here")
+        val pw = singleLine("", "Password (if the backup has VPN servers)").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val box = vbox().apply { setPadding(dp(16), dp(8), dp(16), 0); addView(input); addView(pw) }
         AlertDialog.Builder(this)
             .setTitle("Restore backup")
-            .setView(input)
+            .setView(box)
             .setPositiveButton("Restore") { _, _ ->
-                try {
-                    settings.restore(this, input.text.toString())
-                    Upstream.reload(settings)
-                    pages.clear()
-                    showTab(currentTab)
-                    runUpdate(force = false)
-                    thread { Blocklists.loadUserRules(settings) }
-                } catch (e: Exception) {
-                    toast("That doesn't look like a backup: ${e.message}")
+                val text = input.text.toString()
+                val password = pw.text.toString()
+                thread {
+                    val msg = try {
+                        val added = settings.restore(this, text, password.ifEmpty { null })
+                        Upstream.reload(settings)
+                        Blocklists.loadUserRules(settings)
+                        when {
+                            added > 0 -> "Restored, including $added VPN server(s)"
+                            settings.hasEncryptedServers(text) && password.isEmpty() ->
+                                "Restored. Enter the password to also restore VPN servers."
+                            else -> "Restored"
+                        }
+                    } catch (e: javax.crypto.AEADBadTagException) {
+                        "Wrong password — nothing restored from the VPN part"
+                    } catch (e: Exception) {
+                        "That doesn't look like a backup: ${e.message}"
+                    }
+                    runOnUiThread {
+                        toast(msg)
+                        pages.clear(); filterPages.clear()
+                        showTab(currentTab)
+                        runUpdate(force = false)
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -994,6 +1096,39 @@ class MainActivity : Activity() {
                 "you pick. Slower than a VPN, carries TCP only (calls/QUIC fall back), and Google " +
                 "or some sites may show CAPTCHAs or block Tor."
         ))
+        page.addView(header("Tor bridges"))
+        page.addView(small("If Tor is blocked where you are (it won't connect), use a bridge. Snowflake works " +
+            "almost everywhere; obfs4 is faster. Custom: paste bridge lines from bridges.torproject.org."))
+        val bridgeBtn = button("Bridges: ${settings.torBridges.label}") {}
+        bridgeBtn.setOnClickListener {
+            val modes = TorClient.Bridges.values()
+            AlertDialog.Builder(this)
+                .setTitle("Tor bridges")
+                .setSingleChoiceItems(modes.map { it.label }.toTypedArray(), modes.indexOf(settings.torBridges)) { d, i ->
+                    d.dismiss()
+                    if (modes[i] == TorClient.Bridges.CUSTOM) {
+                        val lines = multiline(settings.torBridgeLines, "obfs4 1.2.3.4:443 FINGERPRINT cert=… iat-mode=0")
+                        AlertDialog.Builder(this)
+                            .setTitle("Paste bridge lines")
+                            .setView(vbox().apply { setPadding(dp(16), dp(8), dp(16), 0); addView(lines) })
+                            .setPositiveButton("Save") { _, _ ->
+                                settings.torBridgeLines = lines.text.toString()
+                                settings.torBridges = TorClient.Bridges.CUSTOM
+                                bridgeBtn.text = "Bridges: Custom"
+                                if (settings.vpnEnabled && VpnClient.tunnels.any { it.isTor }) applyVpn()
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    } else {
+                        settings.torBridges = modes[i]
+                        bridgeBtn.text = "Bridges: ${modes[i].label}"
+                        if (settings.vpnEnabled && VpnClient.tunnels.any { it.isTor }) applyVpn()
+                    }
+                }
+                .show()
+        }
+        page.addView(bridgeBtn)
+
         page.addView(header("Free servers: Proton VPN"))
         page.addView(body(
             "1. Make a free account at protonvpn.com (no card needed).\n" +
@@ -1168,6 +1303,7 @@ class MainActivity : Activity() {
 
     private fun startShield() {
         startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_START))
+        handler.postDelayed({ askBatteryExemption(force = false) }, 1500)
     }
 
     private fun runUpdate(force: Boolean) {
@@ -1227,7 +1363,8 @@ class MainActivity : Activity() {
             warnText.visibility = if (w == null) View.GONE else View.VISIBLE
         }
 
-        if (currentTab == TAB_LOGGER && ::loggerBox.isInitialized && Stats.version != shownVersion) {
+        if (currentTab == TAB_NETWORK) networkPage.refresh()
+        if (currentTab == TAB_NETWORK && ::loggerBox.isInitialized && Stats.version != shownVersion) {
             shownVersion = Stats.version
             renderLogger()
         }
@@ -1243,46 +1380,98 @@ class MainActivity : Activity() {
             "BlockBridge. Set Settings › Private DNS to Off or Automatic." else null
     }
 
+    // ---------------- updates ----------------
+
+    private fun offerUpdate(u: Updates.Available) {
+        AlertDialog.Builder(this)
+            .setTitle("Update available")
+            .setMessage("A newer BlockBridge (build ${u.versionCode}) is on GitHub. Download and open it to install.")
+            .setPositiveButton("Download") { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u.url)))
+            }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    // ---------------- diagnostics ----------------
+
+    private fun ignoringBattery() = getSystemService(android.os.PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(packageName) == true
+
+    internal fun diagnostics(): String = buildString {
+        val info = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
+        appendLine("BlockBridge ${info?.versionName} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("Protection: ${if (ShieldVpnService.isRunning) "on" else "off"} · mode: ${if (ShieldVpnService.fullTunnel) "all traffic" else "DNS only"}")
+        ShieldVpnService.lastError?.let { appendLine("Last error: $it") }
+        appendLine("Engines: tunnel ${if (HevTunnel.available) "ok" else "missing"} · WireGuard ${if (VpnClient.available(this@MainActivity)) "ok" else "missing"}")
+        appendLine("Filters: ${Filter.blockCount} hostnames · ad block ${if (Filter.enabled) "on" else "off"} · DoH guard ${if (DohGuard.enabled) "on" else "off"}")
+        appendLine("DNS: ${Upstream.servers.joinToString { it.hostAddress ?: "?" }}${if (DnsHandler.via != null) " (through VPN)" else ""}")
+        appendLine("VPN: ${if (settings.vpnEnabled) VpnClient.state else "off"} · balancer ${settings.lbMode.label}")
+        for (t in VpnClient.tunnels) {
+            val hs = if (t.lastHandshake > 0) "${(System.currentTimeMillis() - t.lastHandshake) / 1000}s ago" else "none"
+            appendLine("  ${t.name}: ${if (t.usable) "working" else "down"} · handshake $hs · ${t.latencyMs} ms · ${t.active.get()} open${t.error?.let { " · $it" } ?: ""}")
+        }
+        appendLine("Connections: ${ConnTracker.liveCount()} open · ${TrafficStats.connections.get()} total · ${TrafficStats.blockedConnections.get()} refused")
+        appendLine("App exceptions: ${settings.exceptedApps.size} skip · ${settings.vpnBypassApps.size} no-VPN")
+        append("Battery optimization: ${if (ignoringBattery()) "off (good)" else "on — Android may stop BlockBridge"}")
+    }
+
+    /** Asks Android to let BlockBridge run unrestricted (asked once automatically). */
+    internal fun askBatteryExemption(force: Boolean) {
+        if (ignoringBattery()) { if (force) toast("Already unrestricted"); return }
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        if (!force && prefs.getBoolean("asked_battery", false)) return
+        prefs.edit().putBoolean("asked_battery", true).apply()
+        runCatching {
+            @android.annotation.SuppressLint("BatteryLife")
+            val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(android.net.Uri.parse("package:$packageName"))
+            startActivity(i)
+        }.onFailure {
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
+    }
+
     // ---------------- small UI helpers ----------------
 
-    private fun mb(bytes: Long) = if (bytes < 1_000_000) "${bytes / 1000} KB" else "%.1f MB".format(bytes / 1e6)
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-    private fun vbox() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    internal fun mb(bytes: Long) = if (bytes < 1_000_000) "${bytes / 1000} KB" else "%.1f MB".format(bytes / 1e6)
+    internal fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    internal fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    internal fun vbox() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-    private fun card() = LinearLayout(this).apply {
+    internal fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = roundRect(Palette.SURFACE, dp(20).toFloat(), Palette.STROKE, dp(1))
         setPadding(dp(16), dp(16), dp(16), dp(16))
     }
 
-    private fun cardParams() = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+    internal fun cardParams() = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
 
-    private fun cardTitle(t: String) = TextView(this).apply {
+    internal fun cardTitle(t: String) = TextView(this).apply {
         text = t; textSize = 15f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
     }
 
-    private fun pageTitle(t: String, sub: String) = vbox().apply {
+    internal fun pageTitle(t: String, sub: String) = vbox().apply {
         setPadding(0, dp(4), 0, dp(14))
         addView(TextView(context).apply { text = t; textSize = 26f; setTypeface(Typeface.DEFAULT_BOLD); brandGradient() })
         addView(small(sub))
     }
 
-    private fun header(t: String) = TextView(this).apply {
+    internal fun header(t: String) = TextView(this).apply {
         text = t; textSize = 16f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
         setPadding(0, dp(20), 0, dp(6))
     }
 
-    private fun body(t: String) = TextView(this).apply {
+    internal fun body(t: String) = TextView(this).apply {
         text = t; textSize = 14f; setTextColor(Palette.TEXT); setLineSpacing(0f, 1.15f)
         setPadding(0, dp(6), 0, dp(6))
     }
 
-    private fun small(t: String) = TextView(this).apply {
+    internal fun small(t: String) = TextView(this).apply {
         text = t; textSize = 12.5f; setTextColor(Palette.MUTED); setLineSpacing(0f, 1.1f)
     }
 
-    private fun button(t: String, onClick: () -> Unit) = Button(this).apply {
+    internal fun button(t: String, onClick: () -> Unit) = Button(this).apply {
         text = t; isAllCaps = false; textSize = 14f
         setTypeface(Typeface.DEFAULT_BOLD)
         setTextColor(Palette.TEXT)
@@ -1296,9 +1485,9 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
-    private fun field() = roundRect(Palette.SURFACE2, dp(14).toFloat(), Palette.STROKE, dp(1))
+    internal fun field() = roundRect(Palette.SURFACE2, dp(14).toFloat(), Palette.STROKE, dp(1))
 
-    private fun multiline(value: String, hint: String) = EditText(this).apply {
+    internal fun multiline(value: String, hint: String) = EditText(this).apply {
         setText(value); this.hint = hint
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -1309,7 +1498,7 @@ class MainActivity : Activity() {
         setHorizontallyScrolling(false)
     }
 
-    private fun singleLine(value: String, hint: String) = EditText(this).apply {
+    internal fun singleLine(value: String, hint: String) = EditText(this).apply {
         setText(value); this.hint = hint
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         isSingleLine = true

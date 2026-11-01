@@ -193,3 +193,96 @@ class Sparkline(context: Context) : View(context) {
         c.drawPath(path(blocked.toList(), false), line)
     }
 }
+
+/** Speed-test gauge: 240° arc on a log scale (0.1 – 1000 Mbps) with an animated gradient fill. */
+class SpeedGauge(context: Context) : View(context) {
+    private var shown = 0.0
+    private var target = 0.0
+    var unit = "Mbps"
+    var caption = ""
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Palette.STROKE }
+    private val arc = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.MUTED; textAlign = Paint.Align.CENTER }
+    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.TEXT; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+    private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.MUTED; textAlign = Paint.Align.CENTER }
+    private val box = RectF()
+    private val marks = listOf(0.0, 1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0)
+    private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1000; repeatCount = ValueAnimator.INFINITE
+        addUpdateListener {
+            if (kotlin.math.abs(shown - target) > 0.01) { shown += (target - shown) * 0.18; invalidate() }
+        }
+    }
+
+    fun set(value: Double) { target = value.coerceAtLeast(0.0) }
+
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
+    override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+
+    /** 0..1 position on a log scale; 0 Mbps maps to the start. */
+    private fun pos(v: Double): Float {
+        if (v <= 0.1) return (v / 0.1 * 0.02).toFloat()
+        return (0.02 + 0.98 * (kotlin.math.log10(v) + 1) / 4).toFloat().coerceIn(0f, 1f)
+    }
+
+    override fun onDraw(c: Canvas) {
+        val cx = width / 2f
+        val r = min(width.toFloat(), height * 1.25f) / 2f * 0.82f
+        val cy = r + context.dp(20f)
+        val sw = r * 0.11f
+        box.set(cx - r, cy - r, cx + r, cy + r)
+        track.strokeWidth = sw
+        c.drawArc(box, 150f, 240f, false, track)
+        arc.strokeWidth = sw
+        arc.shader = SweepGradient(cx, cy, intArrayOf(Palette.CYAN, Palette.VIOLET, Palette.CYAN), floatArrayOf(0f, 0.6f, 1f))
+        c.save(); c.rotate(140f, cx, cy)
+        c.drawArc(box, 10f, 240f * pos(shown), false, arc)
+        c.restore()
+        tick.textSize = context.dp(11f)
+        for (m in marks) {
+            val a = Math.toRadians(150.0 + 240.0 * pos(m))
+            val tr = r - sw * 1.6f
+            c.drawText(if (m >= 1) m.toInt().toString() else "0", cx + (tr * kotlin.math.cos(a)).toFloat(),
+                cy + (tr * kotlin.math.sin(a)).toFloat() + context.dp(4f), tick)
+        }
+        big.textSize = r * 0.42f
+        val text = when { shown >= 100 -> "%.0f".format(shown); shown >= 10 -> "%.1f".format(shown); else -> "%.2f".format(shown) }
+        c.drawText(text, cx, cy + r * 0.12f, big)
+        small.textSize = r * 0.13f
+        c.drawText(unit, cx, cy + r * 0.34f, small)
+        small.textSize = r * 0.12f
+        c.drawText(caption, cx, cy + r * 0.62f, small)
+    }
+
+    override fun onMeasure(w: Int, h: Int) {
+        val width = MeasureSpec.getSize(w)
+        setMeasuredDimension(width, resolveSize((width * 0.66f).toInt(), h))
+    }
+}
+
+/** Small bar chart: blocked lookups per day. */
+class WeekBars(context: Context) : View(context) {
+    private var days: List<Triple<String, Long, Long>> = emptyList()
+    private val bar = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.MUTED; textAlign = Paint.Align.CENTER }
+    private val rect = RectF()
+
+    fun set(d: List<Triple<String, Long, Long>>) { days = d; invalidate() }
+
+    override fun onDraw(c: Canvas) {
+        if (days.isEmpty()) return
+        val w = width.toFloat(); val h = height.toFloat()
+        label.textSize = context.dp(10f)
+        val bottom = h - context.dp(16f)
+        val slot = w / days.size
+        val peak = max(1L, days.maxOf { it.second })
+        days.forEachIndexed { i, (name, blocked, _) ->
+            val cx = slot * i + slot / 2
+            val bh = (bottom - context.dp(4f)) * blocked / peak
+            rect.set(cx - slot * 0.28f, bottom - bh.coerceAtLeast(context.dp(2f)), cx + slot * 0.28f, bottom)
+            bar.shader = LinearGradient(0f, rect.top, 0f, bottom, Palette.VIOLET, Palette.CYAN, Shader.TileMode.CLAMP)
+            c.drawRoundRect(rect, context.dp(4f), context.dp(4f), bar)
+            c.drawText(name, cx, h - context.dp(2f), label)
+        }
+    }
+}

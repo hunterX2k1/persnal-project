@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application") // AGP 9 compiles Kotlin itself (built-in Kotlin)
 }
@@ -13,6 +15,13 @@ val goExe: File? = (System.getenv("PATH") ?: "").split(File.pathSeparator)
 val wgSrc = rootProject.file("wg")
 val wgOut = layout.buildDirectory.dir("bbwg/jniLibs")
 
+// Release signing key (see the signingConfigs comment below)
+val keyProps = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val storePath: String? = keyProps.getProperty("storeFile") ?: System.getenv("BB_KEYSTORE")
+val hasReleaseKey = storePath != null && file(storePath).exists()
+
 android {
     namespace = "com.blockbridge"
     // tor-android 0.4.9.6+ requires compiling against Android 37.1
@@ -24,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "6.1"
+        versionCode = 8
+        versionName = "7.0"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -46,14 +55,16 @@ android {
         }
     }
 
-    // Fixed key so every build (local or GitHub Actions) can update the installed app
-    // without uninstalling. Only used for personal sideloading.
+    // Release signing key — never committed. Taken from BlockBridge/keystore.properties
+    // (storeFile, storePassword, keyAlias, keyPassword) or the BB_KEYSTORE* environment
+    // variables (GitHub Actions secrets). Without one, release builds use the debug key.
     signingConfigs {
-        create("blockbridge") {
-            storeFile = file("blockbridge.jks")
-            storePassword = "blockbridge"
-            keyAlias = "blockbridge"
-            keyPassword = "blockbridge"
+        if (hasReleaseKey) create("release") {
+            storeFile = file(storePath!!)
+            storePassword = keyProps.getProperty("storePassword") ?: System.getenv("BB_KEYSTORE_PASSWORD")
+            keyAlias = keyProps.getProperty("keyAlias") ?: System.getenv("BB_KEY_ALIAS") ?: "blockbridge"
+            keyPassword = keyProps.getProperty("keyPassword") ?: System.getenv("BB_KEY_PASSWORD")
+                ?: System.getenv("BB_KEYSTORE_PASSWORD")
         }
     }
 
@@ -61,10 +72,17 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("blockbridge")
+            signingConfig = signingConfigs.getByName(if (hasReleaseKey) "release" else "debug")
         }
-        debug {
-            signingConfig = signingConfigs.getByName("blockbridge")
+    }
+
+    // One APK per processor type (most phones: arm64-v8a) plus a universal one.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -89,7 +107,10 @@ android {
 dependencies {
     // Tor (Guardian Project, BSD): runs tor in-process; used as a free VPN exit with country choice.
     implementation("info.guardianproject:tor-android:0.4.9.14")
+    // Tor bridges (Snowflake, obfs4/lyrebird) for networks that block Tor — Guardian Project, MIT/BSD
+    implementation("com.netzarchitekten:IPtProxy:5.7.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // real org.json for JVM tests
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)
     testImplementation("org.robolectric:robolectric:4.14.1")
 }

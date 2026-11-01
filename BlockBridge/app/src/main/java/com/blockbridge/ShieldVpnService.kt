@@ -272,6 +272,7 @@ class ShieldVpnService : VpnService() {
             lastError = "Could not start: ${e.message}"; null
         }
         if (iface == null) {
+            DiagLog.add("tunnel", "could not establish VPN: $lastError")
             if (lastError == null) lastError = "VPN permission missing — open BlockBridge and tap Start."
             stopSelf()
             return
@@ -306,6 +307,7 @@ class ShieldVpnService : VpnService() {
                 if (settings.vpnEnabled) thread(name = "blockbridge-vpn") { applyVpn() }
                 return
             }
+            DiagLog.add("tunnel", "hev failed to start")
             lastError = "Full-traffic engine failed to start. Turn off \"Send all app traffic\" " +
                 "and the VPN in Settings, then try again."
             shutdown(); stopSelf()
@@ -313,6 +315,7 @@ class ShieldVpnService : VpnService() {
         }
 
         fullTunnel = false
+        DiagLog.add("tunnel", "DNS-only mode up")
         pool = Executors.newFixedThreadPool(24)
         loop = thread(name = "blockbridge-dns") {
             try {

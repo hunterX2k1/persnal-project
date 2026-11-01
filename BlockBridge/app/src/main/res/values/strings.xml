@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">Protection and VPN switches with today\'s blocked count</string>
+    <string name="tile_protection">BlockBridge</string>
+    <string name="tile_vpn">BlockBridge VPN</string>
+</resources>

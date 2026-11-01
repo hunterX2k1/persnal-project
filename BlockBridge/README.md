@@ -94,6 +94,31 @@ optional exit country.
 Ad blocking still applies; DNS goes through Tor's DNSPort. Tor carries TCP only, is slower than a
 VPN, and some sites show CAPTCHAs to Tor users.
 
+## Network analyzer, speed test, load balancer (7.0)
+
+* **Network tab** — Wireshark-style list of every connection: app, host, IP:port, TCP/UDP, route
+  (direct or which VPN server), bytes, duration, and why something was blocked. Per-app traffic
+  totals, the DNS log, filters, and CSV export. The app behind each connection comes from a small
+  build-time patch to hev (`app/src/main/jni/patches`) that passes the app socket's address, which
+  Android maps to the owning app.
+* **Speed tab** — ping, jitter, download and upload (4 parallel streams, Cloudflare's speed
+  endpoints) through the route your traffic actually takes; history and *VPN vs direct* compare.
+* **Load balancer** (VPN tab) — Failover, Balanced (least connections, each site sticks to one
+  server for 10 min) or Fastest (lowest measured latency) across several WireGuard/Tor servers,
+  with health probes and automatic reconnect.
+* **Split tunneling** (Filters › Apps) — per app: Normal, *No VPN* (still ad-blocked) or *Skip all*.
+* **Encrypted-DNS guard** — refuses DNS-over-HTTPS/TLS endpoints so apps can't bypass the filters.
+* **Tor bridges** — Snowflake / obfs4 (Tor Browser's built-in bridges) or your own lines.
+* Quick Settings tiles, home-screen widget, background list updates, lifetime stats, password-
+  encrypted backups (AES-256-GCM, PBKDF2), update checker, diagnostics + debug log.
+
+## Signing
+
+The release key is **not** in the repo. Builds read it from `BlockBridge/keystore.properties`
+(`storeFile`, `storePassword`, `keyAlias`, `keyPassword`; git-ignored) or, on GitHub Actions, from
+the secrets `BB_KEYSTORE_B64` (base64 of the .jks) and `BB_KEYSTORE_PASSWORD`. Without a key the
+workflow still builds and tests but doesn't publish a release.
+
 ## Install
 
 1. Download `BlockBridge.apk` (GitHub › Releases › *BlockBridge (latest build)*, or the Actions artifact).

@@ -49,6 +49,21 @@ class ScreenshotTest {
             "pagead2.googlesyndication.com", "github.com", "app-measurement.com")) Stats.record(d, Filter.match(d))
         setRunning(true)
         VpnClient.previewEngines = true
+        ShieldVpnService::class.java.getDeclaredField("fullTunnel").apply { isAccessible = true }.setBoolean(null, true)
+        // sample connections for the analyzer
+        val chrome = AppInfo(10100, "com.android.chrome", "Chrome")
+        val game = AppInfo(10200, "com.nekki.sfa", "Shadow Fight Arena")
+        fun conn(app: AppInfo, host: String, ip: String, port: Int, up: Long, down: Long, status: Conn.Status? = null, route: String = "Direct", note: String? = null) {
+            val c = ConnTracker.open("TCP", java.net.InetSocketAddress(java.net.InetAddress.getByName(ip), port), host, app)
+            c.route = route
+            ConnTracker.traffic(c, up, down)
+            if (status != null) ConnTracker.finish(c, status, note)
+        }
+        conn(chrome, "www.youtube.com", "142.250.1.91", 443, 52_000, 8_400_000, route = "🇳🇱 NL-FREE-12")
+        conn(chrome, "i.ytimg.com", "142.250.1.92", 443, 9_000, 1_200_000, route = "🇳🇱 NL-FREE-12")
+        conn(chrome, "securepubads.g.doubleclick.net", "142.250.1.93", 443, 0, 0, Conn.Status.BLOCKED, note = "blocked by filters")
+        conn(game, "api.shadowfight.com", "203.0.113.20", 443, 31_000, 410_000, Conn.Status.CLOSED)
+        conn(chrome, "dns.google", "8.8.8.8", 443, 0, 0, Conn.Status.BLOCKED, note = "encrypted-DNS bypass blocked")
 
         val ctl = Robolectric.buildActivity(MainActivity::class.java).setup()
         val act = ctl.get()
@@ -78,8 +93,14 @@ class ScreenshotTest {
         save(scroll, "1b-home-full")
         tab(MainActivity.TAB_FILTERS); shoot("2-filters")
         tab(MainActivity.TAB_VPN); shoot("3-vpn")
-        tab(MainActivity.TAB_LOGGER); shoot("4-logger")
+        tab(MainActivity.TAB_NETWORK); shoot("4-network")
+        tab(MainActivity.TAB_SPEED); shoot("4b-speed")
         tab(MainActivity.TAB_SETTINGS); shoot("5-settings")
+        // Settings page scrolled: diagnostics
+        val content = MainActivity::class.java.getDeclaredField("content").apply { isAccessible = true }.get(act) as View
+        content.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED)
+        content.layout(0, 0, 1200, content.measuredHeight)
+        save(content, "5b-settings-full")
         setRunning(false); tab(MainActivity.TAB_HOME); shoot("6-home-off")
 
         // notification (expanded) as Android would inflate it

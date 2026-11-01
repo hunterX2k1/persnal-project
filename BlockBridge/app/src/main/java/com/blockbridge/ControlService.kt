@@ -120,6 +120,8 @@ class ControlService : Service() {
 
     private fun post() {
         if (!running) return
+        runCatching { LifetimeStats.flush(this) }
+        runCatching { ControlWidget.update(this) }
         getSystemService(NotificationManager::class.java).notify(ID, build())
     }
 
