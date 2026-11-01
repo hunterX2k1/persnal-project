@@ -39,6 +39,8 @@ object DnsHandler {
     @Volatile var via: SocksUpstream? = null
     /** Resolvers inside the VPN (from the WireGuard config's DNS line). */
     @Volatile var viaDns: List<InetAddress> = emptyList()
+    /** A local resolver that already goes through the VPN (Tor's DNSPort). */
+    @Volatile var viaUdp: InetSocketAddress? = null
     /** Kill switch: with a VPN selected but not connected, don't leak lookups. */
     @Volatile var requireVia = false
 
@@ -51,7 +53,9 @@ object DnsHandler {
             if (verdict.blocked) return Dns.blockedReply(query, q)
         }
         val up = via
+        val udpVia = viaUdp
         val resp = when {
+            up != null && udpVia != null -> forwardUdpTo(udpVia, query)
             up != null -> forwardVia(up, query)
             requireVia -> null
             tcp -> forwardTcp(query)
@@ -60,6 +64,17 @@ object DnsHandler {
         if (q != null) for (ip in Dns.answerAddresses(resp)) DnsCache.put(ip, q.name)
         return resp
     }
+
+    private fun forwardUdpTo(server: InetSocketAddress, query: ByteArray): ByteArray? = try {
+        DatagramSocket().use { sock ->
+            sock.soTimeout = 8000 // Tor lookups are slower
+            sock.send(DatagramPacket(query, query.size, server))
+            val buf = ByteArray(4096)
+            val p = DatagramPacket(buf, buf.size)
+            sock.receive(p)
+            buf.copyOf(p.length)
+        }
+    } catch (_: IOException) { null }
 
     private fun forwardUdp(query: ByteArray): ByteArray? {
         for (server in Upstream.servers) {

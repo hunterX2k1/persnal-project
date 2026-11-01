@@ -82,6 +82,18 @@ app ─► BlockBridge relay (uBO filters) ─► bbwg (WireGuard, wg/) ══�
 cross-compiles it with the NDK when Go is installed; `go test -race ./...` in `wg/` runs a full
 encrypted tunnel against a local WireGuard peer.
 
+## App exceptions
+
+**Filters › Apps**: apps you switch on there skip BlockBridge entirely (no ad blocking, no VPN), so
+games can show their reward ads. The tunnel is rebuilt automatically when the list changes.
+
+## Free VPN exits: Tor
+
+**VPN › Add Tor** runs Tor inside the app (Guardian Project `tor-android` 0.4.9.5, the newest
+release that builds with this project's Android Gradle plugin) with an optional exit country.
+Ad blocking still applies; DNS goes through Tor's DNSPort. Tor carries TCP only, is slower than a
+VPN, and some sites show CAPTCHAs to Tor users.
+
 ## Install
 
 1. Download `BlockBridge.apk` (GitHub › Releases › *BlockBridge (latest build)*, or the Actions artifact).

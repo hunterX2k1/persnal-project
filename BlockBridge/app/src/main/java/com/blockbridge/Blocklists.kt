@@ -112,6 +112,10 @@ class Settings(ctx: Context) {
     var vpnEnabled: Boolean
         get() = p.getBoolean("vpn_enabled", false)
         set(v) = p.edit().putBoolean("vpn_enabled", v).apply()
+    /** Apps that skip BlockBridge entirely (no ad blocking, no VPN) — e.g. games with reward ads. */
+    var exceptedApps: Set<String>
+        get() = p.getStringSet("excepted_apps", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("excepted_apps", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()

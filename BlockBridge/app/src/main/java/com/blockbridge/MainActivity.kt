@@ -402,7 +402,9 @@ class MainActivity : Activity() {
         adSwitch.isChecked = settings.adBlockEnabled
         vpnSwitch.isChecked = vpnWanted
         syncing = false
-        adSub.text = if (settings.adBlockEnabled) "%,d hostnames".format(Filter.blockCount) else "Paused — ads allowed"
+        val excepted = settings.exceptedApps.size
+        adSub.text = (if (settings.adBlockEnabled) "%,d hostnames".format(Filter.blockCount) else "Paused — ads allowed") +
+            if (excepted > 0) " · $excepted app${if (excepted == 1) "" else "s"} excepted" else ""
         val server = VpnProfiles.selected(this)
         vpnSub.text = when {
             server == null -> "No server yet"
@@ -453,6 +455,88 @@ class MainActivity : Activity() {
         else -> "%,d".format(n)
     }
 
+    // ---------------- App exceptions ----------------
+
+    private class AppRow(val pkg: String, val label: String, val icon: android.graphics.drawable.Drawable?)
+    private var restartPending = false
+
+    private fun buildAppsPage(): View {
+        val page = vbox()
+        page.addView(body("Apps you tick here skip BlockBridge completely: no ad blocking and no VPN. " +
+            "Use it for games whose reward ads (or reward buttons) need ads to load."))
+        val search = singleLine("", "Search apps")
+        page.addView(search)
+        val list = vbox().apply { setPadding(0, dp(8), 0, 0) }
+        list.addView(small("Loading apps…"))
+        page.addView(list)
+
+        thread {
+            val pm = packageManager
+            val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val apps = pm.queryIntentActivities(launcher, 0)
+                .map { it.activityInfo.applicationInfo }
+                .distinctBy { it.packageName }
+                .filter { it.packageName != packageName }
+                .map { AppRow(it.packageName, pm.getApplicationLabel(it).toString(), runCatching { pm.getApplicationIcon(it) }.getOrNull()) }
+                .sortedBy { it.label.lowercase() }
+            runOnUiThread {
+                fun render(q: String) {
+                    list.removeAllViews()
+                    val excepted = settings.exceptedApps
+                    val shown = apps.filter { q.isBlank() || it.label.contains(q, true) || it.pkg.contains(q, true) }
+                        .sortedByDescending { it.pkg in excepted }
+                    for (a in shown.take(150)) list.addView(appRow(a, a.pkg in excepted))
+                    if (shown.isEmpty()) list.addView(small("No apps match."))
+                }
+                render("")
+                search.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun afterTextChanged(e: android.text.Editable?) = render(e?.toString() ?: "")
+                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                })
+            }
+        }
+        return page
+    }
+
+    private fun appRow(a: AppRow, checked: Boolean): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(8), 0, dp(8))
+        }
+        row.addView(ImageView(this).apply { setImageDrawable(a.icon) }, LinearLayout.LayoutParams(dp(36), dp(36)))
+        val text = vbox().apply { setPadding(dp(12), 0, dp(8), 0) }
+        text.addView(TextView(this).apply { this.text = a.label; textSize = 15f; setTextColor(Palette.TEXT); maxLines = 1 })
+        text.addView(small(a.pkg).apply { textSize = 11f; maxLines = 1 })
+        row.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
+        val sw = Switch(this).apply {
+            isChecked = checked
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(states, intArrayOf(Palette.WARN, Palette.MUTED))
+            trackTintList = ColorStateList(states, intArrayOf(0x66FBBF24, Palette.STROKE))
+            setOnCheckedChangeListener { _, on ->
+                val set = settings.exceptedApps.toMutableSet()
+                if (on) set.add(a.pkg) else set.remove(a.pkg)
+                settings.exceptedApps = set
+                scheduleRestart()
+            }
+        }
+        row.addView(sw)
+        row.setOnClickListener { sw.toggle() }
+        return row
+    }
+
+    /** The tunnel has to be rebuilt for app exceptions to apply; batch quick changes. */
+    private fun scheduleRestart() {
+        if (!ShieldVpnService.isRunning || restartPending) return
+        restartPending = true
+        handler.postDelayed({
+            restartPending = false
+            startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_RESTART))
+            toast("App exceptions applied")
+        }, 1500)
+    }
+
     // ---------------- Filters (lists / my filters / trusted) ----------------
 
     private fun buildFiltersPage(): View {
@@ -464,7 +548,7 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         val holder = FrameLayout(this)
-        val labels = listOf("Lists", "My filters", "Trusted")
+        val labels = listOf("Lists", "My filters", "Trusted", "Apps")
         fun select(i: Int) {
             filterSub = i
             for (k in 0 until seg.childCount) {
@@ -475,7 +559,7 @@ class MainActivity : Activity() {
             }
             holder.removeAllViews()
             holder.addView(filterPages.getOrPut(i) {
-                when (i) { 0 -> buildListsPage(); 1 -> buildMyFiltersPage(); else -> buildTrustedPage() }
+                when (i) { 0 -> buildListsPage(); 1 -> buildMyFiltersPage(); 2 -> buildTrustedPage(); else -> buildAppsPage() }
             })
         }
         labels.forEachIndexed { i, l ->
@@ -817,11 +901,18 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(button("Paste config") { pasteConfigDialog() }, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(row)
+        page.addView(button("Add Tor (free, pick a country)") { torDialog() })
         page.addView(button("Check my location") {
             VpnClient.exitInfo = "Checking…"
             thread { VpnClient.checkLocation() }
         })
 
+        page.addView(header("Free: Tor"))
+        page.addView(body(
+            "No account needed. Traffic hops through 3 volunteer relays and leaves from the country " +
+                "you pick. Slower than a VPN, carries TCP only (calls/QUIC fall back), and Google " +
+                "or some sites may show CAPTCHAs or block Tor."
+        ))
         page.addView(header("Free servers: Proton VPN"))
         page.addView(body(
             "1. Make a free account at protonvpn.com (no card needed).\n" +
@@ -884,6 +975,25 @@ class MainActivity : Activity() {
             })
             vpnList.addView(row)
         }
+    }
+
+    private fun torDialog() {
+        val codes = TorClient.COUNTRIES.keys.toList()
+        val labels = codes.map { c -> (if (c.isEmpty()) "🌐" else Flags.of(c)) + "  " + TorClient.COUNTRIES[c] }
+        AlertDialog.Builder(this)
+            .setTitle("Tor exit country")
+            .setItems(labels.toTypedArray()) { _, which ->
+                val code = codes[which]
+                val name = TorClient.profileName(code)
+                val existing = VpnProfiles.all(this).firstOrNull { it.conf == "tor:$code" }
+                val p = existing ?: VpnProfiles.add(this, name, "tor:$code")
+                VpnProfiles.select(this, p.id)
+                if (::vpnList.isInitialized) renderVpnList()
+                toast("$name selected")
+                if (settings.vpnEnabled) applyVpn()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun pasteConfigDialog() {

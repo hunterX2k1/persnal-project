@@ -22,8 +22,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "5.0"
+        versionCode = 6
+        versionName = "6.0"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -88,6 +88,10 @@ android {
 }
 
 dependencies {
+    // Tor (Guardian Project, BSD): runs tor in-process; used as a free VPN exit with country choice.
+    implementation("info.guardianproject:tor-android:0.4.9.5") {
+        exclude(group = "org.jetbrains.kotlin") // use the app's own Kotlin stdlib
+    }
     testImplementation("junit:junit:4.13.2")
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)
     testImplementation("org.robolectric:robolectric:4.14.1")

@@ -103,6 +103,7 @@ object VpnClient {
         error = null
         exitInfo = null
         state = "Connecting to ${profile.name}…"
+        if (TorClient.isTor(profile)) return startTor(ctx, profile)
         if (!available(ctx)) { fail("This build doesn't include the VPN engine"); return null }
 
         val conf = try {
@@ -159,8 +160,26 @@ object VpnClient {
         return up
     }
 
+    private fun startTor(ctx: Context, profile: VpnProfile): SocksUpstream? {
+        state = "Starting Tor…"
+        val up = TorClient.start(ctx, TorClient.countryOf(profile)) { pct ->
+            state = "Building Tor circuit… $pct%"
+        }
+        if (up == null) {
+            TorClient.stop()
+            fail("Tor couldn't connect. Try \"Any country\" — some countries have few Tor exits.")
+            return null
+        }
+        upstream = up
+        connectedTo = profile.name
+        lastHandshake = System.currentTimeMillis()
+        state = "Connected via ${profile.name}"
+        return up
+    }
+
     @Synchronized
     fun stop() {
+        TorClient.stop()
         val p = process
         process = null
         upstream = null

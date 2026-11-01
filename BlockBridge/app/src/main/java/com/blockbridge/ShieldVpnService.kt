@@ -32,6 +32,8 @@ class ShieldVpnService : VpnService() {
         const val ACTION_STOP = "com.blockbridge.STOP"
         /** Re-read the VPN server choice (switch server / turn VPN on or off). */
         const val ACTION_APPLY_VPN = "com.blockbridge.APPLY_VPN"
+        /** Rebuild the tunnel (e.g. after the app exception list changed). */
+        const val ACTION_RESTART = "com.blockbridge.RESTART"
         private const val ADDR4 = "10.111.222.1"
         private const val DNS4 = "10.111.222.2"
         private const val ADDR6 = "fd00:b10c:b10c::1"
@@ -75,6 +77,10 @@ class ShieldVpnService : VpnService() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_RESTART) {
+            if (running) { shutdown(); start() }
+            return START_STICKY
+        }
         if (intent?.action == ACTION_APPLY_VPN) {
             if (running) {
                 if (Settings(this).vpnEnabled && !fullTunnel) { shutdown(); start() } // needs full mode
@@ -93,6 +99,7 @@ class ShieldVpnService : VpnService() {
         val on = Settings(this).vpnEnabled
         VpnClient.stop()
         DnsHandler.via = null
+        DnsHandler.viaUdp = null
         // Kill switch: while a VPN is wanted but not connected, nothing leaves directly.
         server.requireUpstream = on
         DnsHandler.requireVia = on
@@ -103,6 +110,8 @@ class ShieldVpnService : VpnService() {
         if (profile == null) { VpnClient.error = "Choose a VPN server first"; return }
         val up = VpnClient.start(this, profile) ?: return
         DnsHandler.viaDns = VpnClient.dnsOf(profile.conf)
+        DnsHandler.viaUdp = if (TorClient.isTor(profile) && TorClient.dnsPort > 0)
+            java.net.InetSocketAddress("127.0.0.1", TorClient.dnsPort) else null
         DnsHandler.via = up
         server.resetConnections()
     }
@@ -129,6 +138,8 @@ class ShieldVpnService : VpnService() {
             )
         // Our own blocklist downloads go straight to the internet.
         runCatching { builder.addDisallowedApplication(packageName) }
+        // App exceptions: these apps talk to the internet directly, so their ads load normally.
+        for (pkg in settings.exceptedApps) runCatching { builder.addDisallowedApplication(pkg) }
         if (Build.VERSION.SDK_INT >= 29) builder.setMetered(false)
 
         val iface = try {
