@@ -87,8 +87,8 @@ const MODEL = (() => {
       station: 'MCC', estop: false, override: false,
       lines: [1, 2, 3].map(i => ({
         i, eng: 'STOP', n: 0, dem: 0, crank: 0, clutch: false, lever: 0, steer: 0,
-        rev: 0, revCmd: 0, steerPos: 0, hydPump: true, load: 0, hours: [10898, 10893, 10790][i - 1],
-        tlo: 30, tcw: 32, tgo: 30, texh: 40, fuelTrip: 4547, tripH: 16.07, fuelTot: [912120, 905310, 898000][i - 1], reduce: false, local: false, ctl: false,
+        rev: 0, revCmd: 0, steerPos: 0, hydPump: true, load: 0, hours: 0,
+        tlo: 30, tcw: 32, tgo: 30, texh: 40, fuelTrip: 0, tripH: 0, fuelTot: 0, reduce: false, local: false, ctl: false,
         startFail: 0, stopCause: ''
       })),
       gens: [1, 2, 3].map(i => ({ i, run: i <= 2, n: i <= 2 ? 1500 : 0, cb: i <= 2, tlo: 82, tcw: 80 })),
@@ -98,7 +98,7 @@ const MODEL = (() => {
       pbnFail: {},    // pbn -> true
       force: {},      // tag -> 1 (binary force) / number (analog force)
       phys: {},       // line -> {plo:-x, ...} physical fault offsets
-      fire: false, bilge: false, door: false, ramps: [], nLines: 2,
+      fire: false, bilge: false, door: false, ramps: [], nLines: (data.engines && data.engines.n) || 3,
       hist: [], alarms: new Map(), seq: 0,
     };
     st.tanks.forEach((t, k) => t.vol = t.cap * (0.55 + 0.08 * k % 0.4));
@@ -169,8 +169,6 @@ const MODEL = (() => {
     let dem = NIDLE + (NMAX - NIDLE) * lev;
     if (L.reduce) dem = Math.min(dem, NIDLE + (NMAX - NIDLE) * 0.6);
     if (!L.clutch) dem = Math.min(dem, NIDLE + 200 * lev);
-    const nClutched = st.lines.slice(0, st.nLines).filter(x => x.clutch).length;
-    if (L.clutch && (L.lever < 0 || nClutched < 2)) dem = Math.min(dem, 1200);   // 'ENGINE RPM RESTRICTED TO 1200 RPM FOR SINGLE ENGINE AND ASTERN MODE'
     L.dem = dem;
     // waterjet bucket: lever sign -> ahead/astern ; steering
     L.revCmd = L.clutch ? (L.lever >= 0 ? 100 : -100) * Math.min(1, Math.abs(L.lever) / 10) : 0;
@@ -399,7 +397,21 @@ const MODEL = (() => {
   }
 
   // ---------------- engine ----------------
+  // alarm limits that are part of the ACP (project variables): gearbox oil pressures / temperature
+  function applyAcpLimits(cfg) {
+    const g = (sec, key) => { const o = cfg && cfg[sec]; if (!o) return null; const k = Object.keys(o).find(x => x.includes(key)); return k != null ? +o[k] : null; };
+    const set = (src, fn) => { const e = LIMITS.find(L => L[0].source === src); if (e) fn(e); };
+    const c1 = g('Gear1', 'L1_P-Gear_Ctr_Oil'), c2 = g('Gear1', 'L2_P-Gear_Ctr_Oil'), l1 = g('Gear1', 'L1_P-Gear_Lub_Oil'), l2 = g('Gear1', 'L2_P-Gear_Lub_Oil'), t1 = g('Gear1', 'L1_T-Gear_Oil');
+    if (c1 != null) set('^p-gear control oil', e => { e[1] = c1; e[2] = c2 > 0 ? c2 : null; });
+    if (l1 != null) set('^p-gear lube oil', e => { e[1] = l1; e[2] = l2 > 0 ? l2 : null; });
+    if (t1 != null) set('^t-gear oil', e => { e[3] = t1; e[4] = null; });
+  }
+
   function create(data) {
+    applyAcpLimits(data.config);
+    const gcu = (data.params || []).find(d => /A002-A030/.test(d.device));
+    const gpar = no => { const q = gcu && gcu.params.find(x => x.no === no); return q && typeof q.val === 'number' ? q.val : null; };
+    const WLO = gpar(19) ?? 100, WHI = gpar(20) ?? 200;   // engage window below / above idle speed (ParaList of the gearbox control unit)
     const IX = build(data);
     const st = newState(data);
     const cache = new Map();
@@ -505,7 +517,7 @@ const MODEL = (() => {
       stop(i) { const L = st.lines[i - 1]; L.eng = 'STOP'; L.clutch = false; L.stopCause = 'Stop request ' + st.station; return 'Stop'; },
       clutch(i, on) { const L = st.lines[i - 1];
         if (on) { if (L.eng !== 'RUN') return 'Clutch interlock: engine not running';
-          if (L.n > NIDLE + 120) return 'Clutch interlock: speed above engage limit';
+          if (L.n > NIDLE + WHI || L.n < NIDLE - WLO) return 'Clutch interlock: engine speed outside engage window (idle -' + WLO + ' / +' + WHI + ' rpm)';
           if (Math.abs(L.lever) > 5) return 'Clutch interlock: lever not in neutral'; }
         L.clutch = !!on; return on ? 'Clutch in' : 'Clutch out'; },
       lever(i, v) { st.lines[i - 1].lever = clamp(Math.round(v), -100, 100); },

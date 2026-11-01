@@ -357,6 +357,24 @@ def main():
               "raw": t.get("Tagname Eing."), "level": t.get("Tagname aktuelle Höhe") or t.get("Tagname aktuelle Höhe")}
              for t in tanks]
 
+    # engine / propulsion configuration (BR4000.INI) and project variables incl. limits (BVCONFVAR.INI)
+    engines, cfg = {"n": None, "list": []}, {}
+    if find(A, "BR4000.INI"):
+        ini = parse_kv_ini(find(A, "BR4000.INI"))
+        for k, v in ini.items():
+            m = re.match(r"Engine (\d+)$", k)
+            if m:
+                n = m.group(1)
+                g = lambda key, d=None: num(v.get("K%s%s" % (n, key)), d)
+                engines["list"].append({"no": int(n), "cylinders": g("Nr_Cylinder"), "series": g("NumMotor"),
+                                        "emu": g("EMU"), "exhaust": g("Exhaust"), "splashOil": g("Bear_SplashOil"),
+                                        "gcu": g("GCU_PGCO"), "shaftSpeed": g("GMU_ShaftSpeed"), "fpp": g("FPP"), "cpp": g("CPP")})
+        engines["n"] = num(ini.get("Propulsion", {}).get("K_Nr_AnzE"))
+        engines["fuelUnits"] = {"litre": num(ini.get("Fuel Consumption", {}).get("K_Visible_lit")),
+                                "galUS": num(ini.get("Fuel Consumption", {}).get("K_Visible_gal_US")),
+                                "galIMP": num(ini.get("Fuel Consumption", {}).get("K_Visible_gal_IMP"))}
+    if find(A, "BVCONFVAR.INI"):
+        cfg = parse_kv_ini(find(A, "BVCONFVAR.INI"))
     auftrag = parse_kv_ini(find(A, "AUFTRAG.INI")) if find(A, "AUFTRAG.INI") else {}
     pbn = parse_kv_ini(find(A, "PbNodes.ini")) if find(A, "PbNodes.ini") else {}
 
@@ -382,6 +400,8 @@ def main():
         "devices": plant.get("devices", []),
         "serial": plant.get("serial", []),
         "buses": plant.get("buses", []),
+        "engines": engines,
+        "config": cfg,
         "alarmGroups": groups,
         "signals": signals,
         "params": params,
