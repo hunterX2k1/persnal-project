@@ -1,29 +1,49 @@
-# BlockBridge — uBlock-style ad blocking for Chrome on Android
+# BlockBridge — uBlock Origin's filtering engine for your whole Android phone
 
-BlockBridge sits between your phone and the internet as a **local DNS filter**.
-It works with your existing Chrome (and every other app) without modifying Chrome,
-so Chrome keeps updating normally from the Play Store.
+BlockBridge ports the network-filtering part of **uBlock Origin** (the classic MV2 extension
+Chrome dropped) into an Android app. It runs as a local DNS filter, so it works with your
+existing Chrome and every other app, and Chrome keeps updating normally.
+
+## What was taken from uBlock Origin
+
+| uBO feature | In BlockBridge |
+|---|---|
+| Filter list catalogue (`assets/assets.json`) | Same 71 lists, same 9 on by default (uBlock filters ×5, EasyList, EasyPrivacy, Online Malicious URL Blocklist, Peter Lowe's) |
+| Static filter syntax | `\|\|host^`, `@@\|\|host^`, hosts files, plain hostnames, `$important`, `$badfilter`, option aliases, `$reason` |
+| `!#if` / `!#else` / `!#endif` preprocessor | Evaluated as uBO on Chromium for Android (`env_chromium`, `env_mobile`) |
+| Match order | Trusted site → `$important` → exception → block |
+| My filters / Trusted sites | Same tabs, same syntax; restore reads uBO backup `userFilters` / `whitelist` |
+| Logger | Every lookup, which list blocked it, tap to allow/block/trust |
+| List auto-update | Honors each list's `! Expires:` header, like uBO |
+| "used out of total" per list | Shown under each list |
+
+## What can't move out of the browser
+
+uBO also has cosmetic filters (`##`), scriptlets (`##+js`, used for YouTube ads) and
+URL-path rules (`/ads.js`, `$domain=`, `$redirect`). These need to run *inside the web page*,
+which only a browser extension can do — no Android app can reach into Chrome's pages.
+On the default lists that's roughly 43k cosmetic rules and 18k path rules; BlockBridge applies the
+~99k hostname rules. The "used out of total" counter under each list shows exactly how many.
+
+If a site's video player breaks (some use `imasdk.googleapis.com`, which uBO swaps for a
+harmless stand-in that DNS can't provide), open **Logger**, tap the red entry → **Allow**.
 
 ## How it works
 
 ```
-Chrome ──"where is ads.tracker.com?"──► BlockBridge (on your phone)
-                                          │ on blocklist? → answers 0.0.0.0 → ad never loads
-                                          │ not listed?  → asks real DNS (1.1.1.1) → normal page
+Chrome ──"where is ads.tracker.com?"──► BlockBridge (on your phone, uBO rules)
+                                          │ blocked → answers 0.0.0.0 → ad never loads
+                                          │ allowed → asks real DNS (1.1.1.1) → normal page
 ```
 
-* Uses Android's VPN feature **only to capture DNS lookups** — nothing leaves your phone
-  except the normal lookups to the DNS server you choose. No external VPN server.
-* Page/video/download traffic does **not** go through the app, so speed and battery are unaffected.
-* Blocklists are the ones uBlock Origin uses (AdGuard DNS filter built from EasyList/EasyPrivacy,
-  Peter Lowe's list, URLhaus malware list) plus optional StevenBlack and HaGeZi PRO.
-  They refresh automatically every 3 days.
+Android's VPN feature is used **only to capture DNS lookups**. There is no external VPN server,
+and page/video traffic never passes through the app.
 
 ## Install
 
 1. Download `BlockBridge.apk` (GitHub › Releases › *BlockBridge (latest build)*, or the Actions artifact).
 2. Open it on the phone → allow "Install unknown apps" for your browser/file manager when asked.
-3. Open BlockBridge → **Start** → accept the VPN prompt.
+3. Open BlockBridge → **Turn on** → accept the VPN prompt. uBO's default lists download on first start.
 
 ## Make sure Chrome uses it
 
@@ -31,18 +51,6 @@ Chrome ──"where is ads.tracker.com?"──► BlockBridge (on your phone)
   (a custom secure-DNS provider in Chrome bypasses BlockBridge).
 * Android Settings › **Private DNS** → Off or Automatic.
 * Keep it always on: Android Settings › Network › VPN › BlockBridge › ⚙ › **Always-on VPN**.
-
-## Differences from uBlock Origin
-
-| | uBlock Origin | BlockBridge |
-|---|---|---|
-| Ad/tracker servers | ✅ | ✅ |
-| Malware/phishing domains | ✅ | ✅ |
-| Hiding empty ad boxes (cosmetic filters) | ✅ | ❌ |
-| YouTube video ads (same domain as videos) | ✅ | ❌ |
-| Works in all apps, not just the browser | ❌ | ✅ |
-
-If a site breaks, open BlockBridge → **Recent requests** → tap the red domain → **Allow it**.
 
 ## Build locally
 

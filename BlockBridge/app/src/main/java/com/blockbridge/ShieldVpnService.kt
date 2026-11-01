@@ -130,12 +130,14 @@ class ShieldVpnService : VpnService() {
         val pkt = Packets.parseUdp(buf, len) ?: return
         if (pkt.dstPort != 53) return
         val q = Dns.parseQuestion(pkt.payload)
-        if (q != null && Filter.isBlocked(q.name)) {
-            Stats.record(q.name, true)
-            write(Packets.buildReply(pkt, Dns.blockedReply(pkt.payload, q)))
-            return
+        if (q != null) {
+            val verdict = Filter.match(q.name)
+            Stats.record(q.name, verdict)
+            if (verdict.blocked) {
+                write(Packets.buildReply(pkt, Dns.blockedReply(pkt.payload, q)))
+                return
+            }
         }
-        q?.let { Stats.record(it.name, false) }
         try {
             pool?.execute { forward(pkt) }
         } catch (_: Exception) { /* shutting down */ }

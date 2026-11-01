@@ -9,49 +9,88 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreTest {
-    private fun parse(vararg lines: String): Pair<Set<String>, Set<String>> {
-        val b = HashSet<String>(); val a = HashSet<String>()
-        lines.forEach { ListParser.parseLine(it, b, a) }
-        return b to a
+    private fun compile(vararg lists: Pair<String, String>): Ruleset {
+        val c = UboCompiler.Compiler()
+        for ((key, text) in lists) c.addList(key, text.trimIndent().lineSequence())
+        return c.build()
     }
 
-    @Test fun parsesAllListFormats() {
-        val (b, a) = parse(
-            "# comment", "! adblock comment", "[Adblock Plus 2.0]",
-            "0.0.0.0 ads.one.com", "127.0.0.1 localhost", "0.0.0.0 0.0.0.0",
-            "127.0.0.1 two.com three.com # trailing",
-            "||tracker.net^", "||imp.net^\$important", "||skip.net^\$third-party,client=1",
-            "@@||good.tracker.net^", "plain.org", "*.wild.io",
-            "example.com##.ad-banner", "/regex.*/", "||path.com/ads.js",
-            "1.2.3.4", ":: v6host.com",
+    @Test fun parsesUboSyntaxAndSkipsBrowserOnlyRules() {
+        val r = compile("l" to """
+            ! Title: test
+            [Adblock Plus 2.0]
+            # hosts comment
+            0.0.0.0 ads.one.com
+            127.0.0.1 localhost
+            plain.org
+            ||tracker.net^
+            ||pop.net^${'$'}popup,third-party
+            ||imp.net^${'$'}important
+            ||typed.net^${'$'}script
+            ||site.net^${'$'}domain=example.com
+            ||path.com/ads.js
+            @@||good.tracker.net^
+            @@||cosm.net^${'$'}generichide
+            example.com##.ad-banner
+            youtube.com##+js(json-prune, ads)
+            /regex.*/
+        """)
+        assertEquals(setOf("ads.one.com", "plain.org", "tracker.net", "pop.net"), r.block.keys)
+        assertEquals(setOf("imp.net"), r.important.keys)
+        assertEquals(setOf("good.tracker.net"), r.allow.keys)
+    }
+
+    @Test fun preprocessorFollowsUboOnChromiumMobile() {
+        val r = compile("l" to """
+            !#if env_firefox
+            ||firefox-only.com^
+            !#else
+            ||not-firefox.com^
+            !#endif
+            !#if env_mobile && !ext_ubol
+            ||mobile.com^
+            !#endif
+            !#if (env_safari || cap_html_filtering)
+            ||nope.com^
+            !#endif
+        """)
+        assertEquals(setOf("not-firefox.com", "mobile.com"), r.block.keys)
+        assertTrue(UboCompiler.evalCondition("!(env_firefox || env_safari) && env_chromium"))
+    }
+
+    @Test fun badfilterCancelsAcrossLists() {
+        val r = compile(
+            "a" to "||bad.com^\n||keep.com^\n||x.com^${'$'}third-party",
+            "b" to "||bad.com^${'$'}badfilter\n||x.com^${'$'}3p,badfilter",
         )
-        assertEquals(
-            setOf("ads.one.com", "two.com", "three.com", "tracker.net", "imp.net", "plain.org",
-                "wild.io", "v6host.com"),
-            b,
-        )
-        assertEquals(setOf("good.tracker.net"), a)
+        assertEquals(setOf("keep.com"), r.block.keys)
+        assertEquals("a", r.block["keep.com"])
     }
 
-    @Test fun userDomainNormalises() {
-        assertEquals("ads.x.com", ListParser.userDomain("https://Ads.X.com/path?q=1"))
-        assertEquals("x.com", ListParser.userDomain("||x.com^"))
-        assertEquals("x.com", ListParser.userDomain("*.x.com"))
-        assertNull(ListParser.userDomain("# note"))
-        assertNull(ListParser.userDomain("not a domain"))
-    }
+    @Test fun matchOrderLikeUbo() {
+        Filter.setLists(compile(
+            "easylist" to "||tracker.net^\n||ads.com^\n@@||ok.tracker.net^\n||must.com^${'$'}important\n@@||must.com^",
+        ))
+        val c = UboCompiler.Compiler()
+        c.addList(Filter.BY_USER, sequenceOf("||evil.org^", "@@||ads.com^"))
+        Filter.setUser(c.build(), setOf("trusted.net"))
 
-    @Test fun filterPriorityAndSubdomains() {
-        Filter.setLists(setOf("tracker.net", "ads.com"), setOf("ok.tracker.net"))
-        Filter.setUserRules(setOf("evil.org"), setOf("ads.com"))
+        assertEquals("easylist", Filter.match("a.b.tracker.net.").by)
         assertTrue(Filter.isBlocked("tracker.net"))
-        assertTrue(Filter.isBlocked("a.b.tracker.net."))
-        assertFalse(Filter.isBlocked("ok.tracker.net"))
-        assertFalse(Filter.isBlocked("x.ok.tracker.net"))
-        assertFalse(Filter.isBlocked("ads.com"))          // user allow beats list
-        assertTrue(Filter.isBlocked("cdn.evil.org"))       // user block
-        assertFalse(Filter.isBlocked("nottracker.net"))   // no partial-label match
+        assertFalse(Filter.isBlocked("x.ok.tracker.net"))     // list exception
+        assertTrue(Filter.isBlocked("must.com"))               // ${'$'}important beats exception
+        assertFalse(Filter.isBlocked("ads.com"))               // my exception beats list block
+        assertEquals(Filter.BY_USER, Filter.match("cdn.evil.org").by)
+        assertEquals(Filter.BY_TRUSTED, Filter.match("trusted.net").by)
+        assertFalse(Filter.isBlocked("nottracker.net"))       // no partial-label match
         assertFalse(Filter.isBlocked("google.com"))
+    }
+
+    @Test fun hostOfNormalises() {
+        assertEquals("ads.x.com", Filter.hostOf("https://Ads.X.com/path?q=1"))
+        assertEquals("x.com", Filter.hostOf("*.x.com"))
+        assertNull(Filter.hostOf("# note"))
+        assertNull(Filter.hostOf("not a domain"))
     }
 
     private fun dnsQuery(name: String, type: Int): ByteArray {
