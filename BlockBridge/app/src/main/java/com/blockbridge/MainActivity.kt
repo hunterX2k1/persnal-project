@@ -1235,6 +1235,13 @@ class MainActivity : Activity() {
             })
             vpnList.addView(row)
         }
+        val torMembers = profiles.count { TorClient.isTor(it) && (if (multi) it.id in members else it.id == selected) }
+        if (multi && torMembers > 1) {
+            vpnList.addView(small("⚠ Only one Tor exit can run at a time — the load balancer uses the first " +
+                "ticked Tor server. For a specific country, set Load balancer to Off and pick it.").apply {
+                setTextColor(Palette.WARN); setPadding(0, dp(6), 0, dp(6))
+            })
+        }
     }
 
     private fun torDialog() {

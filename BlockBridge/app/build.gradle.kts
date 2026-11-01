@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "7.2"
+        versionCode = 11
+        versionName = "7.3"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
