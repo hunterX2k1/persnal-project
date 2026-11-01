@@ -191,15 +191,19 @@ class MainActivity : Activity() {
         outState.putInt("tab", currentTab)
     }
 
+    private val onState: () -> Unit = { refresh() }
+
     override fun onResume() {
         super.onResume()
         ticks = 0
         handler.post(ticker)
+        StateBus.listen(onState)
     }
 
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(ticker)
+        StateBus.remove(onState)
     }
 
     private fun showTab(i: Int) {
@@ -265,7 +269,7 @@ class MainActivity : Activity() {
         val (adCard, aSw, aSub) = toggleCard(R.drawable.ic_shield, "Ad block", Palette.GOOD) { on ->
             settings.adBlockEnabled = on
             Filter.enabled = on
-            ControlService.refresh(this)
+            StateBus.changed()
         }
         adSwitch = aSw; adSub = aSub
         val (vpnCard, vSw, vSub) = toggleCard(R.drawable.ic_globe, "VPN", Palette.VIOLET) { on ->
@@ -276,9 +280,10 @@ class MainActivity : Activity() {
                 return@toggleCard
             }
             settings.vpnEnabled = on
+            RouteConfig.reload(this)
             if (::vpnToggle.isInitialized) { syncing = true; vpnToggle.isChecked = on; syncing = false }
             applyVpn()
-            ControlService.refresh(this)
+            StateBus.changed()
         }
         vpnSwitch = vSw; vpnSub = vSub
         row.addView(adCard, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
@@ -396,12 +401,14 @@ class MainActivity : Activity() {
     private fun refreshHome(on: Boolean) {
         if (!::power.isInitialized) return
         val vpnWanted = settings.vpnEnabled
-        val vpnUp = vpnWanted && on && VpnClient.lastHandshake > 0
+        val vs = VpnStatus.of(this)
+        val vpnUp = vs.link == VpnStatus.Link.CONNECTED
         power.on = on
-        power.busy = on && vpnWanted && !vpnUp
+        power.busy = on && vs.link == VpnStatus.Link.CONNECTING
         heroTitle.text = when {
             !on -> "Not protected"
-            vpnWanted && !vpnUp -> "Connecting…"
+            vs.link == VpnStatus.Link.CONNECTING -> "Connecting VPN…"
+            vs.link == VpnStatus.Link.FAILED -> "VPN not connected"
             else -> "Protected"
         }
         heroTitle.setTextColor(if (on) Palette.TEXT else Palette.MUTED)
@@ -425,13 +432,17 @@ class MainActivity : Activity() {
         adSub.text = (if (settings.adBlockEnabled) "%,d hostnames".format(Filter.blockCount) else "Paused — ads allowed") +
             if (excepted > 0) " · $excepted app${if (excepted == 1) "" else "s"} excepted" else ""
         val server = VpnProfiles.selected(this)
-        vpnSub.text = when {
-            server == null -> "No server yet"
-            !vpnWanted -> "${Flags.of(server.name)} ${server.name} · off"
-            vpnUp -> "${Flags.of(server.name)} ${server.name}"
-            on -> "Connecting to ${server.name}…"
-            else -> "${Flags.of(server.name)} ${server.name} · waiting"
+        vpnSub.text = when (vs.link) {
+            VpnStatus.Link.OFF -> server?.let { "${Flags.of(it.name)} ${it.name} · off" } ?: "No server yet"
+            VpnStatus.Link.CONNECTED -> "${vs.flag} ${vs.text.removePrefix("Connected · ")}"
+            else -> vs.text
         }
+        vpnSub.setTextColor(when (vs.link) {
+            VpnStatus.Link.CONNECTED -> Palette.GOOD
+            VpnStatus.Link.CONNECTING, VpnStatus.Link.PROTECTION_OFF -> Palette.WARN
+            VpnStatus.Link.OFF -> Palette.MUTED
+            else -> Palette.BAD
+        })
 
         val total = Stats.total.get()
         val blocked = Stats.blocked.get()
@@ -1042,8 +1053,9 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, on ->
                 if (syncing) return@setOnCheckedChangeListener
                 settings.vpnEnabled = on
+                RouteConfig.reload(this@MainActivity)
                 applyVpn()
-                ControlService.refresh(this@MainActivity)
+                StateBus.changed()
             }
         }
         page.addView(vpnToggle)
@@ -1336,13 +1348,7 @@ class MainActivity : Activity() {
 
         if (::vpnStatus.isInitialized) {
             vpnStatus.text = buildString {
-                append(
-                    when {
-                        !settings.vpnEnabled -> "VPN off — websites see your real location"
-                        !on -> "VPN on — turn protection on to connect"
-                        else -> "VPN: ${VpnClient.state}"
-                    }
-                )
+                append(VpnStatus.of(this@MainActivity).text)
                 val hs = VpnClient.lastHandshake
                 if (settings.vpnEnabled && on && hs > 0) {
                     append("  (last contact ${(System.currentTimeMillis() - hs) / 1000}s ago)")

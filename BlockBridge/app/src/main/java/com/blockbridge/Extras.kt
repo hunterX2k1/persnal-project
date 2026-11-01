@@ -56,6 +56,8 @@ class VpnTile : TileService() {
             return
         }
         s.vpnEnabled = !s.vpnEnabled
+        RouteConfig.reload(this)
+        StateBus.changed()
         if (ShieldVpnService.isRunning) {
             startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_APPLY_VPN))
         }

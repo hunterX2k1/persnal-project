@@ -135,8 +135,10 @@ class Tunnel(val profile: VpnProfile) {
                     when {
                         line.startsWith("READY ") || line.startsWith("ERROR ") -> first.offer(line)
                         line.startsWith("HANDSHAKE ") -> {
+                            val first = lastHandshake == 0L
                             lastHandshake = (line.substringAfter(' ').toLongOrNull() ?: 0) * 1000
                             state = "Connected"
+                            if (first) StateBus.changed()
                         }
                     }
                     DiagLog.add("vpn", "${profile.name}: $line")
@@ -164,6 +166,7 @@ class Tunnel(val profile: VpnProfile) {
         upstream = up
         lastHandshake = System.currentTimeMillis()
         state = "Connected"
+        StateBus.changed()
         return true
     }
 
@@ -192,6 +195,7 @@ class Tunnel(val profile: VpnProfile) {
     private fun fail(msg: String): Boolean {
         error = msg
         state = "Not connected"
+        StateBus.changed()
         DiagLog.add("vpn", "${profile.name}: $msg")
         return false
     }
@@ -363,8 +367,8 @@ object VpnClient {
             val o = JSONObject(json)
             val place = listOf(o.optString("city"), o.optString("region"), countryName(o.optString("country")))
                 .filter { it.isNotBlank() }.distinct().joinToString(", ")
-            val via = if (upstream != null) "through VPN" else "direct (VPN off)"
-            "Websites see: ${o.optString("ip")} — $place\n${o.optString("org")} · $via"
+            if (upstream != null) "✓ Through the VPN, websites see: ${o.optString("ip")} — $place\n${o.optString("org")}"
+            else "⚠ VPN not connected — this is your REAL location: ${o.optString("ip")} — $place\n${o.optString("org")}"
         } catch (e: Exception) {
             "Couldn't read location answer"
         }.also { exitInfo = it }
@@ -372,4 +376,34 @@ object VpnClient {
 
     private fun countryName(code: String) =
         if (code.length == 2) java.util.Locale("", code).displayCountry.ifBlank { code } else code
+}
+
+/** The VPN's real state (not just the switch), shown the same way everywhere. */
+object VpnStatus {
+    enum class Link { OFF, NO_SERVER, PROTECTION_OFF, UNAVAILABLE, CONNECTING, CONNECTED, FAILED }
+
+    class State(val link: Link, val text: String, val flag: String = "🌐")
+
+    fun of(ctx: android.content.Context): State {
+        val s = Settings(ctx)
+        if (!s.vpnEnabled) return State(Link.OFF, "VPN off — websites see your real location")
+        val profiles = VpnProfiles.all(ctx)
+        val wanted = if (s.lbMode == LbMode.OFF) listOfNotNull(VpnProfiles.selected(ctx))
+        else profiles.filter { it.id in s.lbMembers }.ifEmpty { listOfNotNull(VpnProfiles.selected(ctx)) }
+        if (wanted.isEmpty()) return State(Link.NO_SERVER, "No VPN server yet — add one in the VPN tab")
+        if (!ShieldVpnService.isRunning) return State(Link.PROTECTION_OFF, "Turn protection on to connect the VPN")
+        if (!ShieldVpnService.fullTunnel) return State(Link.UNAVAILABLE,
+            if (s.safeMode) "VPN can't run in Safe mode (Settings › Safe mode)"
+            else "VPN needs all-traffic mode, which didn't start — see Settings › Diagnostics")
+        val ts = VpnClient.tunnels
+        val up = ts.firstOrNull { it.usable && it.lastHandshake > 0 }
+        if (up != null) {
+            val extra = if (ts.size > 1) " · ${ts.count { it.usable }}/${ts.size} servers" else ""
+            return State(Link.CONNECTED, "Connected · ${up.name}$extra", Flags.of(up.name))
+        }
+        val failed = ts.isNotEmpty() && ts.all { it.dead || it.upstream == null && it.error != null } || (ts.isEmpty() && VpnClient.error != null)
+        if (failed) return State(Link.FAILED, "Not connected: ${VpnClient.error ?: ts.firstNotNullOfOrNull { it.error } ?: "server unreachable"} — retrying; internet paused (kill switch)")
+        val t = ts.firstOrNull()
+        return State(Link.CONNECTING, if (t != null) "${t.state} · ${t.name}" else "Connecting…")
+    }
 }

@@ -72,7 +72,10 @@ class ControlService : Service() {
         if (Build.VERSION.SDK_INT >= 34) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(ID, n)
         handler.post(ticker)
+        StateBus.listen(onState)
     }
+
+    private val onState: () -> Unit = { post() }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Every startForegroundService() must be answered with startForeground(), even when
@@ -100,6 +103,7 @@ class ControlService : Service() {
             ACTION_ADBLOCK -> {
                 s.adBlockEnabled = !s.adBlockEnabled
                 Filter.enabled = s.adBlockEnabled
+                StateBus.changed()
             }
             ACTION_VPN -> {
                 if (!s.vpnEnabled && VpnProfiles.selected(this) == null) {
@@ -108,6 +112,8 @@ class ControlService : Service() {
                         .putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_VPN))
                 } else {
                     s.vpnEnabled = !s.vpnEnabled
+                    RouteConfig.reload(this)
+                    StateBus.changed()
                     if (ShieldVpnService.isRunning) {
                         startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_APPLY_VPN))
                     }
@@ -121,6 +127,7 @@ class ControlService : Service() {
 
     override fun onDestroy() {
         running = false
+        StateBus.remove(onState)
         handler.removeCallbacks(ticker)
         super.onDestroy()
     }
@@ -129,6 +136,10 @@ class ControlService : Service() {
         if (!running) return
         runCatching { LifetimeStats.flush(this) }
         runCatching { ControlWidget.update(this) }
+        runCatching {
+            android.service.quicksettings.TileService.requestListeningState(this, android.content.ComponentName(this, ProtectionTile::class.java))
+            android.service.quicksettings.TileService.requestListeningState(this, android.content.ComponentName(this, VpnTile::class.java))
+        }
         getSystemService(NotificationManager::class.java).notify(ID, build())
     }
 
@@ -142,19 +153,17 @@ class ControlService : Service() {
         val on = ShieldVpnService.isRunning
         val ad = s.adBlockEnabled
         val vpn = s.vpnEnabled
-        val vpnUp = vpn && on && VpnClient.lastHandshake > 0
-        val server = VpnProfiles.selected(this)?.name
+        val vs = VpnStatus.of(this)
 
         val title = when {
             !on -> "Not protected"
-            vpn && !vpnUp -> "Connecting VPN…"
+            vs.link == VpnStatus.Link.CONNECTING -> "Protected · connecting VPN…"
+            vs.link == VpnStatus.Link.FAILED -> "VPN not connected"
+            vs.link == VpnStatus.Link.CONNECTED -> "Protected · ${vs.flag} VPN"
             else -> "Protected"
         }
-        val detail = buildString {
-            append("${"%,d".format(Stats.blocked.get())} blocked")
-            if (vpn && server != null) append(" · ${Flags.of(server)} $server")
-            else append(" · VPN off")
-        }
+        val detail = "${"%,d".format(Stats.blocked.get())} blocked · " +
+            if (vpn) vs.text else "VPN off"
 
         fun views(layout: Int) = RemoteViews(packageName, layout).apply {
             setTextViewText(R.id.n_title, title)
@@ -162,7 +171,7 @@ class ControlService : Service() {
             setTextColor(R.id.n_title, if (on) Palette.GOOD else Palette.BAD)
             pill(R.id.n_power, if (on) "●  ON" else "○  OFF", on, ACTION_PROTECTION)
             pill(R.id.n_adblock, if (ad) "🛡  Ad block" else "🛡  Ads allowed", ad, ACTION_ADBLOCK)
-            pill(R.id.n_vpn, if (vpn) "🌐  VPN on" else "🌐  VPN off", vpn, ACTION_VPN)
+            vpnPill(vs)
             setOnClickPendingIntent(R.id.n_kill, action(ACTION_KILL))
         }
 
@@ -184,6 +193,19 @@ class ControlService : Service() {
             .setCustomContentView(views(R.layout.notif_small))
             .setCustomBigContentView(views(R.layout.notif_big))
             .build()
+    }
+
+    private fun RemoteViews.vpnPill(vs: VpnStatus.State) {
+        val (text, bg, fg) = when (vs.link) {
+            VpnStatus.Link.CONNECTED -> Triple("${vs.flag}  VPN", R.drawable.pill_on, Palette.BG)
+            VpnStatus.Link.CONNECTING, VpnStatus.Link.PROTECTION_OFF -> Triple("🌐  VPN…", R.drawable.pill_warn, Palette.WARN)
+            VpnStatus.Link.FAILED, VpnStatus.Link.UNAVAILABLE, VpnStatus.Link.NO_SERVER -> Triple("⚠  VPN", R.drawable.pill_kill, Palette.TEXT)
+            VpnStatus.Link.OFF -> Triple("🌐  VPN off", R.drawable.pill_off, Palette.TEXT)
+        }
+        setTextViewText(R.id.n_vpn, text)
+        setInt(R.id.n_vpn, "setBackgroundResource", bg)
+        setTextColor(R.id.n_vpn, fg)
+        setOnClickPendingIntent(R.id.n_vpn, action(ACTION_VPN))
     }
 
     private fun RemoteViews.pill(id: Int, text: String, active: Boolean, action: String) {

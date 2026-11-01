@@ -37,3 +37,26 @@ object DiagLog {
 
     fun clear() = synchronized(lines) { lines.clear() }
 }
+
+/**
+ * "Something changed" signal shared by the app screen, the notification, the widget and the
+ * Quick Settings tiles, so every switch shows the same state at the same moment.
+ */
+object StateBus {
+    private val listeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var pending = false
+
+    fun listen(l: () -> Unit) { listeners.add(l) }
+    fun remove(l: () -> Unit) { listeners.remove(l) }
+
+    /** Coalesces bursts of changes into one refresh ~100 ms later, on the main thread. */
+    fun changed() {
+        if (pending) return
+        pending = true
+        main.postDelayed({
+            pending = false
+            listeners.forEach { runCatching { it() } }
+        }, 100)
+    }
+}

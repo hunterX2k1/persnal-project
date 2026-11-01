@@ -110,7 +110,10 @@ class ShieldVpnService : VpnService() {
         val profiles = vpnProfiles(settings)
         if (profiles.isEmpty()) { VpnClient.error = "Choose a VPN server first"; return }
         DiagLog.add("vpn", "connecting: ${profiles.joinToString { it.name }} (${LoadBalancer.mode.label})")
-        if (!VpnClient.startAll(this, profiles)) {
+        StateBus.changed()
+        val ok = VpnClient.startAll(this, profiles)
+        StateBus.changed()
+        if (!ok) {
             DiagLog.add("vpn", "connect failed: ${VpnClient.error}")
             return // the supervisor retries with backoff
         }
@@ -282,6 +285,7 @@ class ShieldVpnService : VpnService() {
         tun = iface
         running = true
         isRunning = true
+        StateBus.changed()
         lastError = null
         settings.wantRunning = true
         ControlService.show(this)
@@ -307,6 +311,7 @@ class ShieldVpnService : VpnService() {
                 // Survived the risky part; clear the marker after it has run a little.
                 android.os.Handler(mainLooper).postDelayed({ CrashGuard.markStarting(this, false) }, 15_000)
                 fullTunnel = true
+                StateBus.changed()
                 DiagLog.add("tunnel", "full-traffic mode up (IPv6 ${if (v6) "on" else "off"})")
                 startSupervisor()
                 watchNetwork(v6)
@@ -383,6 +388,7 @@ class ShieldVpnService : VpnService() {
     private fun shutdown() {
         running = false
         isRunning = false
+        StateBus.changed()
         if (fullTunnel) HevTunnel.stop()
         fullTunnel = false
         supervisor?.interrupt(); supervisor = null

@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "7.1"
+        versionCode = 10
+        versionName = "7.2"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -113,6 +113,7 @@ dependencies {
     testImplementation("org.json:json:20240303") // real org.json for JVM tests
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)
     testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
 }
 
 // Cross-compiles bbwg for each ABI with the NDK's clang (cgo), output as lib/<abi>/libbbwg.so.
