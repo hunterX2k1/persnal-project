@@ -74,127 +74,232 @@ object VpnProfiles {
 }
 
 /**
- * Runs bbwg (the WireGuard helper bundled as libbbwg.so) and exposes it as a [SocksUpstream].
- * BlockBridge is excluded from its own VPN, so the helper's encrypted UDP goes straight out.
+ * One VPN server connection: bbwg (WireGuard helper bundled as libbbwg.so) or Tor, exposed
+ * as a [SocksUpstream]. BlockBridge is excluded from its own VPN, so the helper's encrypted
+ * traffic goes straight out.
  */
-object VpnClient {
+class Tunnel(val profile: VpnProfile) {
     @Volatile var upstream: SocksUpstream? = null
-        private set
-    @Volatile var state: String = "Off"
+        internal set
+    @Volatile var state = "Starting…"
         private set
     @Volatile var error: String? = null
-    @Volatile var connectedTo: String? = null
-        private set
     @Volatile var lastHandshake = 0L
+        internal set
+    @Volatile var latencyMs = -1L
+    @Volatile var probeFailures = 0
+    val active = java.util.concurrent.atomic.AtomicInteger()
+    private val startedAt = System.currentTimeMillis()
+    @Volatile private var process: Process? = null
+    @Volatile var dead = false
         private set
-    @Volatile var exitInfo: String? = null
 
-    private var process: Process? = null
-    private val rnd = SecureRandom()
+    val isTor get() = TorClient.isTor(profile)
+    val name get() = profile.name
+    val display get() = "${Flags.of(profile.name)} ${profile.name}"
 
-    private fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so")
-    /** Screenshot tests only: draw the VPN screens without the native engines. */
-    @Volatile var previewEngines = false
-    fun available(ctx: Context) = previewEngines || binary(ctx).canExecute()
-
-    @Synchronized
-    fun start(ctx: Context, profile: VpnProfile): SocksUpstream? {
-        stop()
-        error = null
-        exitInfo = null
-        state = "Connecting to ${profile.name}…"
-        if (TorClient.isTor(profile)) return startTor(ctx, profile)
-        if (!available(ctx)) { fail("This build doesn't include the VPN engine"); return null }
-
-        val conf = try {
-            resolveEndpoints(profile.conf)
-        } catch (e: Exception) {
-            fail("Can't find the server address: ${e.message}"); return null
+    /** Usable for new connections: up, and not failing health checks. */
+    val usable: Boolean
+        get() {
+            if (dead || upstream == null || probeFailures >= 2) return false
+            if (isTor) return true
+            // WireGuard: a recent handshake, or still within the first moments after start
+            val now = System.currentTimeMillis()
+            return lastHandshake > 0 && now - lastHandshake < 200_000 || now - startedAt < 25_000
         }
-        val file = File(ctx.filesDir, "wg.conf").apply { writeText(conf) }
-        val user = token()
-        val pass = token()
+
+    fun start(ctx: Context): Boolean {
+        if (isTor) return startTor(ctx)
+        if (!VpnClient.available(ctx)) return fail("This build doesn't include the VPN engine")
+        val conf = try {
+            VpnClient.resolveEndpoints(profile.conf)
+        } catch (e: Exception) {
+            return fail("Can't find the server address: ${e.message}")
+        }
+        val file = File(ctx.filesDir, "wg-${profile.id}.conf").apply { writeText(conf) }
+        val user = VpnClient.token()
+        val pass = VpnClient.token()
         val proc = try {
-            ProcessBuilder(binary(ctx).path, "-config", file.path)
+            ProcessBuilder(File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so").path, "-config", file.path)
                 .redirectErrorStream(true)
                 .apply { environment()["BB_USER"] = user; environment()["BB_PASS"] = pass }
                 .start()
         } catch (e: Exception) {
-            fail("VPN engine failed to start: ${e.message}"); return null
+            return fail("VPN engine failed to start: ${e.message}")
         }
         process = proc
-
         val first = LinkedBlockingQueue<String>()
-        thread(name = "bbwg-out", isDaemon = true) {
+        thread(name = "bbwg-${profile.name}", isDaemon = true) {
             runCatching {
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     when {
                         line.startsWith("READY ") || line.startsWith("ERROR ") -> first.offer(line)
                         line.startsWith("HANDSHAKE ") -> {
                             lastHandshake = (line.substringAfter(' ').toLongOrNull() ?: 0) * 1000
-                            state = "Connected to ${profile.name}"
+                            state = "Connected"
                         }
                     }
+                    DiagLog.add("vpn", "${profile.name}: $line")
                 }
             }
-            if (process === proc) { // helper exited on its own
-                upstream = null
-                DnsHandler.via = null
-                process = null
-                connectedTo = null
-                fail(if (error == null) "VPN disconnected" else error!!)
-            }
+            if (process === proc) { dead = true; upstream = null; fail(error ?: "Disconnected") }
         }
-
         val line = first.poll(8, TimeUnit.SECONDS)
         if (line == null || !line.startsWith("READY ")) {
-            val msg = line?.removePrefix("ERROR ") ?: "VPN engine didn't respond"
             stop()
-            fail(msg)
-            return null
+            return fail(line?.removePrefix("ERROR ") ?: "VPN engine didn't respond")
         }
-        val up = SocksUpstream(line.substringAfter(' ').trim().toInt(), user, pass)
+        upstream = SocksUpstream(line.substringAfter(' ').trim().toInt(), user, pass)
+        state = "Waiting for server…"
+        return true
+    }
+
+    private fun startTor(ctx: Context): Boolean {
+        state = "Starting Tor…"
+        val up = TorClient.start(ctx, TorClient.countryOf(profile)) { pct -> state = "Building Tor circuit… $pct%" }
+            ?: run {
+                TorClient.stop()
+                return fail("Tor couldn't connect. Try \"Any country\" — some countries have few Tor exits.")
+            }
         upstream = up
-        connectedTo = profile.name
-        state = "Waiting for ${profile.name} to answer…"
+        lastHandshake = System.currentTimeMillis()
+        state = "Connected"
+        return true
+    }
+
+    fun stop() {
+        dead = true
+        if (isTor) TorClient.stop()
+        val p = process
+        process = null
+        upstream = null
+        p?.let { runCatching { it.outputStream.close() }; it.destroy() }
+    }
+
+    /** Health probe: time a TCP connection through this server. */
+    fun probe() {
+        val up = upstream ?: return
+        val t0 = System.nanoTime()
+        try {
+            up.connect(InetAddress.getByName("1.1.1.1"), 443).use { }
+            latencyMs = (System.nanoTime() - t0) / 1_000_000
+            probeFailures = 0
+        } catch (_: Exception) {
+            probeFailures++
+        }
+    }
+
+    private fun fail(msg: String): Boolean {
+        error = msg
+        state = "Not connected"
+        DiagLog.add("vpn", "${profile.name}: $msg")
+        return false
+    }
+}
+
+/** How traffic is spread over several VPN servers. */
+enum class LbMode(val label: String) {
+    OFF("Off"), FAILOVER("Failover"), BALANCED("Balanced"), FASTEST("Fastest");
+}
+
+/**
+ * Picks a server for each new connection:
+ *  - Failover: the first working server in your order; the next one takes over if it fails.
+ *  - Balanced: the server with the fewest open connections; a website sticks to the same
+ *    server for 10 minutes so logins and sessions don't jump between countries.
+ *  - Fastest: the working server with the lowest measured latency.
+ */
+object LoadBalancer {
+    @Volatile var mode = LbMode.OFF
+    private val sticky = java.util.concurrent.ConcurrentHashMap<String, kotlin.Pair<Tunnel, Long>>()
+    private val rr = java.util.concurrent.atomic.AtomicInteger()
+
+    fun pick(key: String?, tunnels: List<Tunnel>): Tunnel? {
+        val usable = tunnels.filter { it.usable }
+        if (usable.isEmpty()) return null
+        return when (mode) {
+            LbMode.OFF, LbMode.FAILOVER -> usable.first()
+            LbMode.FASTEST -> usable.minByOrNull { if (it.latencyMs < 0) Long.MAX_VALUE else it.latencyMs }
+            LbMode.BALANCED -> {
+                val now = System.currentTimeMillis()
+                key?.let { k -> sticky[k]?.let { (t, exp) -> if (exp > now && t.usable && t in usable) return t } }
+                val least = usable.minOf { it.active.get() }
+                val candidates = usable.filter { it.active.get() == least }
+                val t = candidates[Math.floorMod(rr.getAndIncrement(), candidates.size)]
+                if (key != null) {
+                    if (sticky.size > 5000) sticky.clear()
+                    sticky[key] = t to now + 10 * 60_000
+                }
+                t
+            }
+        }
+    }
+
+    fun reset() = sticky.clear()
+}
+
+/** All active VPN server connections (one, or several with the load balancer). */
+object VpnClient {
+    @Volatile var tunnels: List<Tunnel> = emptyList()
+        private set
+    @Volatile var exitInfo: String? = null
+    @Volatile var error: String? = null
+
+    /** The server used for DNS and location checks: the first working one. */
+    val primary: Tunnel? get() = tunnels.firstOrNull { it.usable } ?: tunnels.firstOrNull { it.upstream != null }
+    val upstream: SocksUpstream? get() = primary?.upstream
+    val lastHandshake: Long get() = primary?.lastHandshake ?: 0L
+    val state: String
+        get() {
+            val ts = tunnels
+            if (ts.isEmpty()) return if (error != null) "Not connected" else "Off"
+            val ok = ts.count { it.usable }
+            return if (ts.size == 1) "${ts[0].state} · ${ts[0].name}"
+            else "$ok of ${ts.size} servers working · ${LoadBalancer.mode.label}"
+        }
+
+    /** Screenshot tests only: draw the VPN screens without the native engines. */
+    @Volatile var previewEngines = false
+    fun available(ctx: Context) = previewEngines ||
+        File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so").canExecute()
+
+    private val rnd = SecureRandom()
+    internal fun token() = (1..24).map { "abcdefghijkmnopqrstuvwxyz23456789"[rnd.nextInt(33)] }.joinToString("")
+
+    /** Connects to every profile in parallel. Blocking; true if at least one is up. */
+    @Synchronized
+    fun startAll(ctx: Context, profiles: List<VpnProfile>): Boolean {
+        stop()
+        error = null
+        exitInfo = null
+        // Only one Tor instance can run; keep the first Tor profile.
+        var torSeen = false
+        val list = profiles.filter { p -> if (TorClient.isTor(p)) !torSeen.also { torSeen = true } else true }
+            .map { Tunnel(it) }
+        tunnels = list
+        val threads = list.map { t -> thread(name = "vpn-start-${t.name}") { t.start(ctx) } }
+        threads.forEach { it.join(130_000) }
+        LoadBalancer.reset()
+        val up = list.any { it.upstream != null }
+        if (!up) error = list.mapNotNull { it.error }.distinct().joinToString("\n").ifBlank { "Couldn't connect" }
         return up
     }
 
-    private fun startTor(ctx: Context, profile: VpnProfile): SocksUpstream? {
-        state = "Starting Tor…"
-        val up = TorClient.start(ctx, TorClient.countryOf(profile)) { pct ->
-            state = "Building Tor circuit… $pct%"
-        }
-        if (up == null) {
-            TorClient.stop()
-            fail("Tor couldn't connect. Try \"Any country\" — some countries have few Tor exits.")
-            return null
-        }
-        upstream = up
-        connectedTo = profile.name
-        lastHandshake = System.currentTimeMillis()
-        state = "Connected via ${profile.name}"
-        return up
+    /** Restarts one dead tunnel in place (auto-reconnect). */
+    fun restart(ctx: Context, t: Tunnel): Tunnel {
+        t.stop()
+        val fresh = Tunnel(t.profile)
+        tunnels = tunnels.map { if (it === t) fresh else it }
+        fresh.start(ctx)
+        return fresh
     }
 
     @Synchronized
     fun stop() {
-        TorClient.stop()
-        val p = process
-        process = null
-        upstream = null
-        connectedTo = null
-        lastHandshake = 0
-        p?.let { runCatching { it.outputStream.close() }; it.destroy() }
-        state = "Off"
+        tunnels.forEach { it.stop() }
+        tunnels = emptyList()
+        LoadBalancer.reset()
     }
-
-    private fun fail(msg: String) {
-        error = msg
-        state = "Not connected"
-    }
-
-    private fun token() = (1..24).map { "abcdefghijkmnopqrstuvwxyz23456789"[rnd.nextInt(33)] }.joinToString("")
 
     /** DNS servers from the config, used for lookups inside the tunnel. */
     fun dnsOf(conf: String): List<InetAddress> = conf.lines()

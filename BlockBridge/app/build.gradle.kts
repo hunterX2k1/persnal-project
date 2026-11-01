@@ -124,7 +124,20 @@ val buildBbwg = tasks.register("buildBbwg") {
         }
     }
 }
-tasks.named("preBuild") { dependsOn(buildBbwg) }
+// Tags every connection with the app-side address (see src/main/jni/patches). Idempotent.
+val applyHevPatch = tasks.register("applyHevPatch") {
+    enabled = hasHev
+    val patch = file("src/main/jni/patches/hev-app-source.patch")
+    inputs.file(patch)
+    doLast {
+        fun git(vararg args: String) = ProcessBuilder("git", "-C", hevDir.path, *args)
+            .redirectErrorStream(true).start().let { it.inputStream.readBytes(); it.waitFor() }
+        if (git("apply", "--reverse", "--check", patch.path) != 0 && git("apply", patch.path) != 0) {
+            throw GradleException("Could not apply ${patch.name} to hev-socks5-tunnel")
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(buildBbwg, applyHevPatch) }
 
 // ./gradlew testDebugUnitTest -Dbb.shots=/some/dir renders screenshots (ScreenshotTest).
 // Robolectric downloads the Android system jar it renders with; use Google's Maven Central
@@ -132,6 +145,7 @@ tasks.named("preBuild") { dependsOn(buildBbwg) }
 val shotsDir: String = System.getProperty("bb.shots") ?: ""
 tasks.withType<Test>().configureEach {
     systemProperty("bb.shots", shotsDir)
+    systemProperty("bb.e2e", System.getProperty("bb.e2e") ?: "")
     if (shotsDir.isNotEmpty()) {
         systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
     }

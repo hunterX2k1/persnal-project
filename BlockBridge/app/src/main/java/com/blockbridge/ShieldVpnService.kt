@@ -92,28 +92,152 @@ class ShieldVpnService : VpnService() {
         return START_STICKY
     }
 
-    /** Connects to (or disconnects from) the selected VPN server. Blocking. */
+    /** Connects to (or disconnects from) the selected VPN server(s). Blocking. */
     @Synchronized
     private fun applyVpn() {
         val server = socks ?: return
-        val on = Settings(this).vpnEnabled
+        val settings = Settings(this)
+        RouteConfig.reload(this)
+        val on = settings.vpnEnabled
         VpnClient.stop()
-        DnsHandler.via = null
-        DnsHandler.viaUdp = null
+        setDnsVia(null)
         // Kill switch: while a VPN is wanted but not connected, nothing leaves directly.
-        server.requireUpstream = on
         DnsHandler.requireVia = on
         server.resetConnections()
+        backoffMs = 10_000
         if (!on) { VpnClient.error = null; return }
 
-        val profile = VpnProfiles.selected(this)
-        if (profile == null) { VpnClient.error = "Choose a VPN server first"; return }
-        val up = VpnClient.start(this, profile) ?: return
-        DnsHandler.viaDns = VpnClient.dnsOf(profile.conf)
-        DnsHandler.viaUdp = if (TorClient.isTor(profile) && TorClient.dnsPort > 0)
+        val profiles = vpnProfiles(settings)
+        if (profiles.isEmpty()) { VpnClient.error = "Choose a VPN server first"; return }
+        DiagLog.add("vpn", "connecting: ${profiles.joinToString { it.name }} (${LoadBalancer.mode.label})")
+        if (!VpnClient.startAll(this, profiles)) {
+            DiagLog.add("vpn", "connect failed: ${VpnClient.error}")
+            return // the supervisor retries with backoff
+        }
+        setDnsVia(VpnClient.primary)
+        server.resetConnections()
+    }
+
+    /** The servers to use: the load-balancer members, or just the selected one. */
+    private fun vpnProfiles(s: Settings): List<VpnProfile> {
+        val all = VpnProfiles.all(this)
+        LoadBalancer.mode = s.lbMode
+        return if (s.lbMode == LbMode.OFF) listOfNotNull(VpnProfiles.selected(this))
+        else all.filter { it.id in s.lbMembers }.ifEmpty { listOfNotNull(VpnProfiles.selected(this)) }
+    }
+
+    /** Sends DNS through [t] (Tor: its DNSPort; WireGuard: the config's DNS over TCP). */
+    private fun setDnsVia(t: Tunnel?) {
+        val up = t?.upstream
+        DnsHandler.viaDns = t?.let { VpnClient.dnsOf(it.profile.conf) } ?: emptyList()
+        DnsHandler.viaUdp = if (t != null && t.isTor && TorClient.dnsPort > 0)
             java.net.InetSocketAddress("127.0.0.1", TorClient.dnsPort) else null
         DnsHandler.via = up
-        server.resetConnections()
+    }
+
+    /** Per-connection routing: split tunneling, load balancer, kill switch. */
+    private val router = Router { c ->
+        if (!RouteConfig.vpnOn) return@Router Route.Direct
+        val app = c.app
+        if (app != null && app.pkg in RouteConfig.bypassApps) return@Router Route.Direct
+        val t = LoadBalancer.pick(c.host ?: c.dst.address.hostAddress, VpnClient.tunnels)
+        val up = t?.upstream ?: return@Router Route.Reject("VPN not connected (kill switch)")
+        t.active.incrementAndGet()
+        c.onFinish = { t.active.decrementAndGet() }
+        Route.Via(up, t.display)
+    }
+
+    private val appCache = java.util.concurrent.ConcurrentHashMap<Int, AppInfo>()
+
+    /** Which app owns a connection (Android 10+: the VPN app may ask the system). */
+    private fun resolveApp(proto: String, src: java.net.InetSocketAddress, dst: java.net.InetSocketAddress): AppInfo? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return null
+        val p = if (proto == "TCP") OsConstants.IPPROTO_TCP else OsConstants.IPPROTO_UDP
+        val uid = runCatching { cm.getConnectionOwnerUid(p, src, dst) }.getOrDefault(-1)
+        if (uid < 0) return null
+        return appCache.getOrPut(uid) {
+            val pm = packageManager
+            val pkg = pm.getPackagesForUid(uid)?.firstOrNull()
+            val label = pkg?.let { runCatching { pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString() }.getOrNull() }
+            AppInfo(uid, pkg ?: "uid:$uid", label ?: pkg ?: if (uid < 10000) "Android system ($uid)" else "uid $uid")
+        }
+    }
+
+    // ---------------- supervisor: auto-reconnect, health checks ----------------
+
+    @Volatile private var backoffMs = 10_000L
+    private var supervisor: Thread? = null
+
+    private fun startSupervisor() {
+        supervisor = thread(name = "blockbridge-supervisor", isDaemon = true) {
+            var lastProbe = 0L
+            var nextRetry = 0L
+            while (running) {
+                try { Thread.sleep(5_000) } catch (_: InterruptedException) { break }
+                if (!running || !fullTunnel) continue
+                try {
+                    val s = Settings(this)
+                    if (!s.vpnEnabled) continue
+                    val now = System.currentTimeMillis()
+                    val ts = VpnClient.tunnels
+                    if (ts.isEmpty() || ts.all { it.upstream == null && it.dead }) {
+                        if (now >= nextRetry) {
+                            DiagLog.add("supervisor", "VPN down, reconnecting (next wait ${backoffMs / 1000}s)")
+                            nextRetry = now + backoffMs
+                            backoffMs = (backoffMs * 2).coerceAtMost(120_000)
+                            applyVpn()
+                        }
+                        continue
+                    }
+                    for (t in ts) {
+                        val stale = !t.isTor && t.upstream != null && t.lastHandshake > 0 &&
+                            now - t.lastHandshake > 200_000 && t.probeFailures >= 2
+                        if (t.dead || stale) {
+                            DiagLog.add("supervisor", "restarting ${t.name} (${if (stale) "no handshake" else "stopped"})")
+                            VpnClient.restart(this, t)
+                        }
+                    }
+                    if (now - lastProbe > 30_000) {
+                        lastProbe = now
+                        VpnClient.tunnels.map { t -> thread { t.probe() } }.forEach { it.join(10_000) }
+                    }
+                    if (VpnClient.tunnels.any { it.usable }) backoffMs = 10_000
+                    val primary = VpnClient.primary
+                    if (primary?.upstream !== DnsHandler.via) setDnsVia(primary)
+                } catch (e: Exception) {
+                    DiagLog.error("supervisor", "check failed", e)
+                }
+            }
+        }
+    }
+
+    // ---------------- network changes ----------------
+
+    private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    @Volatile private var lastNetwork: android.net.Network? = null
+
+    private fun watchNetwork(v6AtStart: Boolean) {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                val prev = lastNetwork
+                lastNetwork = network
+                runCatching { setUnderlyingNetworks(arrayOf(network)) }
+                if (prev == null || prev == network) return
+                DiagLog.add("network", "switched network — dropping stale connections")
+                DnsCache.clear()
+                socks?.resetConnections()
+                // IPv6 appeared or vanished: rebuild routes so apps don't wait on dead IPv6.
+                if (fullTunnel && hasIpv6() != v6AtStart) {
+                    startService(Intent(this@ShieldVpnService, ShieldVpnService::class.java).setAction(ACTION_RESTART))
+                }
+            }
+            override fun onLost(network: android.net.Network) {
+                if (network == lastNetwork) DiagLog.add("network", "network lost")
+            }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb) }.onSuccess { netCallback = cb }
     }
 
     private fun start() {
@@ -166,15 +290,19 @@ class ShieldVpnService : VpnService() {
         if (full) {
             // Every app -> tunnel -> hev-socks5-tunnel -> Socks5Server -> internet
             val localDns = setOf(InetAddress.getByName(DNS4), InetAddress.getByName(DNS6))
-            val server = Socks5Server({ it in localDns }, { VpnClient.upstream }).start()
+            val server = Socks5Server({ it in localDns }).start()
+            server.appResolver = ::resolveApp
+            server.router = router
+            DohGuard.enabled = settings.dohGuard
+            RouteConfig.reload(this)
             socks = server
             val conf = java.io.File(filesDir, "tunnel.yml").apply { writeText(HevTunnel.config(server, v6)) }
-            if (settings.vpnEnabled) {
-                server.requireUpstream = true
-                DnsHandler.requireVia = true
-            }
+            if (settings.vpnEnabled) DnsHandler.requireVia = true
             if (HevTunnel.start(conf.path, iface.fd)) {
                 fullTunnel = true
+                DiagLog.add("tunnel", "full-traffic mode up (IPv6 ${if (v6) "on" else "off"})")
+                startSupervisor()
+                watchNetwork(v6)
                 if (settings.vpnEnabled) thread(name = "blockbridge-vpn") { applyVpn() }
                 return
             }
@@ -247,6 +375,12 @@ class ShieldVpnService : VpnService() {
         isRunning = false
         if (fullTunnel) HevTunnel.stop()
         fullTunnel = false
+        supervisor?.interrupt(); supervisor = null
+        netCallback?.let { cb ->
+            runCatching { getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(cb) }
+        }
+        netCallback = null
+        lastNetwork = null
         socks?.close(); socks = null
         VpnClient.stop()
         DnsHandler.via = null

@@ -1,0 +1,104 @@
+diff --git a/src/hev-socks5-session-tcp.c b/src/hev-socks5-session-tcp.c
+index 684b301..071915f 100644
+--- a/src/hev-socks5-session-tcp.c
++++ b/src/hev-socks5-session-tcp.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <errno.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ #include <lwip/tcp.h>
+@@ -197,6 +198,15 @@ hev_socks5_session_tcp_new (struct tcp_pcb *pcb, HevTaskMutex *mutex)
+         return NULL;
+     }
+ 
++    /* BlockBridge: remember the app-side address (see HevSocks5SessionData) */
++    {
++        char ip[64];
++
++        if (ipaddr_ntoa_r (&pcb->remote_ip, ip, sizeof (ip)))
++            snprintf (self->data.src, sizeof (self->data.src), "T|%s|%u",
++                      ip, (unsigned int)pcb->remote_port);
++    }
++
+     LOG_D ("%p socks5 session tcp new", self);
+ 
+     return self;
+diff --git a/src/hev-socks5-session-udp.c b/src/hev-socks5-session-udp.c
+index 457b0e9..887b755 100644
+--- a/src/hev-socks5-session-udp.c
++++ b/src/hev-socks5-session-udp.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <errno.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ #include <lwip/udp.h>
+@@ -321,6 +322,15 @@ hev_socks5_session_udp_new (struct udp_pcb *pcb, HevTaskMutex *mutex)
+         return NULL;
+     }
+ 
++    /* BlockBridge: remember the app-side address (see HevSocks5SessionData) */
++    {
++        char ip[64];
++
++        if (ipaddr_ntoa_r (&pcb->remote_ip, ip, sizeof (ip)))
++            snprintf (self->data.src, sizeof (self->data.src), "U|%s|%u",
++                      ip, (unsigned int)pcb->remote_port);
++    }
++
+     LOG_D ("%p socks5 session udp new", self);
+ 
+     return self;
+diff --git a/src/hev-socks5-session.c b/src/hev-socks5-session.c
+index e9d8458..4e611b9 100644
+--- a/src/hev-socks5-session.c
++++ b/src/hev-socks5-session.c
+@@ -16,6 +16,9 @@
+ #include "hev-socks5-client.h"
+ #include "hev-socks5-tunnel.h"
+ 
++#include <stdio.h>
++
++#include "hev-compiler.h"
+ #include "hev-socks5-session.h"
+ 
+ void
+@@ -37,7 +40,17 @@ hev_socks5_session_run (HevSocks5Session *self)
+     }
+ 
+     if (srv->user && srv->pass) {
+-        hev_socks5_client_set_auth (HEV_SOCKS5_CLIENT (self), srv->user,
++        HevSocks5SessionData *sd;
++        const char *user = srv->user;
++
++        sd = container_of (hev_socks5_session_get_node (self),
++                          HevSocks5SessionData, node);
++        if (sd->src[0]) {
++            snprintf (sd->auth_user, sizeof (sd->auth_user), "%s|%s",
++                      srv->user, sd->src);
++            user = sd->auth_user;
++        }
++        hev_socks5_client_set_auth (HEV_SOCKS5_CLIENT (self), user,
+                                     srv->pass);
+         LOG_D ("%p socks5 client auth %s:%s", self, srv->user, srv->pass);
+     }
+diff --git a/src/hev-socks5-session.h b/src/hev-socks5-session.h
+index e06dfc7..ff30fdb 100644
+--- a/src/hev-socks5-session.h
++++ b/src/hev-socks5-session.h
+@@ -27,6 +27,10 @@ struct _HevSocks5SessionData
+     HevListNode node;
+     HevTask *task;
+     HevSocks5Session *self;
++    /* BlockBridge: "T|ip|port" / "U|ip|port" of the app socket, sent in the
++     * SOCKS username so the relay can tell which app opened the connection. */
++    char src[72];
++    char auth_user[200];
+ };
+ 
+ struct _HevSocks5SessionIface

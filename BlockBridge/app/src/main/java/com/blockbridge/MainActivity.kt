@@ -462,8 +462,9 @@ class MainActivity : Activity() {
 
     private fun buildAppsPage(): View {
         val page = vbox()
-        page.addView(body("Apps you tick here skip BlockBridge completely: no ad blocking and no VPN. " +
-            "Use it for games whose reward ads (or reward buttons) need ads to load."))
+        page.addView(body("Tap an app to choose how BlockBridge treats it:"))
+        page.addView(small("• No VPN — still ad-blocked, but connects from your real location (split tunneling).\n" +
+            "• Skip all — no ad blocking and no VPN. Use it for games whose reward ads need ads to load."))
         val search = singleLine("", "Search apps")
         page.addView(search)
         val list = vbox().apply { setPadding(0, dp(8), 0, 0) }
@@ -484,7 +485,7 @@ class MainActivity : Activity() {
                     list.removeAllViews()
                     val excepted = settings.exceptedApps
                     val shown = apps.filter { q.isBlank() || it.label.contains(q, true) || it.pkg.contains(q, true) }
-                        .sortedByDescending { it.pkg in excepted }
+                        .sortedByDescending { it.pkg in excepted || it.pkg in settings.vpnBypassApps }
                     for (a in shown.take(150)) list.addView(appRow(a, a.pkg in excepted))
                     if (shown.isEmpty()) list.addView(small("No apps match."))
                 }
@@ -499,7 +500,17 @@ class MainActivity : Activity() {
         return page
     }
 
-    private fun appRow(a: AppRow, checked: Boolean): View {
+    private enum class AppMode(val label: String, val color: Int) {
+        NORMAL("Normal", Palette.MUTED), NO_VPN("No VPN", Palette.VIOLET), SKIP("Skip all", Palette.WARN)
+    }
+
+    private fun modeOf(pkg: String) = when (pkg) {
+        in settings.exceptedApps -> AppMode.SKIP
+        in settings.vpnBypassApps -> AppMode.NO_VPN
+        else -> AppMode.NORMAL
+    }
+
+    private fun appRow(a: AppRow, @Suppress("UNUSED_PARAMETER") checked: Boolean): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(8), 0, dp(8))
@@ -509,20 +520,48 @@ class MainActivity : Activity() {
         text.addView(TextView(this).apply { this.text = a.label; textSize = 15f; setTextColor(Palette.TEXT); maxLines = 1 })
         text.addView(small(a.pkg).apply { textSize = 11f; maxLines = 1 })
         row.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
-        val sw = Switch(this).apply {
-            isChecked = checked
-            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            thumbTintList = ColorStateList(states, intArrayOf(Palette.WARN, Palette.MUTED))
-            trackTintList = ColorStateList(states, intArrayOf(0x66FBBF24, Palette.STROKE))
-            setOnCheckedChangeListener { _, on ->
-                val set = settings.exceptedApps.toMutableSet()
-                if (on) set.add(a.pkg) else set.remove(a.pkg)
-                settings.exceptedApps = set
-                scheduleRestart()
-            }
+        val chip = TextView(this).apply {
+            textSize = 12f; setTypeface(Typeface.DEFAULT_BOLD)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
         }
-        row.addView(sw)
-        row.setOnClickListener { sw.toggle() }
+        fun paint() {
+            val m = modeOf(a.pkg)
+            chip.text = m.label
+            chip.setTextColor(m.color)
+            chip.background = roundRect((m.color and 0x00FFFFFF) or 0x22000000, dp(99).toFloat(), (m.color and 0x00FFFFFF) or 0x66000000, dp(1))
+        }
+        paint()
+        row.addView(chip)
+        row.setOnClickListener {
+            val modes = AppMode.values()
+            val names = arrayOf(
+                "Normal — ad blocking + VPN",
+                "No VPN — ad blocking only (split tunneling)",
+                "Skip BlockBridge — no ad blocking, no VPN (reward ads work)",
+            )
+            AlertDialog.Builder(this)
+                .setTitle(a.label)
+                .setSingleChoiceItems(names, modes.indexOf(modeOf(a.pkg))) { d, which ->
+                    val skip = settings.exceptedApps.toMutableSet()
+                    val noVpn = settings.vpnBypassApps.toMutableSet()
+                    val wasSkip = a.pkg in skip
+                    skip.remove(a.pkg); noVpn.remove(a.pkg)
+                    when (modes[which]) {
+                        AppMode.SKIP -> skip.add(a.pkg)
+                        AppMode.NO_VPN -> noVpn.add(a.pkg)
+                        AppMode.NORMAL -> Unit
+                    }
+                    settings.exceptedApps = skip
+                    settings.vpnBypassApps = noVpn
+                    RouteConfig.reload(this)
+                    // Skipping apps needs the tunnel rebuilt; split tunneling applies to new connections.
+                    if (wasSkip != (modes[which] == AppMode.SKIP)) scheduleRestart()
+                    paint()
+                    d.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
         return row
     }
 
@@ -793,6 +832,15 @@ class MainActivity : Activity() {
             else "This build doesn't include the full-traffic engine, so only DNS lookups are filtered."
         ))
 
+        page.addView(CheckBox(this).apply {
+            text = "Block encrypted-DNS bypass"
+            isChecked = settings.dohGuard
+            setOnCheckedChangeListener { _, on -> settings.dohGuard = on; DohGuard.enabled = on }
+        })
+        page.addView(small("Apps and browsers with their own DNS-over-HTTPS (e.g. Chrome \"Secure DNS\" set " +
+            "to Google) would skip the filters. This refuses those servers so they fall back to " +
+            "BlockBridge. Needs all-traffic mode."))
+
         page.addView(header("Control center"))
         page.addView(CheckBox(this).apply {
             text = "Show control-center notification"
@@ -889,6 +937,39 @@ class MainActivity : Activity() {
                 "falling back to your real location (kill switch)."
         ))
 
+        page.addView(header("Load balancer"))
+        page.addView(small("Use several servers at once. Failover: next server takes over if one dies. " +
+            "Balanced: spreads connections (each website sticks to one server). Fastest: lowest latency."))
+        val lb = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = roundRect(Palette.SURFACE, dp(99).toFloat(), Palette.STROKE, dp(1))
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        fun paintLb() {
+            for (k in 0 until lb.childCount) {
+                val t = lb.getChildAt(k) as TextView
+                val on = LbMode.values()[k] == settings.lbMode
+                t.background = if (on) gradientRect(dp(99).toFloat(), Palette.CYAN, Palette.VIOLET) else null
+                t.setTextColor(if (on) Palette.BG else Palette.MUTED)
+            }
+        }
+        LbMode.values().forEach { m ->
+            lb.addView(TextView(this).apply {
+                text = m.label; textSize = 12f; setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, dp(8))
+                setOnClickListener {
+                    settings.lbMode = m
+                    if (m != LbMode.OFF && settings.lbMembers.isEmpty()) {
+                        settings.lbMembers = VpnProfiles.all(this@MainActivity).map { it.id }.toSet()
+                    }
+                    paintLb(); renderVpnList()
+                    if (settings.vpnEnabled) applyVpn()
+                }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        paintLb()
+        page.addView(lb, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
+
         page.addView(header("Servers"))
         vpnList = vbox()
         page.addView(vpnList)
@@ -947,28 +1028,46 @@ class MainActivity : Activity() {
             vpnList.addView(small("No servers yet — import one below."))
             return
         }
+        val multi = settings.lbMode != LbMode.OFF
         val selected = VpnProfiles.selected(this)?.id
+        val members = settings.lbMembers
+        val live = VpnClient.tunnels.associateBy { it.profile.id }
         for (p in profiles) {
+            val on = if (multi) p.id in members else p.id == selected
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            row.addView(TextView(this).apply {
-                text = "${if (p.id == selected) "◉" else "○"}   ${Flags.of(p.name)}  ${p.name}"
+            val info = vbox().apply { setPadding(0, dp(8), 0, dp(8)) }
+            info.addView(TextView(this).apply {
+                text = "${if (multi) (if (on) "☑" else "☐") else (if (on) "◉" else "○")}   ${Flags.of(p.name)}  ${p.name}"
                 textSize = 16f
-                setTextColor(if (p.id == selected) Palette.CYAN else Palette.TEXT)
-                setPadding(0, dp(10), 0, dp(10))
-                setOnClickListener {
-                    VpnProfiles.select(this@MainActivity, p.id)
-                    renderVpnList()
-                    if (settings.vpnEnabled) applyVpn()
+                setTextColor(if (on) Palette.CYAN else Palette.TEXT)
+            })
+            live[p.id]?.let { t ->
+                val st = when {
+                    t.usable && t.latencyMs >= 0 -> "● working · ${t.latencyMs} ms · ${t.active.get()} open"
+                    t.usable -> "● working · ${t.active.get()} open"
+                    else -> "● ${t.error ?: t.state}"
                 }
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+                info.addView(small(st).apply { setTextColor(if (t.usable) Palette.GOOD else Palette.BAD); setPadding(dp(30), 0, 0, 0) })
+            }
+            info.setOnClickListener {
+                if (multi) {
+                    settings.lbMembers = if (p.id in members) members - p.id else members + p.id
+                } else {
+                    VpnProfiles.select(this@MainActivity, p.id)
+                }
+                renderVpnList()
+                if (settings.vpnEnabled) applyVpn()
+            }
+            row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
             row.addView(button("Delete") {
                 AlertDialog.Builder(this)
                     .setMessage("Delete ${p.name}?")
                     .setPositiveButton("Delete") { _, _ ->
-                        val wasSelected = p.id == VpnProfiles.selected(this)?.id
+                        val wasUsed = p.id == VpnProfiles.selected(this)?.id || p.id in settings.lbMembers
                         VpnProfiles.remove(this, p.id)
+                        settings.lbMembers = settings.lbMembers - p.id
                         renderVpnList()
-                        if (wasSelected && settings.vpnEnabled) applyVpn()
+                        if (wasUsed && settings.vpnEnabled) applyVpn()
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
@@ -1082,6 +1181,8 @@ class MainActivity : Activity() {
     private fun refresh() {
         val on = ShieldVpnService.isRunning
         refreshHome(on)
+
+        if (currentTab == TAB_VPN && ::vpnList.isInitialized && ticks % 3 == 0 && VpnClient.tunnels.isNotEmpty()) renderVpnList()
 
         if (::vpnStatus.isInitialized) {
             vpnStatus.text = buildString {

@@ -10,9 +10,10 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketAddress
+import java.nio.channels.ServerSocketChannel
+import java.nio.channels.SocketChannel
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -31,6 +32,21 @@ object DnsCache {
     }
 
     fun host(ip: String): String? = map[ip]
+
+    fun clear() = map.clear()
+}
+
+/** Routing settings read on every connection, cached here instead of SharedPreferences. */
+object RouteConfig {
+    @Volatile var vpnOn = false
+    @Volatile var bypassApps: Set<String> = emptySet()
+
+    fun reload(ctx: android.content.Context) {
+        val s = Settings(ctx)
+        vpnOn = s.vpnEnabled
+        bypassApps = s.vpnBypassApps
+        LoadBalancer.mode = s.lbMode
+    }
 }
 
 /** Applies the uBO filter to a DNS query and resolves allowed ones upstream. */
@@ -48,7 +64,10 @@ object DnsHandler {
     fun handle(query: ByteArray, tcp: Boolean = false): ByteArray? {
         val q = Dns.parseQuestion(query)
         if (q != null) {
-            val verdict = Filter.match(q.name)
+            var verdict = Filter.match(q.name)
+            if (!verdict.blocked && DohGuard.enabled && DohGuard.isDohHost(q.name)) {
+                verdict = Filter.Verdict(true, DohGuard.BY)
+            }
             Stats.record(q.name, verdict)
             if (verdict.blocked) return Dns.blockedReply(query, q)
         }
@@ -146,35 +165,44 @@ object TrafficStats {
  * Local SOCKS5 server (RFC 1928 CONNECT + UDP ASSOCIATE, RFC 1929 password auth) that every
  * app's traffic reaches through the tunnel. It:
  *  - answers all DNS (UDP or TCP, to any server — so apps that hard-code 8.8.8.8 are filtered too)
- *  - refuses connections to hostnames the filters block (when the IP came from a recent lookup)
- *  - relays everything else to the internet.
+ *  - refuses connections to blocked hostnames and encrypted-DNS bypass endpoints
+ *  - finds the app behind each connection (hev tags it with the app's socket address)
+ *  - routes each connection direct or through a VPN server ([router]) and records it.
  * BlockBridge itself is excluded from the VPN, so its own sockets go straight out.
  */
 class Socks5Server(
     private val isLocalDns: (InetAddress) -> Boolean,
-    /** Where allowed traffic goes: a VPN tunnel, or null for straight to the internet. */
+    /** Default routing when no [router] is set: a VPN upstream, or null for direct. */
     private val upstream: () -> SocksUpstream? = { null },
 ) : Closeable {
-    /** Kill switch: when true and there's no upstream, refuse instead of going direct. */
+    /** Kill switch for the default router: no upstream means refuse, not go direct. */
     @Volatile var requireUpstream = false
+    /** Finds the app that owns a socket (Android: ConnectivityManager.getConnectionOwnerUid). */
+    @Volatile var appResolver: ((proto: String, src: InetSocketAddress, dst: InetSocketAddress) -> AppInfo?)? = null
+    /** Per-connection routing (split tunneling, load balancer); null = default router. */
+    @Volatile var router: Router? = null
+
     private val rnd = SecureRandom()
     val username = token()
     val password = token()
-    private val server = ServerSocket(0, 512, InetAddress.getByName("127.0.0.1"))
-    val port: Int get() = server.localPort
+    private val server: ServerSocketChannel = ServerSocketChannel.open().apply {
+        bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 512)
+    }
+    val port: Int get() = (server.localAddress as InetSocketAddress).port
     @Volatile private var running = true
     private val open: MutableSet<Closeable> = ConcurrentHashMap.newKeySet()
     private val pool: ExecutorService = Executors.newCachedThreadPool { r ->
-        Thread(null, r, "bb-relay", 256 * 1024).apply { isDaemon = true }
+        Thread(null, r, "bb-relay", 192 * 1024).apply { isDaemon = true }
     }
+    private val pipes = PipePool()
 
     private fun token() = (1..24).map { "abcdefghijkmnopqrstuvwxyz23456789"[rnd.nextInt(33)] }.joinToString("")
 
     fun start(): Socks5Server {
         pool.execute {
             while (running) {
-                val s = try { server.accept() } catch (_: IOException) { break }
-                pool.execute { session(s) }
+                val ch = try { server.accept() } catch (_: IOException) { break }
+                pool.execute { session(ch) }
             }
         }
         return this
@@ -185,6 +213,7 @@ class Socks5Server(
         runCatching { server.close() }
         open.forEach { runCatching { it.close() } }
         open.clear()
+        pipes.close()
         pool.shutdownNow()
     }
 
@@ -199,8 +228,9 @@ class Socks5Server(
         if (c != null) { open.remove(c); runCatching { c.close() } }
     }
 
-    private fun session(s: Socket) {
-        track(s)
+    private fun session(ch: SocketChannel) {
+        track(ch)
+        val s = ch.socket()
         try {
             s.tcpNoDelay = true
             s.soTimeout = 15_000
@@ -208,16 +238,17 @@ class Socks5Server(
             val out = s.getOutputStream()
 
             // greeting: require username/password so other apps can't use this proxy
-            if (input.readUnsignedByte() != 5) return release(s)
+            if (input.readUnsignedByte() != 5) return release(ch)
             val methods = ByteArray(input.readUnsignedByte()).also { input.readFully(it) }
-            if (methods.none { it.toInt() == 2 }) { out.write(byteArrayOf(5, 0xFF.toByte())); return release(s) }
+            if (methods.none { it.toInt() == 2 }) { out.write(byteArrayOf(5, 0xFF.toByte())); return release(ch) }
             out.write(byteArrayOf(5, 2))
             input.readUnsignedByte()
             val user = String(ByteArray(input.readUnsignedByte()).also { input.readFully(it) })
             val pass = String(ByteArray(input.readUnsignedByte()).also { input.readFully(it) })
-            val ok = user == username && pass == password
+            val source = parseSource(user)
+            val ok = (source?.first ?: user) == username && pass == password
             out.write(byteArrayOf(1, if (ok) 0 else 1))
-            if (!ok) return release(s)
+            if (!ok) return release(ch)
 
             // request
             input.readUnsignedByte()
@@ -226,12 +257,12 @@ class Socks5Server(
             val addr = readAddress(input)
             val port = input.readUnsignedShort()
             when (cmd) {
-                1 -> connect(s, input, out, addr, port)
-                3 -> udpAssociate(s, out)
-                else -> { reply(out, 7); release(s) }
+                1 -> connect(ch, input, out, addr, port, source?.second)
+                3 -> udpAssociate(ch, out, source?.second)
+                else -> { reply(out, 7); release(ch) }
             }
         } catch (_: Exception) {
-            release(s)
+            release(ch)
         }
     }
 
@@ -252,69 +283,77 @@ class Socks5Server(
         out.flush()
     }
 
-    // ---------------- TCP ----------------
-
-    private fun connect(s: Socket, input: DataInputStream, out: OutputStream, addr: InetAddress, port: Int) {
-        if (port == 53) return tcpDns(s, input, out)
-        if (isLocalDns(addr)) { reply(out, 5); return release(s) } // e.g. Private DNS probe on 853
-
-        val host = DnsCache.host(addr.hostAddress ?: "")
-        if (host != null && Filter.isBlocked(host)) {
-            TrafficStats.blockedConnections.incrementAndGet()
-            reply(out, 2)
-            return release(s)
-        }
-
-        val up = upstream()
-        if (up == null && requireUpstream) { reply(out, 2); return release(s) }
-        val remote = try {
-            track(up?.connect(addr, port) ?: Socket().apply {
-                connect(InetSocketAddress(addr, port), 10_000)
-                tcpNoDelay = true
-            })
-        } catch (e: IOException) {
-            reply(out, if (addr is Inet4Address) 5 else 4)
-            return release(s)
-        }
-        reply(out, 0)
-        s.soTimeout = 0
-        TrafficStats.connections.incrementAndGet()
-        TrafficStats.active.incrementAndGet()
-
-        val done = AtomicInteger()
-        val finish = {
-            if (done.incrementAndGet() == 2) {
-                release(s, remote)
-                TrafficStats.active.decrementAndGet()
-            }
-        }
-        pool.execute {
-            pipe(input, remote.getOutputStream(), TrafficStats.bytesUp) { runCatching { remote.shutdownOutput() } }
-            finish()
-        }
-        pipe(remote.getInputStream(), out, TrafficStats.bytesDown) { runCatching { s.shutdownOutput() } }
-        finish()
+    private fun appFor(proto: String, src: InetSocketAddress?, dst: InetSocketAddress): AppInfo? {
+        val r = appResolver ?: return null
+        return src?.let { runCatching { r(proto, it, dst) }.getOrNull() }
     }
 
-    private fun pipe(from: InputStream, to: OutputStream, counter: AtomicLong, onEof: () -> Unit) {
-        val buf = ByteArray(16 * 1024)
-        try {
-            while (true) {
-                val n = from.read(buf)
-                if (n < 0) break
-                to.write(buf, 0, n)
-                counter.addAndGet(n.toLong())
+    private fun route(c: Conn): Route {
+        router?.let { return it.route(c) }
+        val up = upstream()
+        return when {
+            up != null -> Route.Via(up, "VPN")
+            requireUpstream -> Route.Reject("VPN not connected (kill switch)")
+            else -> Route.Direct
+        }
+    }
+
+    // ---------------- TCP ----------------
+
+    private fun connect(
+        ch: SocketChannel, input: DataInputStream, out: OutputStream,
+        addr: InetAddress, port: Int, src: InetSocketAddress?,
+    ) {
+        if (port == 53) return tcpDns(ch, input, out)
+        if (isLocalDns(addr)) { reply(out, 5); return release(ch) } // e.g. Private DNS probe on 853
+
+        val dst = InetSocketAddress(addr, port)
+        val host = DnsCache.host(addr.hostAddress ?: "")
+        val conn = ConnTracker.open("TCP", dst, host, appFor("TCP", src, dst))
+        val blockedBy = when {
+            host != null && Filter.isBlocked(host) -> "blocked by filters"
+            DohGuard.blocks(addr, port, host) -> "encrypted-DNS bypass blocked"
+            else -> null
+        }
+        if (blockedBy != null) {
+            TrafficStats.blockedConnections.incrementAndGet()
+            ConnTracker.finish(conn, Conn.Status.BLOCKED, blockedBy)
+            reply(out, 2)
+            return release(ch)
+        }
+
+        val remote: SocketChannel = try {
+            when (val r = route(conn)) {
+                is Route.Reject -> {
+                    ConnTracker.finish(conn, Conn.Status.BLOCKED, r.reason)
+                    reply(out, 2); return release(ch)
+                }
+                is Route.Via -> { conn.route = r.name; r.up.connectChannel(addr, port) }
+                Route.Direct -> SocketChannel.open().apply {
+                    socket().connect(dst, 10_000)
+                    socket().tcpNoDelay = true
+                }
             }
-            onEof()
-        } catch (_: IOException) {
-            onEof()
+        } catch (e: IOException) {
+            ConnTracker.finish(conn, Conn.Status.FAILED, e.message ?: "connect failed")
+            reply(out, if (addr is Inet4Address) 5 else 4)
+            return release(ch)
+        }
+        track(remote)
+        reply(out, 0)
+        TrafficStats.connections.incrementAndGet()
+        TrafficStats.active.incrementAndGet()
+        pipes.splice(ch, remote, conn) {
+            open.remove(ch); open.remove(remote)
+            TrafficStats.active.decrementAndGet()
+            ConnTracker.finish(conn, Conn.Status.CLOSED)
         }
     }
 
     /** DNS over TCP (any server): 2-byte length + message, possibly several per connection. */
-    private fun tcpDns(s: Socket, input: DataInputStream, out: OutputStream) {
+    private fun tcpDns(ch: SocketChannel, input: DataInputStream, out: OutputStream) {
         reply(out, 0)
-        s.soTimeout = 30_000
+        ch.socket().soTimeout = 30_000
         try {
             while (true) {
                 val len = input.readUnsignedShort()
@@ -325,25 +364,36 @@ class Socks5Server(
                 out.flush()
             }
         } catch (_: IOException) { }
-        release(s)
+        release(ch)
     }
 
     // ---------------- UDP ----------------
 
-    private fun udpAssociate(s: Socket, out: OutputStream) {
-        val up = upstream()
-        if (up == null && requireUpstream) { reply(out, 2); return release(s) }
-        val remote: UdpOut = try {
-            track(up?.associate() ?: DirectUdp())
-        } catch (_: IOException) {
-            reply(out, 1); return release(s)
-        }
+    private fun udpAssociate(ch: SocketChannel, out: OutputStream, src: InetSocketAddress?) {
+        val s = ch.socket()
+        // Default routing with the kill switch on and no VPN: refuse right away so apps fail fast.
+        if (router == null && requireUpstream && upstream() == null) { reply(out, 2); return release(ch) }
         val local = track(DatagramSocket(0, InetAddress.getByName("127.0.0.1")))
         reply(out, 0, local.localAddress, local.localPort)
         s.soTimeout = 0
         val client = AtomicReference<SocketAddress?>(null)
+        // The outbound side is chosen on the first non-DNS datagram, once the app is known.
+        val remoteRef = AtomicReference<UdpOut?>(null)
+        val connRef = AtomicReference<Conn?>(null)
 
-        // app -> internet
+        fun startReceiver(remote: UdpOut, conn: Conn) = pool.execute {
+            val buf = ByteArray(65_535)
+            try {
+                while (true) {
+                    val d = remote.receive(buf) ?: continue
+                    val to = client.get() ?: continue
+                    val wrapped = udpHeader(d.addr, d.port, d.data)
+                    local.send(DatagramPacket(wrapped, wrapped.size, to))
+                    ConnTracker.traffic(conn, 0, d.data.size.toLong())
+                }
+            } catch (_: IOException) { }
+        }
+
         pool.execute {
             val buf = ByteArray(65_535)
             try {
@@ -359,29 +409,47 @@ class Socks5Server(
                             val wrapped = udpHeader(d.addr, d.port, resp)
                             runCatching { local.send(DatagramPacket(wrapped, wrapped.size, from)) }
                         }
-                    } else {
-                        remote.send(d.addr, d.port, d.data)
-                        TrafficStats.bytesUp.addAndGet(d.data.size.toLong())
+                        continue
                     }
-                }
-            } catch (_: IOException) { }
-        }
-        // internet -> app
-        pool.execute {
-            val buf = ByteArray(65_535)
-            try {
-                while (true) {
-                    val d = remote.receive(buf) ?: continue
-                    val to = client.get() ?: continue
-                    val wrapped = udpHeader(d.addr, d.port, d.data)
-                    local.send(DatagramPacket(wrapped, wrapped.size, to))
-                    TrafficStats.bytesDown.addAndGet(d.data.size.toLong())
+                    var remote = remoteRef.get()
+                    if (remote == null) {
+                        val dst = InetSocketAddress(d.addr, d.port)
+                        val host = DnsCache.host(d.addr.hostAddress ?: "")
+                        val conn = ConnTracker.open("UDP", dst, host, appFor("UDP", src, dst))
+                        connRef.set(conn)
+                        val blockedBy = when {
+                            host != null && Filter.isBlocked(host) -> "blocked by filters"
+                            DohGuard.blocks(d.addr, d.port, host) -> "encrypted-DNS bypass blocked"
+                            else -> null
+                        }
+                        if (blockedBy != null) {
+                            TrafficStats.blockedConnections.incrementAndGet()
+                            ConnTracker.finish(conn, Conn.Status.BLOCKED, blockedBy)
+                            break
+                        }
+                        remote = try {
+                            when (val r = route(conn)) {
+                                is Route.Reject -> { ConnTracker.finish(conn, Conn.Status.BLOCKED, r.reason); break }
+                                is Route.Via -> { conn.route = r.name; r.up.associate() }
+                                Route.Direct -> DirectUdp()
+                            }
+                        } catch (e: IOException) {
+                            ConnTracker.finish(conn, Conn.Status.FAILED, e.message ?: "UDP not available")
+                            break
+                        }
+                        track(remote)
+                        remoteRef.set(remote)
+                        startReceiver(remote, conn)
+                    }
+                    remote.send(d.addr, d.port, d.data)
+                    connRef.get()?.let { ConnTracker.traffic(it, d.data.size.toLong(), 0) }
                 }
             } catch (_: IOException) { }
         }
         // The association lives as long as its TCP control connection.
         try { while (s.getInputStream().read() >= 0) { } } catch (_: IOException) { }
-        release(s, local, remote)
+        release(ch, local, remoteRef.get())
+        connRef.get()?.let { if (it.end == 0L) ConnTracker.finish(it, Conn.Status.CLOSED) }
     }
 
     class UdpDatagram(val addr: InetAddress, val port: Int, val data: ByteArray)
@@ -438,7 +506,7 @@ class SocksUpstream(val port: Int, private val user: String, private val pass: S
     private val lo: InetAddress = InetAddress.getByName("127.0.0.1")
 
     private fun open(): Socket {
-        val s = Socket()
+        val s = SocketChannel.open().socket() // channel-backed so the pipe pool can splice it
         try {
             s.connect(InetSocketAddress(lo, port), 3000)
             s.tcpNoDelay = true
@@ -478,6 +546,9 @@ class SocksUpstream(val port: Int, private val user: String, private val pass: S
 
     private fun ipTarget(a: InetAddress): ByteArray =
         byteArrayOf(if (a.address.size == 4) 1 else 4) + a.address
+
+    /** Same as [connect], for the relay's pipe pool. */
+    fun connectChannel(addr: InetAddress, port: Int): SocketChannel = connect(addr, port).channel
 
     fun connect(addr: InetAddress, port: Int): Socket = open().also { s ->
         try { request(s, 1, ipTarget(addr), port); s.soTimeout = 0 } catch (e: IOException) { s.close(); throw e }

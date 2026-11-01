@@ -57,6 +57,7 @@ object Catalog {
         null -> ""
         Filter.BY_USER -> "My filters"
         Filter.BY_TRUSTED -> "Trusted site"
+        DohGuard.BY -> "Encrypted-DNS guard"
         else -> all(ctx).firstOrNull { it.key == key }?.title ?: key
     }
 }
@@ -116,6 +117,21 @@ class Settings(ctx: Context) {
     var exceptedApps: Set<String>
         get() = p.getStringSet("excepted_apps", emptySet())!!.toSet()
         set(v) = p.edit().putStringSet("excepted_apps", v).apply()
+    /** Load balancer mode and the servers it spreads traffic over (VPN tab). */
+    var lbMode: LbMode
+        get() = runCatching { LbMode.valueOf(p.getString("lb_mode", "OFF")!!) }.getOrDefault(LbMode.OFF)
+        set(v) = p.edit().putString("lb_mode", v.name).apply()
+    var lbMembers: Set<String>
+        get() = p.getStringSet("lb_members", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("lb_members", v).apply()
+    /** Split tunneling: apps that skip the VPN server but keep ad blocking. */
+    var vpnBypassApps: Set<String>
+        get() = p.getStringSet("vpn_bypass_apps", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("vpn_bypass_apps", v).apply()
+    /** Encrypted-DNS guard (full-traffic mode). */
+    var dohGuard: Boolean
+        get() = p.getBoolean("doh_guard", true)
+        set(v) = p.edit().putBoolean("doh_guard", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()
