@@ -8,7 +8,7 @@ import org.junit.Test
 
 class LoadBalancerTest {
     private fun tunnel(name: String, latency: Long = -1, up: Boolean = true, active: Int = 0) =
-        Tunnel(VpnProfile(name, name, "tor:")).apply {
+        Tunnel(VpnProfile(name, name, "[Interface]\nPrivateKey = x\n[Peer]\nPublicKey = y\nEndpoint = 1.2.3.4:51820")).apply {
             if (up) upstream = SocksUpstream(1, "u", "p")
             lastHandshake = System.currentTimeMillis()
             latencyMs = latency
