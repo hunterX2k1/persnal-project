@@ -8,6 +8,12 @@ plugins {
 val hevDir = file("src/main/jni/hev-socks5-tunnel")
 val hasHev = file("$hevDir/Android.mk").exists() && file("$hevDir/third-part/lwip/Android.mk").exists()
 
+// VPN mode uses bbwg (../wg, Go + official wireguard-go). Built only when Go is installed.
+val goExe: File? = (System.getenv("PATH") ?: "").split(File.pathSeparator)
+    .map { File(it, "go") }.firstOrNull { it.canExecute() }
+val wgSrc = rootProject.file("wg")
+val wgOut = layout.buildDirectory.dir("bbwg/jniLibs")
+
 android {
     namespace = "com.blockbridge"
     compileSdk = 35
@@ -16,8 +22,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 4
+        versionName = "4.0"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -60,6 +66,14 @@ android {
         }
     }
 
+    // bbwg is an executable shipped as libbbwg.so; it must be extracted to run.
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
+    if (goExe != null && hasHev) {
+        sourceSets.getByName("main").jniLibs.srcDir(wgOut)
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -72,3 +86,34 @@ android {
 dependencies {
     testImplementation("junit:junit:4.13.2")
 }
+
+// Cross-compiles bbwg for each ABI with the NDK's clang (cgo), output as lib/<abi>/libbbwg.so.
+val buildBbwg by tasks.registering {
+    enabled = goExe != null && hasHev
+    inputs.dir(wgSrc)
+    outputs.dir(wgOut)
+    doLast {
+        val toolchain = android.ndkDirectory.resolve("toolchains/llvm/prebuilt/linux-x86_64/bin")
+        val targets = mapOf(
+            "arm64-v8a" to Triple("arm64", "aarch64-linux-android26-clang", ""),
+            "armeabi-v7a" to Triple("arm", "armv7a-linux-androideabi26-clang", "7"),
+            "x86_64" to Triple("amd64", "x86_64-linux-android26-clang", ""),
+        )
+        for ((abi, t) in targets) {
+            val out = wgOut.get().file("$abi/libbbwg.so").asFile
+            out.parentFile.mkdirs()
+            val proc = ProcessBuilder(
+                goExe!!.path, "build", "-trimpath", "-buildvcs=false", "-ldflags=-s -w", "-o", out.path, ".",
+            ).directory(wgSrc).redirectErrorStream(true).apply {
+                environment().putAll(mapOf(
+                    "CGO_ENABLED" to "1", "GOOS" to "android", "GOARCH" to t.first,
+                    "CC" to toolchain.resolve(t.second).path,
+                ))
+                if (t.third.isNotEmpty()) environment()["GOARM"] = t.third
+            }.start()
+            val log = proc.inputStream.bufferedReader().readText()
+            if (proc.waitFor() != 0) throw GradleException("bbwg build failed for $abi:\n$log")
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(buildBbwg) }

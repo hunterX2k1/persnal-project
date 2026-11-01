@@ -100,6 +100,10 @@ class Settings(ctx: Context) {
     var fullTunnel: Boolean
         get() = p.getBoolean("full_tunnel", true)
         set(v) = p.edit().putBoolean("full_tunnel", v).apply()
+    /** Send traffic out through the selected VPN server (VPN tab). */
+    var vpnEnabled: Boolean
+        get() = p.getBoolean("vpn_enabled", false)
+        set(v) = p.edit().putBoolean("vpn_enabled", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()

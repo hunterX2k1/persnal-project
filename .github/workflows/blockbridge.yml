@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "BlockBridge/**"
+      - ".gitmodules"
       - ".github/workflows/blockbridge.yml"
   workflow_dispatch:
 
@@ -24,7 +25,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: BlockBridge/wg/go.mod
+          cache-dependency-path: BlockBridge/wg/go.sum
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test VPN helper (bbwg)
+        working-directory: BlockBridge/wg
+        run: go test -race ./...
 
       - name: Test and build
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease

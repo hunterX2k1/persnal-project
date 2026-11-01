@@ -58,6 +58,30 @@ any app ─► VPN tunnel ─► hev-socks5-tunnel (native, MIT) ─► BlockBri
 The native engine lives in the `app/src/main/jni/hev-socks5-tunnel` git submodule — clone with
 `git clone --recursive`, or run `git submodule update --init --recursive`.
 
+## VPN: browse from another country
+
+**VPN tab › Use VPN server.** Traffic still passes BlockBridge's filters first (ads stay blocked),
+then leaves the phone through a WireGuard server, so websites see that server's IP and country.
+DNS goes through the tunnel too.
+
+```
+app ─► BlockBridge relay (uBO filters) ─► bbwg (WireGuard, wg/) ═══encrypted═══► server ─► internet
+```
+
+* **Kill switch:** if the server can't be reached, traffic is paused rather than sent from your real IP.
+* **Free servers:** Proton VPN's free plan — account.protonvpn.com › Downloads › WireGuard
+  configuration › Android › a free server › Download, then *Import .conf file*.
+* **Your own free server:** Oracle Cloud *Always Free* + `server/setup-wireguard-server.sh`,
+  then *Paste config*.
+* **Check my location** shows the IP and country websites see.
+* Google also uses GPS/Wi-Fi location, SIM country and your Play payments profile — turn Location
+  off while using the VPN; the Play Store country doesn't change with a VPN.
+
+`wg/` is BlockBridge's own Go helper on top of the official `golang.zx2c4.com/wireguard`
+(userspace WireGuard + gVisor netstack), exposed to the app as a local SOCKS5 server. Gradle
+cross-compiles it with the NDK when Go is installed; `go test -race ./...` in `wg/` runs a full
+encrypted tunnel against a local WireGuard peer.
+
 ## Install
 
 1. Download `BlockBridge.apk` (GitHub › Releases › *BlockBridge (latest build)*, or the Actions artifact).

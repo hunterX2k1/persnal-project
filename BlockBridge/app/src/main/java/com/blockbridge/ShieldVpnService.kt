@@ -30,6 +30,8 @@ class ShieldVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.blockbridge.START"
         const val ACTION_STOP = "com.blockbridge.STOP"
+        /** Re-read the VPN server choice (switch server / turn VPN on or off). */
+        const val ACTION_APPLY_VPN = "com.blockbridge.APPLY_VPN"
         private const val ADDR4 = "10.111.222.1"
         private const val DNS4 = "10.111.222.2"
         private const val ADDR6 = "fd00:b10c:b10c::1"
@@ -59,14 +61,43 @@ class ShieldVpnService : VpnService() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_APPLY_VPN) {
+            if (running) {
+                if (Settings(this).vpnEnabled && !fullTunnel) { shutdown(); start() } // needs full mode
+                else thread(name = "blockbridge-vpn") { applyVpn() }
+            }
+            return START_STICKY
+        }
         start()
         return START_STICKY
+    }
+
+    /** Connects to (or disconnects from) the selected VPN server. Blocking. */
+    @Synchronized
+    private fun applyVpn() {
+        val server = socks ?: return
+        val on = Settings(this).vpnEnabled
+        VpnClient.stop()
+        DnsHandler.via = null
+        // Kill switch: while a VPN is wanted but not connected, nothing leaves directly.
+        server.requireUpstream = on
+        DnsHandler.requireVia = on
+        server.resetConnections()
+        if (!on) { VpnClient.error = null; return }
+
+        val profile = VpnProfiles.selected(this)
+        if (profile == null) { VpnClient.error = "Choose a VPN server first"; return }
+        val up = VpnClient.start(this, profile) ?: return
+        DnsHandler.viaDns = VpnClient.dnsOf(profile.conf)
+        DnsHandler.via = up
+        server.resetConnections()
     }
 
     private fun start() {
         if (running) return
         val settings = Settings(this)
-        val full = settings.fullTunnel && HevTunnel.available
+        // A VPN server needs every connection to pass through, so it forces full mode.
+        val full = (settings.fullTunnel || settings.vpnEnabled) && HevTunnel.available
         val v6 = !full || hasIpv6()
         val builder = Builder()
             .setSession("BlockBridge")
@@ -109,14 +140,20 @@ class ShieldVpnService : VpnService() {
         if (full) {
             // Every app -> tunnel -> hev-socks5-tunnel -> Socks5Server -> internet
             val localDns = setOf(InetAddress.getByName(DNS4), InetAddress.getByName(DNS6))
-            val server = Socks5Server { it in localDns }.start()
+            val server = Socks5Server({ it in localDns }, { VpnClient.upstream }).start()
             socks = server
             val conf = java.io.File(filesDir, "tunnel.yml").apply { writeText(HevTunnel.config(server, v6)) }
+            if (settings.vpnEnabled) {
+                server.requireUpstream = true
+                DnsHandler.requireVia = true
+            }
             if (HevTunnel.start(conf.path, iface.fd)) {
                 fullTunnel = true
+                if (settings.vpnEnabled) thread(name = "blockbridge-vpn") { applyVpn() }
                 return
             }
-            lastError = "Full-traffic engine failed to start; using DNS-only filtering."
+            lastError = "Full-traffic engine failed to start. Turn off \"Send all app traffic\" " +
+                "and the VPN in Settings, then try again."
             shutdown(); stopSelf()
             return
         }
@@ -185,6 +222,9 @@ class ShieldVpnService : VpnService() {
         if (fullTunnel) HevTunnel.stop()
         fullTunnel = false
         socks?.close(); socks = null
+        VpnClient.stop()
+        DnsHandler.via = null
+        DnsHandler.requireVia = false
         pool?.shutdownNow(); pool = null
         synchronized(writeLock) { output = null }
         runCatching { tun?.close() }; tun = null

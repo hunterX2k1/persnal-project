@@ -29,10 +29,11 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     private companion object {
         const val REQ_VPN = 1
+        const val REQ_IMPORT = 2
         val RED = Color.parseColor("#E53935")
         val GREEN = Color.parseColor("#43A047")
         val AMBER = Color.parseColor("#F9A825")
-        val TABS = listOf("Filter lists", "My filters", "Trusted sites", "Logger", "Settings")
+        val TABS = listOf("Filter lists", "My filters", "Trusted sites", "Logger", "Settings", "VPN")
     }
 
     private lateinit var settings: Settings
@@ -57,6 +58,11 @@ class MainActivity : Activity() {
     private lateinit var trustedEdit: EditText
     private lateinit var up1Edit: EditText
     private lateinit var up2Edit: EditText
+
+    // VPN
+    private lateinit var vpnStatus: TextView
+    private lateinit var vpnList: LinearLayout
+    private lateinit var vpnToggle: CheckBox
 
     // Logger
     private lateinit var loggerBox: LinearLayout
@@ -145,7 +151,8 @@ class MainActivity : Activity() {
                 1 -> buildMyFiltersPage()
                 2 -> buildTrustedPage()
                 3 -> buildLoggerPage()
-                else -> buildSettingsPage()
+                4 -> buildSettingsPage()
+                else -> buildVpnPage()
             }
         })
         if (i == 3) { shownVersion = -1; refresh() }
@@ -422,6 +429,159 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------------- VPN ----------------
+
+    private fun buildVpnPage(): View {
+        val page = vbox()
+        vpnStatus = body("").apply { setTypeface(typeface, Typeface.BOLD) }
+        page.addView(vpnStatus)
+        if (!VpnClient.available(this) || !HevTunnel.available) {
+            page.addView(body("This build doesn't include the VPN engine."))
+            return page
+        }
+        vpnToggle = CheckBox(this).apply {
+            text = "Use VPN server (show the server's country)"
+            textSize = 16f
+            isChecked = settings.vpnEnabled
+            setOnCheckedChangeListener { _, on ->
+                settings.vpnEnabled = on
+                applyVpn()
+            }
+        }
+        page.addView(vpnToggle)
+        page.addView(small(
+            "While on, websites see the server's IP and country, and lookups go through it too. " +
+                "Ads stay blocked. If the server can't be reached, internet is paused rather than " +
+                "falling back to your real location (kill switch)."
+        ))
+
+        page.addView(header("Servers"))
+        vpnList = vbox()
+        page.addView(vpnList)
+        renderVpnList()
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(button("Import .conf file") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            }, REQ_IMPORT)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(button("Paste config") { pasteConfigDialog() }, LinearLayout.LayoutParams(0, -2, 1f))
+        page.addView(row)
+        page.addView(button("Check my location") {
+            VpnClient.exitInfo = "Checking…"
+            thread { VpnClient.checkLocation() }
+        })
+
+        page.addView(header("Free servers: Proton VPN"))
+        page.addView(body(
+            "1. Make a free account at protonvpn.com (no card needed).\n" +
+                "2. On a browser go to account.protonvpn.com › Downloads › WireGuard configuration.\n" +
+                "3. Platform: Android. Pick a free server (Free plan: a few countries such as " +
+                "Netherlands, USA, Japan…), press Create, then Download.\n" +
+                "4. Here: Import .conf file. Repeat for each country you want."
+        ))
+        page.addView(header("Your own free server"))
+        page.addView(body(
+            "Oracle Cloud's Always Free tier gives you a server in the region you pick (sign-up " +
+                "asks for a card to verify you). Run BlockBridge/server/setup-wireguard-server.sh " +
+                "from this project on it, then paste the config it prints."
+        ))
+        page.addView(header("Making Google agree"))
+        page.addView(body(
+            "Google also uses your phone's location, not just the IP:\n" +
+                "• Turn off Location (quick settings) while using the VPN.\n" +
+                "• Search › Settings › Region can be set to the server's country.\n" +
+                "• Your SIM country and Play Store country (set by your payments profile) don't " +
+                "change with a VPN.\n" +
+                "• Streaming apps may block VPN servers, and unlocking other regions can break " +
+                "their terms of use."
+        ))
+        return page
+    }
+
+    private fun renderVpnList() {
+        vpnList.removeAllViews()
+        val profiles = VpnProfiles.all(this)
+        if (profiles.isEmpty()) {
+            vpnList.addView(small("No servers yet — import one below."))
+            return
+        }
+        val selected = VpnProfiles.selected(this)?.id
+        for (p in profiles) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(TextView(this).apply {
+                text = "${if (p.id == selected) "◉" else "○"}  ${p.name}"
+                textSize = 16f
+                setPadding(0, dp(10), 0, dp(10))
+                setOnClickListener {
+                    VpnProfiles.select(this@MainActivity, p.id)
+                    renderVpnList()
+                    if (settings.vpnEnabled) applyVpn()
+                }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(button("Delete") {
+                AlertDialog.Builder(this)
+                    .setMessage("Delete ${p.name}?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        val wasSelected = p.id == VpnProfiles.selected(this)?.id
+                        VpnProfiles.remove(this, p.id)
+                        renderVpnList()
+                        if (wasSelected && settings.vpnEnabled) applyVpn()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            })
+            vpnList.addView(row)
+        }
+    }
+
+    private fun pasteConfigDialog() {
+        val box = vbox().apply { setPadding(dp(16), dp(8), dp(16), 0) }
+        val name = singleLine("", "Name, e.g. Netherlands")
+        val conf = multiline("", "[Interface]\nPrivateKey = …\n\n[Peer]\n…")
+        box.addView(name); box.addView(conf)
+        AlertDialog.Builder(this)
+            .setTitle("Paste WireGuard config")
+            .setView(box)
+            .setPositiveButton("Add") { _, _ ->
+                addProfile(name.text.toString().ifBlank { "VPN server" }, conf.text.toString())
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun addProfile(name: String, conf: String) {
+        val problem = VpnProfile.validate(conf)
+        if (problem != null) { toast("Not a WireGuard config: $problem"); return }
+        val first = VpnProfiles.all(this).isEmpty()
+        VpnProfiles.add(this, name, conf)
+        if (::vpnList.isInitialized) renderVpnList()
+        toast("Added $name")
+        if (first && settings.vpnEnabled) applyVpn()
+    }
+
+    private fun importFile(uri: android.net.Uri) {
+        try {
+            var name: String? = null
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) name = it.getString(0)
+            }
+            val text = contentResolver.openInputStream(uri)?.use { it.readBytes().take(64_000).toByteArray() }
+                ?.toString(Charsets.UTF_8) ?: throw java.io.IOException("can't read file")
+            addProfile(VpnProfile.nameFrom(name), text)
+        } catch (e: Exception) {
+            toast("Couldn't import: ${e.message}")
+        }
+    }
+
+    private fun applyVpn() {
+        if (ShieldVpnService.isRunning) {
+            startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_APPLY_VPN))
+        } else {
+            toast(if (settings.vpnEnabled) "Saved — turn protection on to connect" else "Saved")
+        }
+    }
+
     // ---------------- Power + status ----------------
 
     private fun toggle() {
@@ -436,6 +596,10 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT) {
+            if (resultCode == RESULT_OK) data?.data?.let { importFile(it) }
+            return
+        }
         if (requestCode == REQ_VPN) {
             if (resultCode == RESULT_OK) startShield()
             else toast("BlockBridge needs the VPN permission to filter DNS.")
@@ -473,6 +637,28 @@ class MainActivity : Activity() {
                     if (refused > 0) append("\n${"%,d".format(refused)} connections to blocked hosts refused")
                 } else if (on) append("\nDNS-only mode")
             }
+
+        if (::vpnStatus.isInitialized) {
+            vpnStatus.text = buildString {
+                append(
+                    when {
+                        !settings.vpnEnabled -> "VPN off — websites see your real location"
+                        !on -> "VPN on — turn protection on to connect"
+                        else -> "VPN: ${VpnClient.state}"
+                    }
+                )
+                val hs = VpnClient.lastHandshake
+                if (settings.vpnEnabled && on && hs > 0) {
+                    append("  (last contact ${(System.currentTimeMillis() - hs) / 1000}s ago)")
+                }
+                VpnClient.error?.let { if (settings.vpnEnabled) append("\n⚠ $it") }
+                VpnClient.exitInfo?.let { append("\n\n$it") }
+            }
+            vpnStatus.setTextColor(
+                if (settings.vpnEnabled && on && VpnClient.lastHandshake > 0) GREEN
+                else if (settings.vpnEnabled && VpnClient.error != null) RED else statsText.currentTextColor
+            )
+        }
 
         if (::listInfo.isInitialized) {
             val busy = Blocklists.status

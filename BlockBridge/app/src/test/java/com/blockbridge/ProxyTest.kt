@@ -21,7 +21,7 @@ class ProxyTest {
     private val closers = mutableListOf<AutoCloseable>()
 
     @Before fun setUp() {
-        proxy = Socks5Server { it.hostAddress == "10.111.222.2" }.start()
+        proxy = Socks5Server({ it.hostAddress == "10.111.222.2" }).start()
         val c = UboCompiler.Compiler()
         c.addList(Filter.BY_USER, sequenceOf("||ads.blocked.com^"))
         Filter.setUser(c.build(), emptySet())

@@ -35,6 +35,13 @@ object DnsCache {
 
 /** Applies the uBO filter to a DNS query and resolves allowed ones upstream. */
 object DnsHandler {
+    /** VPN tunnel to resolve through (null = resolve directly). */
+    @Volatile var via: SocksUpstream? = null
+    /** Resolvers inside the VPN (from the WireGuard config's DNS line). */
+    @Volatile var viaDns: List<InetAddress> = emptyList()
+    /** Kill switch: with a VPN selected but not connected, don't leak lookups. */
+    @Volatile var requireVia = false
+
     /** Returns the reply to send back, or null if the upstream servers didn't answer. */
     fun handle(query: ByteArray, tcp: Boolean = false): ByteArray? {
         val q = Dns.parseQuestion(query)
@@ -43,7 +50,13 @@ object DnsHandler {
             Stats.record(q.name, verdict)
             if (verdict.blocked) return Dns.blockedReply(query, q)
         }
-        val resp = (if (tcp) forwardTcp(query) else forwardUdp(query)) ?: return null
+        val up = via
+        val resp = when {
+            up != null -> forwardVia(up, query)
+            requireVia -> null
+            tcp -> forwardTcp(query)
+            else -> forwardUdp(query)
+        } ?: return null
         if (q != null) for (ip in Dns.answerAddresses(resp)) DnsCache.put(ip, q.name)
         return resp
     }
@@ -62,6 +75,27 @@ object DnsHandler {
             } catch (_: IOException) { /* try the next server */ }
         }
         return null
+    }
+
+    /** DNS over TCP through the VPN, so answers match the VPN server's country. */
+    private fun forwardVia(up: SocksUpstream, query: ByteArray): ByteArray? {
+        for (server in viaDns.ifEmpty { Upstream.servers }) {
+            try {
+                up.connect(server, 53).use { s -> return tcpExchange(s, query) }
+            } catch (_: IOException) { }
+        }
+        return null
+    }
+
+    private fun tcpExchange(s: Socket, query: ByteArray): ByteArray {
+        s.soTimeout = 5000
+        val out = s.getOutputStream()
+        out.write(byteArrayOf((query.size shr 8).toByte(), query.size.toByte()))
+        out.write(query)
+        out.flush()
+        val input = DataInputStream(s.getInputStream())
+        val len = input.readUnsignedShort()
+        return ByteArray(len).also { input.readFully(it) }
     }
 
     private fun forwardTcp(query: ByteArray): ByteArray? {
@@ -101,7 +135,13 @@ object TrafficStats {
  *  - relays everything else to the internet.
  * BlockBridge itself is excluded from the VPN, so its own sockets go straight out.
  */
-class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable {
+class Socks5Server(
+    private val isLocalDns: (InetAddress) -> Boolean,
+    /** Where allowed traffic goes: a VPN tunnel, or null for straight to the internet. */
+    private val upstream: () -> SocksUpstream? = { null },
+) : Closeable {
+    /** Kill switch: when true and there's no upstream, refuse instead of going direct. */
+    @Volatile var requireUpstream = false
     private val rnd = SecureRandom()
     val username = token()
     val password = token()
@@ -131,6 +171,12 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
         open.forEach { runCatching { it.close() } }
         open.clear()
         pool.shutdownNow()
+    }
+
+    /** Drops every relayed connection so apps reconnect through the new route. */
+    fun resetConnections() {
+        open.toList().forEach { runCatching { it.close() } }
+        open.clear()
     }
 
     private fun <T : Closeable> track(c: T): T = c.also { open.add(it) }
@@ -204,13 +250,16 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
             return release(s)
         }
 
-        val remote = track(Socket())
-        try {
-            remote.connect(InetSocketAddress(addr, port), 10_000)
-            remote.tcpNoDelay = true
+        val up = upstream()
+        if (up == null && requireUpstream) { reply(out, 2); return release(s) }
+        val remote = try {
+            track(up?.connect(addr, port) ?: Socket().apply {
+                connect(InetSocketAddress(addr, port), 10_000)
+                tcpNoDelay = true
+            })
         } catch (e: IOException) {
             reply(out, if (addr is Inet4Address) 5 else 4)
-            return release(s, remote)
+            return release(s)
         }
         reply(out, 0)
         s.soTimeout = 0
@@ -267,8 +316,14 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
     // ---------------- UDP ----------------
 
     private fun udpAssociate(s: Socket, out: OutputStream) {
+        val up = upstream()
+        if (up == null && requireUpstream) { reply(out, 2); return release(s) }
+        val remote: UdpOut = try {
+            track(up?.associate() ?: DirectUdp())
+        } catch (_: IOException) {
+            reply(out, 1); return release(s)
+        }
         val local = track(DatagramSocket(0, InetAddress.getByName("127.0.0.1")))
-        val remote = track(DatagramSocket())
         reply(out, 0, local.localAddress, local.localPort)
         s.soTimeout = 0
         val client = AtomicReference<SocketAddress?>(null)
@@ -290,7 +345,7 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
                             runCatching { local.send(DatagramPacket(wrapped, wrapped.size, from)) }
                         }
                     } else {
-                        remote.send(DatagramPacket(d.data, d.data.size, InetSocketAddress(d.addr, d.port)))
+                        remote.send(d.addr, d.port, d.data)
                         TrafficStats.bytesUp.addAndGet(d.data.size.toLong())
                     }
                 }
@@ -301,12 +356,11 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
             val buf = ByteArray(65_535)
             try {
                 while (true) {
-                    val p = DatagramPacket(buf, buf.size)
-                    remote.receive(p)
+                    val d = remote.receive(buf) ?: continue
                     val to = client.get() ?: continue
-                    val wrapped = udpHeader(p.address, p.port, buf.copyOf(p.length))
+                    val wrapped = udpHeader(d.addr, d.port, d.data)
                     local.send(DatagramPacket(wrapped, wrapped.size, to))
-                    TrafficStats.bytesDown.addAndGet(p.length.toLong())
+                    TrafficStats.bytesDown.addAndGet(d.data.size.toLong())
                 }
             } catch (_: IOException) { }
         }
@@ -339,6 +393,110 @@ class Socks5Server(private val isLocalDns: (InetAddress) -> Boolean) : Closeable
             data.copyInto(out, 6 + a.size)
             return out
         }
+    }
+}
+
+/** Where relayed UDP goes: straight out, or through the VPN. */
+interface UdpOut : Closeable {
+    fun send(addr: InetAddress, port: Int, data: ByteArray)
+    /** Blocks for the next datagram; null for one to skip. */
+    fun receive(buf: ByteArray): Socks5Server.UdpDatagram?
+}
+
+class DirectUdp : UdpOut {
+    private val sock = DatagramSocket()
+    override fun send(addr: InetAddress, port: Int, data: ByteArray) =
+        sock.send(DatagramPacket(data, data.size, InetSocketAddress(addr, port)))
+    override fun receive(buf: ByteArray): Socks5Server.UdpDatagram? {
+        val p = DatagramPacket(buf, buf.size)
+        sock.receive(p)
+        return Socks5Server.UdpDatagram(p.address, p.port, buf.copyOf(p.length))
+    }
+    override fun close() = sock.close()
+}
+
+/**
+ * SOCKS5 client for the local VPN helper (bbwg). Every connection opened here leaves
+ * the phone through the WireGuard tunnel.
+ */
+class SocksUpstream(val port: Int, private val user: String, private val pass: String) {
+    private val lo: InetAddress = InetAddress.getByName("127.0.0.1")
+
+    private fun open(): Socket {
+        val s = Socket()
+        try {
+            s.connect(InetSocketAddress(lo, port), 3000)
+            s.tcpNoDelay = true
+            s.soTimeout = 15_000
+            val out = s.getOutputStream()
+            val input = DataInputStream(s.getInputStream())
+            out.write(byteArrayOf(5, 1, 2))
+            if (input.readUnsignedByte() != 5 || input.readUnsignedByte() != 2) throw IOException("vpn: no auth")
+            out.write(byteArrayOf(1, user.length.toByte()) + user.toByteArray() +
+                byteArrayOf(pass.length.toByte()) + pass.toByteArray())
+            input.readUnsignedByte()
+            if (input.readUnsignedByte() != 0) throw IOException("vpn: auth failed")
+            return s
+        } catch (e: IOException) {
+            s.close(); throw e
+        }
+    }
+
+    /** Sends a request and returns the bound address from the reply. */
+    private fun request(s: Socket, cmd: Int, target: ByteArray, port: Int): InetSocketAddress {
+        s.getOutputStream().write(byteArrayOf(5, cmd.toByte(), 0) + target +
+            byteArrayOf((port shr 8).toByte(), port.toByte()))
+        val input = DataInputStream(s.getInputStream())
+        input.readUnsignedByte()
+        val rep = input.readUnsignedByte()
+        input.readUnsignedByte()
+        val addr = when (input.readUnsignedByte()) {
+            1 -> InetAddress.getByAddress(ByteArray(4).also { input.readFully(it) })
+            4 -> InetAddress.getByAddress(ByteArray(16).also { input.readFully(it) })
+            3 -> { val n = input.readUnsignedByte(); input.readFully(ByteArray(n)); lo }
+            else -> throw IOException("vpn: bad reply")
+        }
+        val bport = input.readUnsignedShort()
+        if (rep != 0) throw IOException("vpn: request refused ($rep)")
+        return InetSocketAddress(if (addr.isAnyLocalAddress) lo else addr, bport)
+    }
+
+    private fun ipTarget(a: InetAddress): ByteArray =
+        byteArrayOf(if (a.address.size == 4) 1 else 4) + a.address
+
+    fun connect(addr: InetAddress, port: Int): Socket = open().also { s ->
+        try { request(s, 1, ipTarget(addr), port); s.soTimeout = 0 } catch (e: IOException) { s.close(); throw e }
+    }
+
+    /** Connects by hostname; the name is resolved inside the tunnel. */
+    fun connect(host: String, port: Int): Socket = open().also { s ->
+        val h = host.toByteArray()
+        try { request(s, 1, byteArrayOf(3, h.size.toByte()) + h, port); s.soTimeout = 0 } catch (e: IOException) { s.close(); throw e }
+    }
+
+    fun associate(): UdpOut {
+        val ctrl = open()
+        try {
+            val relay = request(ctrl, 3, byteArrayOf(1, 0, 0, 0, 0), 0)
+            ctrl.soTimeout = 0
+            return SocksUdp(ctrl, relay)
+        } catch (e: IOException) {
+            ctrl.close(); throw e
+        }
+    }
+
+    private class SocksUdp(private val ctrl: Socket, private val relay: InetSocketAddress) : UdpOut {
+        private val sock = DatagramSocket()
+        override fun send(addr: InetAddress, port: Int, data: ByteArray) {
+            val pkt = Socks5Server.udpHeader(addr, port, data)
+            sock.send(DatagramPacket(pkt, pkt.size, relay))
+        }
+        override fun receive(buf: ByteArray): Socks5Server.UdpDatagram? {
+            val p = DatagramPacket(buf, buf.size)
+            sock.receive(p)
+            return Socks5Server.parseUdpHeader(buf, p.length)
+        }
+        override fun close() { runCatching { ctrl.close() }; sock.close() }
     }
 }
 
