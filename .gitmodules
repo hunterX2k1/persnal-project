@@ -1,3 +1,4 @@
 [submodule "BlockBridge/app/src/main/jni/hev-socks5-tunnel"]
 	path = BlockBridge/app/src/main/jni/hev-socks5-tunnel
 	url = https://github.com/heiher/hev-socks5-tunnel
+	ignore = dirty
