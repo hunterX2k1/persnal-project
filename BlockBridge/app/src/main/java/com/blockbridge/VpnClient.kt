@@ -102,7 +102,7 @@ class Tunnel(val profile: VpnProfile) {
     val usable: Boolean
         get() {
             if (dead || upstream == null || probeFailures >= 2) return false
-            if (isTor) return true
+            if (isTor) return TorClient.healthy()
             // WireGuard: a recent handshake, or still within the first moments after start
             val now = System.currentTimeMillis()
             return lastHandshake > 0 && now - lastHandshake < 200_000 || now - startedAt < 25_000

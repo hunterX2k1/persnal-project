@@ -1470,6 +1470,7 @@ class MainActivity : Activity() {
         appendLine("Connections: ${ConnTracker.liveCount()} open · ${TrafficStats.connections.get()} total · ${TrafficStats.blockedConnections.get()} refused")
         appendLine("App exceptions: ${settings.exceptedApps.size} skip · ${settings.vpnBypassApps.size} no-VPN")
         append("Battery optimization: ${if (ignoringBattery()) "off (good)" else "on — Android may stop BlockBridge"}")
+        TorClient.tailLog(this@MainActivity, 25)?.let { append("\n\nTor log (last lines):\n$it") }
     }
 
     /** Asks Android to let BlockBridge run unrestricted (asked once automatically). */
