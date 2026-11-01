@@ -348,6 +348,25 @@ class MainActivity : Activity() {
             }
         })
 
+        page.addView(header("Traffic"))
+        page.addView(CheckBox(this).apply {
+            text = "Send all app traffic through BlockBridge"
+            isChecked = settings.fullTunnel && HevTunnel.available
+            isEnabled = HevTunnel.available
+            setOnCheckedChangeListener { _, on ->
+                settings.fullTunnel = on
+                if (ShieldVpnService.isRunning) toast("Turn protection off and on again to switch mode")
+            }
+        })
+        page.addView(small(
+            if (HevTunnel.available)
+                "On: every connection from every app passes through BlockBridge. DNS sent to any " +
+                    "server (apps that skip Android's DNS) is filtered too, and connections to " +
+                    "blocked hosts are refused. Uses a little more battery.\n" +
+                    "Off: only DNS lookups pass through (lowest battery use)."
+            else "This build doesn't include the full-traffic engine, so only DNS lookups are filtered."
+        ))
+
         page.addView(header("Backup"))
         page.addView(small("Selected lists, My filters and Trusted sites. Restore also accepts the " +
             "\"userFilters\" / \"whitelist\" parts of a uBlock Origin backup file."))
@@ -445,7 +464,15 @@ class MainActivity : Activity() {
         val blocked = Stats.blocked.get()
         val pct = if (total > 0) blocked * 100 / total else 0
         statsText.text = ShieldVpnService.lastError
-            ?: "Requests: ${"%,d".format(total)}   Blocked: ${"%,d".format(blocked)} ($pct%)"
+            ?: buildString {
+                append("Lookups: ${"%,d".format(total)}   Blocked: ${"%,d".format(blocked)} ($pct%)")
+                if (ShieldVpnService.fullTunnel) {
+                    append("\nAll traffic • ${TrafficStats.active.get()} open connections • ")
+                    append("↑ ${mb(TrafficStats.bytesUp.get())} ↓ ${mb(TrafficStats.bytesDown.get())}")
+                    val refused = TrafficStats.blockedConnections.get()
+                    if (refused > 0) append("\n${"%,d".format(refused)} connections to blocked hosts refused")
+                } else if (on) append("\nDNS-only mode")
+            }
 
         if (::listInfo.isInitialized) {
             val busy = Blocklists.status
@@ -486,6 +513,7 @@ class MainActivity : Activity() {
 
     // ---------------- small UI helpers ----------------
 
+    private fun mb(bytes: Long) = if (bytes < 1_000_000) "${bytes / 1000} KB" else "%.1f MB".format(bytes / 1e6)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     private fun vbox() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

@@ -126,6 +126,42 @@ object Dns {
         return Question(sb.toString().lowercase(), Packets.u16(msg, p), p + 4)
     }
 
+    /** IP addresses in the answer section of a DNS response (A and AAAA records). */
+    fun answerAddresses(msg: ByteArray): List<String> {
+        try {
+            if (msg.size < 12) return emptyList()
+            val qd = Packets.u16(msg, 4)
+            val an = Packets.u16(msg, 6)
+            var p = 12
+            repeat(qd) { p = skipName(msg, p) + 4 }
+            val out = ArrayList<String>(an)
+            repeat(an) {
+                p = skipName(msg, p)
+                val type = Packets.u16(msg, p)
+                val rdLen = Packets.u16(msg, p + 8)
+                val rd = p + 10
+                if (rd + rdLen > msg.size) return out
+                if ((type == TYPE_A && rdLen == 4) || (type == TYPE_AAAA && rdLen == 16)) {
+                    java.net.InetAddress.getByAddress(msg.copyOfRange(rd, rd + rdLen)).hostAddress?.let { out.add(it) }
+                }
+                p = rd + rdLen
+            }
+            return out
+        } catch (_: Exception) {
+            return emptyList()
+        }
+    }
+
+    private fun skipName(msg: ByteArray, start: Int): Int {
+        var p = start
+        while (true) {
+            val l = msg[p].toInt() and 0xff
+            if (l == 0) return p + 1
+            if ((l and 0xC0) == 0xC0) return p + 2
+            p += 1 + l
+        }
+    }
+
     /**
      * Answer for a blocked domain: 0.0.0.0 / :: for address lookups (so the page fails
      * instantly instead of retrying), and an empty answer for every other record type.

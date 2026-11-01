@@ -96,6 +96,10 @@ class Settings(ctx: Context) {
     var lastUpdate: Long
         get() = p.getLong("last_update", 0)
         set(v) = p.edit().putLong("last_update", v).apply()
+    /** Send every app's traffic through BlockBridge (needs the native tunnel engine). */
+    var fullTunnel: Boolean
+        get() = p.getBoolean("full_tunnel", true)
+        set(v) = p.edit().putBoolean("full_tunnel", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()
@@ -139,6 +143,7 @@ class Settings(ctx: Context) {
 /** Upstream DNS servers that allowed lookups are forwarded to. */
 object Upstream {
     @Volatile var servers: List<InetAddress> = defaults()
+    @Volatile var port: Int = 53
 
     private fun defaults() = listOf(InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)))
     private val NUMERIC = Regex("^[0-9a-fA-F:.]+$")

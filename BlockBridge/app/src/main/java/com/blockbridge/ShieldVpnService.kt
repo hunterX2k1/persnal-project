@@ -14,8 +14,7 @@ import android.system.StructPollfd
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import java.net.InetAddress
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
@@ -39,7 +38,12 @@ class ShieldVpnService : VpnService() {
         @Volatile var isRunning = false
             private set
         @Volatile var lastError: String? = null
+        /** True when every app's traffic goes through BlockBridge (not only DNS). */
+        @Volatile var fullTunnel = false
+            private set
     }
+
+    private var socks: Socks5Server? = null
 
     @Volatile private var running = false
     private var tun: ParcelFileDescriptor? = null
@@ -61,12 +65,19 @@ class ShieldVpnService : VpnService() {
 
     private fun start() {
         if (running) return
+        val settings = Settings(this)
+        val full = settings.fullTunnel && HevTunnel.available
+        val v6 = !full || hasIpv6()
         val builder = Builder()
             .setSession("BlockBridge")
-            .setMtu(1500)
-            .addAddress(ADDR4, 24).addDnsServer(DNS4).addRoute(DNS4, 32)
-            .addAddress(ADDR6, 64).addDnsServer(DNS6).addRoute(DNS6, 128)
-            .setConfigureIntent(
+            .setMtu(if (full) 8500 else 1500)
+            .addAddress(ADDR4, 24).addDnsServer(DNS4)
+        if (full) builder.addRoute("0.0.0.0", 0) else builder.addRoute(DNS4, 32)
+        if (v6) {
+            builder.addAddress(ADDR6, 64).addDnsServer(DNS6)
+            if (full) builder.addRoute("::", 0) else builder.addRoute(DNS6, 128)
+        }
+        builder.setConfigureIntent(
                 PendingIntent.getActivity(
                     this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
                 )
@@ -89,7 +100,28 @@ class ShieldVpnService : VpnService() {
         running = true
         isRunning = true
         lastError = null
-        Settings(this).wantRunning = true
+        settings.wantRunning = true
+        thread(name = "blockbridge-lists") {
+            Blocklists.loadAll(this)
+            if (Blocklists.needsUpdate(this)) runCatching { Blocklists.update(this, force = true) }
+        }
+
+        if (full) {
+            // Every app -> tunnel -> hev-socks5-tunnel -> Socks5Server -> internet
+            val localDns = setOf(InetAddress.getByName(DNS4), InetAddress.getByName(DNS6))
+            val server = Socks5Server { it in localDns }.start()
+            socks = server
+            val conf = java.io.File(filesDir, "tunnel.yml").apply { writeText(HevTunnel.config(server, v6)) }
+            if (HevTunnel.start(conf.path, iface.fd)) {
+                fullTunnel = true
+                return
+            }
+            lastError = "Full-traffic engine failed to start; using DNS-only filtering."
+            shutdown(); stopSelf()
+            return
+        }
+
+        fullTunnel = false
         pool = Executors.newFixedThreadPool(24)
         loop = thread(name = "blockbridge-dns") {
             try {
@@ -100,10 +132,14 @@ class ShieldVpnService : VpnService() {
                 if (running) { shutdown(); stopSelf() }
             }
         }
-        thread(name = "blockbridge-lists") {
-            Blocklists.loadAll(this)
-            if (Blocklists.needsUpdate(this)) runCatching { Blocklists.update(this, force = true) }
-        }
+    }
+
+    /** Only route IPv6 into the tunnel when the real network has it, so apps don't wait on it. */
+    @Suppress("DEPRECATION")
+    private fun hasIpv6(): Boolean {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val lp = cm.activeNetwork?.let { cm.getLinkProperties(it) } ?: return false
+        return lp.routes.any { it.isDefaultRoute && it.destination.address is java.net.Inet6Address }
     }
 
     private fun readLoop(iface: ParcelFileDescriptor) {
@@ -129,39 +165,12 @@ class ShieldVpnService : VpnService() {
     private fun handle(buf: ByteArray, len: Int) {
         val pkt = Packets.parseUdp(buf, len) ?: return
         if (pkt.dstPort != 53) return
-        val q = Dns.parseQuestion(pkt.payload)
-        if (q != null) {
-            val verdict = Filter.match(q.name)
-            Stats.record(q.name, verdict)
-            if (verdict.blocked) {
-                write(Packets.buildReply(pkt, Dns.blockedReply(pkt.payload, q)))
-                return
-            }
-        }
         try {
-            pool?.execute { forward(pkt) }
-        } catch (_: Exception) { /* shutting down */ }
-    }
-
-    /** Sends an allowed lookup to the real DNS server, trying the backup if needed. */
-    private fun forward(pkt: UdpPacket) {
-        for (server in Upstream.servers) {
-            if (!running) return
-            try {
-                DatagramSocket().use { sock ->
-                    protect(sock) // keep this socket outside the tunnel
-                    sock.soTimeout = 4000
-                    sock.send(DatagramPacket(pkt.payload, pkt.payload.size, server, 53))
-                    val rb = ByteArray(4096)
-                    val rp = DatagramPacket(rb, rb.size)
-                    sock.receive(rp)
-                    write(Packets.buildReply(pkt, rb.copyOf(rp.length)))
-                }
-                return
-            } catch (_: IOException) {
-                // try next server
+            pool?.execute {
+                val resp = DnsHandler.handle(pkt.payload) ?: return@execute
+                write(Packets.buildReply(pkt, resp))
             }
-        }
+        } catch (_: Exception) { /* shutting down */ }
     }
 
     private fun write(packet: ByteArray) {
@@ -173,6 +182,9 @@ class ShieldVpnService : VpnService() {
     private fun shutdown() {
         running = false
         isRunning = false
+        if (fullTunnel) HevTunnel.stop()
+        fullTunnel = false
+        socks?.close(); socks = null
         pool?.shutdownNow(); pool = null
         synchronized(writeLock) { output = null }
         runCatching { tun?.close() }; tun = null
