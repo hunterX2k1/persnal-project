@@ -231,6 +231,8 @@ object Filter {
         private set
     @Volatile var listsLoaded = false
         private set
+    /** The ad-block switch. Off = nothing is blocked (the VPN keeps working). */
+    @Volatile var enabled = true
 
     val blockCount: Int get() = lists.size
 
@@ -240,6 +242,7 @@ object Filter {
     fun isBlocked(name: String) = match(name).blocked
 
     fun match(name: String): Verdict {
+        if (!enabled) return NONE
         val d = name.lowercase().trimEnd('.')
         if (d.isEmpty()) return NONE
         val chain = ArrayList<String>(6)

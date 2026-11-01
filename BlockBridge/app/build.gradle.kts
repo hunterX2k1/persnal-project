@@ -22,8 +22,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "4.0"
+        versionCode = 5
+        versionName = "5.0"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -78,6 +78,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -85,6 +89,8 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Renders real screens on the JVM for screenshot checks (test only, not in the APK)
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 // Cross-compiles bbwg for each ABI with the NDK's clang (cgo), output as lib/<abi>/libbbwg.so.
@@ -117,3 +123,14 @@ val buildBbwg by tasks.registering {
     }
 }
 tasks.named("preBuild") { dependsOn(buildBbwg) }
+
+// ./gradlew testDebugUnitTest -Dbb.shots=/some/dir renders screenshots (ScreenshotTest).
+// Robolectric downloads the Android system jar it renders with; use Google's Maven Central
+// mirror (repo1.maven.org rate-limits that large download).
+val shotsDir: String = System.getProperty("bb.shots") ?: ""
+tasks.withType<Test>().configureEach {
+    systemProperty("bb.shots", shotsDir)
+    if (shotsDir.isNotEmpty()) {
+        systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
+    }
+}

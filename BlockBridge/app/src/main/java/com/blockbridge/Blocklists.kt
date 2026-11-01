@@ -100,6 +100,14 @@ class Settings(ctx: Context) {
     var fullTunnel: Boolean
         get() = p.getBoolean("full_tunnel", true)
         set(v) = p.edit().putBoolean("full_tunnel", v).apply()
+    /** The ad-block switch (uBO filtering on/off). */
+    var adBlockEnabled: Boolean
+        get() = p.getBoolean("adblock_enabled", true)
+        set(v) = p.edit().putBoolean("adblock_enabled", v).apply()
+    /** Show the control-center notification while the app or protection is running. */
+    var controlNotification: Boolean
+        get() = p.getBoolean("control_notification", true)
+        set(v) = p.edit().putBoolean("control_notification", v).apply()
     /** Send traffic out through the selected VPN server (VPN tab). */
     var vpnEnabled: Boolean
         get() = p.getBoolean("vpn_enabled", false)
@@ -188,6 +196,7 @@ object Blocklists {
     /** Loads everything saved on disk (used at app/VPN start). */
     fun loadAll(ctx: Context) {
         val s = Settings(ctx)
+        Filter.enabled = s.adBlockEnabled
         Upstream.reload(s)
         loadUserRules(s)
         synchronized(lock) {

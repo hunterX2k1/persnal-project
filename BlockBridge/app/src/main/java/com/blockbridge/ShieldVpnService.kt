@@ -43,6 +43,20 @@ class ShieldVpnService : VpnService() {
         /** True when every app's traffic goes through BlockBridge (not only DNS). */
         @Volatile var fullTunnel = false
             private set
+        @Volatile var instance: ShieldVpnService? = null
+            private set
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
+    /** Emergency kill: tear everything down right now, on the calling thread. */
+    fun emergencyStop() {
+        Settings(this).wantRunning = false
+        shutdown()
+        stopSelf()
     }
 
     private var socks: Socks5Server? = null
@@ -132,6 +146,7 @@ class ShieldVpnService : VpnService() {
         isRunning = true
         lastError = null
         settings.wantRunning = true
+        ControlService.show(this)
         thread(name = "blockbridge-lists") {
             Blocklists.loadAll(this)
             if (Blocklists.needsUpdate(this)) runCatching { Blocklists.update(this, force = true) }
@@ -241,6 +256,7 @@ class ShieldVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        instance = null
         shutdown()
         super.onDestroy()
     }

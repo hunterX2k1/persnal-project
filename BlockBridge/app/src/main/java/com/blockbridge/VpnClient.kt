@@ -93,7 +93,9 @@ object VpnClient {
     private val rnd = SecureRandom()
 
     private fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so")
-    fun available(ctx: Context) = binary(ctx).canExecute()
+    /** Screenshot tests only: draw the VPN screens without the native engines. */
+    @Volatile var previewEngines = false
+    fun available(ctx: Context) = previewEngines || binary(ctx).canExecute()
 
     @Synchronized
     fun start(ctx: Context, profile: VpnProfile): SocksUpstream? {

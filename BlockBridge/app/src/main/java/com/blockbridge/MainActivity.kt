@@ -3,7 +3,7 @@ package com.blockbridge
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.VpnService
@@ -18,33 +18,71 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.HorizontalScrollView
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import java.lang.ref.WeakReference
 import kotlin.concurrent.thread
 
-/** Dashboard laid out like uBlock Origin's: Filter lists, My filters, Trusted sites, Logger, Settings. */
+/**
+ * BlockBridge's dashboard: Home (power, ad-block and VPN switches, live stats), Filters
+ * (uBO lists, My filters, Trusted sites), VPN, Logger and Settings.
+ */
 class MainActivity : Activity() {
-    private companion object {
-        const val REQ_VPN = 1
-        const val REQ_IMPORT = 2
-        val RED = Color.parseColor("#E53935")
-        val GREEN = Color.parseColor("#43A047")
-        val AMBER = Color.parseColor("#F9A825")
-        val TABS = listOf("Filter lists", "My filters", "Trusted sites", "Logger", "Settings", "VPN")
+    companion object {
+        const val EXTRA_START = "start"
+        const val EXTRA_TAB = "tab"
+        const val TAB_HOME = 0
+        const val TAB_FILTERS = 1
+        const val TAB_VPN = 2
+        const val TAB_LOGGER = 3
+        const val TAB_SETTINGS = 4
+        private const val REQ_VPN = 1
+        private const val REQ_IMPORT = 2
+        private const val REQ_NOTIF = 3
+        private val RED = Palette.BAD
+        private val GREEN = Palette.GOOD
+        private val AMBER = Palette.WARN
+        private val NAV = listOf(
+            "Home" to R.drawable.ic_home, "Filters" to R.drawable.ic_filter, "VPN" to R.drawable.ic_globe,
+            "Logger" to R.drawable.ic_log, "Settings" to R.drawable.ic_tune,
+        )
     }
 
     private lateinit var settings: Settings
-    private lateinit var statusText: TextView
-    private lateinit var toggleBtn: Button
-    private lateinit var statsText: TextView
-    private lateinit var warnText: TextView
-    private lateinit var tabBar: LinearLayout
+    private lateinit var scroll: ScrollView
     private lateinit var content: LinearLayout
+    private lateinit var navBar: LinearLayout
     private val pages = HashMap<Int, View>()
     private var currentTab = 0
+
+    // Home
+    private lateinit var power: PowerButton
+    private lateinit var heroTitle: TextView
+    private lateinit var heroSub: TextView
+    private lateinit var liveChip: TextView
+    private lateinit var adSwitch: Switch
+    private lateinit var adSub: TextView
+    private lateinit var vpnSwitch: Switch
+    private lateinit var vpnSub: TextView
+    private lateinit var tileBlocked: TextView
+    private lateinit var tileLookups: TextView
+    private lateinit var tileData: TextView
+    private lateinit var tileDataLabel: TextView
+    private lateinit var spark: Sparkline
+    private lateinit var recentBlocked: LinearLayout
+    private lateinit var warnText: TextView
+    private var lastTotal = -1L
+    private var lastBlocked = -1L
+    private var syncing = false
+
+    // Filters
+    private var filterSub = 0
+    private val filterPages = HashMap<Int, View>()
 
     // Filter lists tab
     private lateinit var listInfo: TextView
@@ -81,48 +119,62 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = Settings(this)
-        val pad = dp(16)
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, 0)
-        }
-        statusText = TextView(this).apply {
-            textSize = 22f; setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
-        }
-        header.addView(statusText)
-        toggleBtn = Button(this).apply { textSize = 18f; setOnClickListener { toggle() } }
-        header.addView(toggleBtn, LinearLayout.LayoutParams(-1, dp(60)).apply { topMargin = dp(6) })
-        statsText = body("").apply { gravity = Gravity.CENTER }
-        header.addView(statsText)
-        warnText = body("").apply { setTextColor(AMBER); visibility = View.GONE }
-        header.addView(warnText)
-
-        tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        TABS.forEachIndexed { i, name ->
-            tabBar.addView(Button(this).apply {
-                text = name; isAllCaps = false; textSize = 14f
-                setOnClickListener { showTab(i) }
-            })
-        }
-        header.addView(HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(tabBar)
-        })
+        Emergency.activity = WeakReference(this)
+        Filter.enabled = settings.adBlockEnabled
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, dp(8), pad, pad * 2)
+            setPadding(dp(16), dp(12), dp(16), dp(24))
         }
-        val root = LinearLayout(this).apply {
+        scroll = ScrollView(this).apply { isFillViewport = true; addView(content) }
+        navBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(0xFF0E1426.toInt())
+            setPadding(dp(6), dp(6), dp(6), dp(8))
+            elevation = dp(8).toFloat()
+        }
+        NAV.forEachIndexed { i, (label, icon) ->
+            navBar.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(0, dp(4), 0, dp(2))
+                addView(ImageView(context).apply {
+                    setImageResource(icon)
+                    setPadding(dp(14), dp(4), dp(14), dp(4))
+                }, LinearLayout.LayoutParams(-2, dp(32)))
+                addView(TextView(context).apply { text = label; textSize = 11f; gravity = Gravity.CENTER })
+                setOnClickListener { showTab(i) }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(header)
-            addView(content)
-        }
-        setContentView(ScrollView(this).apply { addView(root) })
+            setBackgroundColor(Palette.BG)
+            addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(navBar, LinearLayout.LayoutParams(-1, -2))
+        })
 
-        showTab(savedInstanceState?.getInt("tab") ?: 0)
+        showTab(savedInstanceState?.getInt("tab") ?: TAB_HOME)
         thread { Blocklists.loadAll(applicationContext) }
+
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+        }
+        ControlService.show(this)
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(i: Intent?) {
+        if (i == null) return
+        if (i.hasExtra(EXTRA_TAB)) showTab(i.getIntExtra(EXTRA_TAB, TAB_HOME))
+        if (i.getBooleanExtra(EXTRA_START, false) && !ShieldVpnService.isRunning) toggle()
+        i.removeExtra(EXTRA_TAB); i.removeExtra(EXTRA_START)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -143,19 +195,300 @@ class MainActivity : Activity() {
 
     private fun showTab(i: Int) {
         currentTab = i
-        for (t in 0 until tabBar.childCount) tabBar.getChildAt(t).alpha = if (t == i) 1f else 0.55f
+        for (t in 0 until navBar.childCount) {
+            val item = navBar.getChildAt(t) as LinearLayout
+            val sel = t == i
+            val icon = item.getChildAt(0) as ImageView
+            icon.imageTintList = ColorStateList.valueOf(if (sel) Palette.CYAN else Palette.MUTED)
+            icon.background = if (sel) roundRect(0x3322D3EE, dp(16).toFloat()) else null
+            (item.getChildAt(1) as TextView).setTextColor(if (sel) Palette.CYAN else Palette.MUTED)
+        }
         content.removeAllViews()
         content.addView(pages.getOrPut(i) {
             when (i) {
-                0 -> buildListsPage()
-                1 -> buildMyFiltersPage()
-                2 -> buildTrustedPage()
-                3 -> buildLoggerPage()
-                4 -> buildSettingsPage()
-                else -> buildVpnPage()
+                TAB_HOME -> buildHomePage()
+                TAB_FILTERS -> buildFiltersPage()
+                TAB_VPN -> buildVpnPage()
+                TAB_LOGGER -> buildLoggerPage()
+                else -> buildSettingsPage()
             }
         })
-        if (i == 3) { shownVersion = -1; refresh() }
+        scroll.scrollTo(0, 0)
+        if (i == TAB_LOGGER) shownVersion = -1
+        refresh()
+    }
+
+    // ---------------- Home ----------------
+
+    private fun buildHomePage(): View {
+        val page = vbox()
+
+        // top bar
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        top.addView(TextView(this).apply {
+            text = "BlockBridge"; textSize = 26f; setTypeface(Typeface.DEFAULT_BOLD)
+            letterSpacing = -0.02f; brandGradient()
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        liveChip = TextView(this).apply {
+            textSize = 11f; setTypeface(Typeface.DEFAULT_BOLD); letterSpacing = 0.08f
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+        }
+        top.addView(liveChip)
+        page.addView(top)
+        page.addView(small("uBlock Origin filters · WireGuard VPN · all apps").apply { setPadding(0, 0, 0, dp(12)) })
+
+        // hero
+        val hero = card().apply {
+            background = gradientRect(dp(24).toFloat(), 0xFF141B33.toInt(), 0xFF1A1440.toInt())
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        power = PowerButton(this).apply { setOnClickListener { toggle() } }
+        hero.addView(power)
+        heroTitle = TextView(this).apply { textSize = 24f; setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER }
+        heroSub = TextView(this).apply { textSize = 13f; setTextColor(Palette.MUTED); gravity = Gravity.CENTER }
+        hero.addView(heroTitle)
+        hero.addView(heroSub)
+        page.addView(hero, cardParams())
+
+        // switches
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val (adCard, aSw, aSub) = toggleCard(R.drawable.ic_shield, "Ad block", Palette.GOOD) { on ->
+            settings.adBlockEnabled = on
+            Filter.enabled = on
+            ControlService.refresh(this)
+        }
+        adSwitch = aSw; adSub = aSub
+        val (vpnCard, vSw, vSub) = toggleCard(R.drawable.ic_globe, "VPN", Palette.VIOLET) { on ->
+            if (on && VpnProfiles.selected(this) == null) {
+                syncing = true; vpnSwitch.isChecked = false; syncing = false
+                toast("Add a VPN server first")
+                showTab(TAB_VPN)
+                return@toggleCard
+            }
+            settings.vpnEnabled = on
+            if (::vpnToggle.isInitialized) { syncing = true; vpnToggle.isChecked = on; syncing = false }
+            applyVpn()
+            ControlService.refresh(this)
+        }
+        vpnSwitch = vSw; vpnSub = vSub
+        row.addView(adCard, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+        row.addView(vpnCard, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
+        page.addView(row, cardParams())
+
+        // stat tiles
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun tile(label: String, color: Int, gap: Boolean): Pair<TextView, TextView> {
+            val t = card().apply { setPadding(dp(14), dp(14), dp(14), dp(14)) }
+            val v = TextView(this).apply { textSize = 20f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(color); maxLines = 1 }
+            val l = TextView(this).apply { text = label; textSize = 11f; setTextColor(Palette.MUTED); letterSpacing = 0.06f }
+            t.addView(v); t.addView(l)
+            tiles.addView(t, LinearLayout.LayoutParams(0, -2, 1f).apply { if (gap) marginStart = dp(10) })
+            return v to l
+        }
+        tileBlocked = tile("BLOCKED", Palette.BAD, false).first
+        tileLookups = tile("LOOKUPS", Palette.CYAN, true).first
+        tile("DATA", Palette.VIOLET, true).let { tileData = it.first; tileDataLabel = it.second }
+        page.addView(tiles, cardParams())
+
+        // live chart
+        val chart = card()
+        val chartHead = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        chartHead.addView(cardTitle("Live activity"), LinearLayout.LayoutParams(0, -2, 1f))
+        chartHead.addView(small("● lookups").apply { setTextColor(Palette.CYAN) })
+        chartHead.addView(small("   ● blocked").apply { setTextColor(Palette.BAD) })
+        chart.addView(chartHead)
+        spark = Sparkline(this)
+        chart.addView(spark, LinearLayout.LayoutParams(-1, dp(110)).apply { topMargin = dp(10) })
+        page.addView(chart, cardParams())
+
+        // recently blocked
+        val recent = card()
+        recent.addView(cardTitle("Recently blocked"))
+        recentBlocked = vbox()
+        recent.addView(recentBlocked)
+        page.addView(recent, cardParams())
+
+        warnText = body("").apply {
+            setTextColor(Palette.WARN)
+            background = roundRect(0x22FBBF24, dp(16).toFloat(), 0x55FBBF24, dp(1))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            visibility = View.GONE
+        }
+        page.addView(warnText, cardParams())
+
+        // emergency kill
+        val kill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = ripple(roundRect(0x22EF4444, dp(18).toFloat(), Palette.DANGER, dp(1)), dp(18).toFloat())
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            isClickable = true
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Emergency kill?")
+                    .setMessage("Stops protection and the VPN, removes the notification and closes BlockBridge completely.")
+                    .setPositiveButton("Kill now") { _, _ -> Emergency.killEverything(this@MainActivity) }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        kill.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_bolt); imageTintList = ColorStateList.valueOf(Palette.DANGER)
+        }, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val killText = vbox().apply { setPadding(dp(12), 0, 0, 0) }
+        killText.addView(TextView(this).apply {
+            text = "Emergency kill"; textSize = 16f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.DANGER)
+        })
+        killText.addView(small("Stop everything and close the app instantly"))
+        kill.addView(killText)
+        page.addView(kill, cardParams())
+        return page
+    }
+
+    /** A card with an icon, a title, a status line and a switch. Tapping the card flips it. */
+    private fun toggleCard(icon: Int, title: String, color: Int, onChange: (Boolean) -> Unit): Triple<View, Switch, TextView> {
+        val c = card().apply { setPadding(dp(14), dp(14), dp(14), dp(14)) }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(ImageView(this).apply {
+            setImageResource(icon); imageTintList = ColorStateList.valueOf(color)
+            background = roundRect((color and 0x00FFFFFF) or 0x26000000, dp(12).toFloat())
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        head.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val sw = Switch(this).apply {
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(states, intArrayOf(color, Palette.MUTED))
+            trackTintList = ColorStateList(states, intArrayOf((color and 0x00FFFFFF) or 0x66000000, Palette.STROKE))
+            setOnCheckedChangeListener { _, on -> if (!syncing) onChange(on) }
+        }
+        head.addView(sw)
+        c.addView(head)
+        c.addView(TextView(this).apply {
+            text = title; textSize = 16f; setTypeface(Typeface.DEFAULT_BOLD); setPadding(0, dp(10), 0, 0)
+        })
+        val sub = small("")
+        sub.maxLines = 2
+        c.addView(sub)
+        c.isClickable = true
+        c.setOnClickListener { sw.toggle() }
+        return Triple(c, sw, sub)
+    }
+
+    private fun refreshHome(on: Boolean) {
+        if (!::power.isInitialized) return
+        val vpnWanted = settings.vpnEnabled
+        val vpnUp = vpnWanted && on && VpnClient.lastHandshake > 0
+        power.on = on
+        power.busy = on && vpnWanted && !vpnUp
+        heroTitle.text = when {
+            !on -> "Not protected"
+            vpnWanted && !vpnUp -> "Connecting…"
+            else -> "Protected"
+        }
+        heroTitle.setTextColor(if (on) Palette.TEXT else Palette.MUTED)
+        heroSub.text = ShieldVpnService.lastError ?: when {
+            !on -> "Tap the button to turn BlockBridge on"
+            else -> listOfNotNull(
+                if (ShieldVpnService.fullTunnel) "All app traffic" else "DNS filtering",
+                if (settings.adBlockEnabled) "ads blocked" else "ads allowed",
+                if (vpnWanted) VpnProfiles.selected(this)?.let { "${Flags.of(it.name)} ${it.name}" } else null,
+            ).joinToString(" · ")
+        }
+        liveChip.text = if (on) "● LIVE" else "● OFF"
+        liveChip.setTextColor(if (on) Palette.GOOD else Palette.MUTED)
+        liveChip.background = roundRect(if (on) 0x2234D399 else 0x228A94B3, dp(99).toFloat())
+
+        syncing = true
+        adSwitch.isChecked = settings.adBlockEnabled
+        vpnSwitch.isChecked = vpnWanted
+        syncing = false
+        adSub.text = if (settings.adBlockEnabled) "%,d hostnames".format(Filter.blockCount) else "Paused — ads allowed"
+        val server = VpnProfiles.selected(this)
+        vpnSub.text = when {
+            server == null -> "No server yet"
+            !vpnWanted -> "${Flags.of(server.name)} ${server.name} · off"
+            vpnUp -> "${Flags.of(server.name)} ${server.name}"
+            on -> "Connecting to ${server.name}…"
+            else -> "${Flags.of(server.name)} ${server.name} · waiting"
+        }
+
+        val total = Stats.total.get()
+        val blocked = Stats.blocked.get()
+        tileBlocked.text = compact(blocked)
+        tileLookups.text = compact(total)
+        if (ShieldVpnService.fullTunnel) {
+            tileData.text = mb(TrafficStats.bytesUp.get() + TrafficStats.bytesDown.get())
+            tileDataLabel.text = "DATA · ${TrafficStats.active.get()} OPEN"
+        } else {
+            tileData.text = "—"; tileDataLabel.text = "DATA"
+        }
+        if (lastTotal >= 0) spark.push((total - lastTotal).toFloat(), (blocked - lastBlocked).toFloat())
+        lastTotal = total; lastBlocked = blocked
+
+        if (Stats.version != shownVersion || recentBlocked.childCount == 0) {
+            if (currentTab == TAB_HOME) shownVersion = Stats.version
+            recentBlocked.removeAllViews()
+            val items = Stats.recent().filter { it.blocked }.take(5)
+            if (items.isEmpty()) recentBlocked.addView(small("Nothing blocked yet.").apply { setPadding(0, dp(8), 0, 0) })
+            for (e in items) {
+                val r = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(8), 0, 0)
+                }
+                r.addView(View(this).apply { background = roundRect(Palette.BAD, dp(4).toFloat()) },
+                    LinearLayout.LayoutParams(dp(8), dp(8)))
+                r.addView(TextView(this).apply {
+                    text = e.domain; textSize = 13f; maxLines = 1; setPadding(dp(10), 0, dp(8), 0)
+                    ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                r.addView(small(Catalog.title(this, e.by)).apply { maxLines = 1; textSize = 11f })
+                recentBlocked.addView(r)
+            }
+        }
+    }
+
+    private fun compact(n: Long) = when {
+        n >= 1_000_000 -> "%.1fM".format(n / 1e6)
+        n >= 10_000 -> "%.1fk".format(n / 1e3)
+        else -> "%,d".format(n)
+    }
+
+    // ---------------- Filters (lists / my filters / trusted) ----------------
+
+    private fun buildFiltersPage(): View {
+        val page = vbox()
+        page.addView(pageTitle("Filters", "uBlock Origin's lists and your own rules"))
+        val seg = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = roundRect(Palette.SURFACE, dp(99).toFloat(), Palette.STROKE, dp(1))
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        val holder = FrameLayout(this)
+        val labels = listOf("Lists", "My filters", "Trusted")
+        fun select(i: Int) {
+            filterSub = i
+            for (k in 0 until seg.childCount) {
+                val t = seg.getChildAt(k) as TextView
+                val on = k == i
+                t.background = if (on) gradientRect(dp(99).toFloat(), Palette.CYAN, Palette.VIOLET) else null
+                t.setTextColor(if (on) Palette.BG else Palette.MUTED)
+            }
+            holder.removeAllViews()
+            holder.addView(filterPages.getOrPut(i) {
+                when (i) { 0 -> buildListsPage(); 1 -> buildMyFiltersPage(); else -> buildTrustedPage() }
+            })
+        }
+        labels.forEachIndexed { i, l ->
+            seg.addView(TextView(this).apply {
+                text = l; textSize = 13f; setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER
+                setPadding(0, dp(9), 0, dp(9))
+                setOnClickListener { select(i) }
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        page.addView(seg, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        page.addView(holder)
+        select(filterSub)
+        return page
     }
 
     // ---------------- Filter lists ----------------
@@ -265,6 +598,7 @@ class MainActivity : Activity() {
 
     private fun buildLoggerPage(): View {
         val page = vbox()
+        page.addView(pageTitle("Logger", "Every hostname your phone looks up, live"))
         page.addView(small("Every hostname looked up on this phone. Tap one to allow, block or trust it."))
         val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("All", "Blocked", "Allowed").forEachIndexed { i, label ->
@@ -337,6 +671,7 @@ class MainActivity : Activity() {
 
     private fun buildSettingsPage(): View {
         val page = vbox()
+        page.addView(pageTitle("Settings", "DNS, traffic mode, notification, backup"))
         page.addView(header("DNS server"))
         page.addView(small("Allowed lookups are sent here. 1.1.1.1 = Cloudflare, 8.8.8.8 = Google, 9.9.9.9 = Quad9."))
         up1Edit = singleLine(settings.upstream1, "Main")
@@ -373,6 +708,18 @@ class MainActivity : Activity() {
                     "Off: only DNS lookups pass through (lowest battery use)."
             else "This build doesn't include the full-traffic engine, so only DNS lookups are filtered."
         ))
+
+        page.addView(header("Control center"))
+        page.addView(CheckBox(this).apply {
+            text = "Show control-center notification"
+            isChecked = settings.controlNotification
+            setOnCheckedChangeListener { _, on ->
+                settings.controlNotification = on
+                if (on) ControlService.show(this@MainActivity) else ControlService.hide(this@MainActivity)
+            }
+        })
+        page.addView(small("Quick switches for protection, ad block and VPN, plus the emergency kill button, " +
+            "right in your notification shade."))
 
         page.addView(header("Backup"))
         page.addView(small("Selected lists, My filters and Trusted sites. Restore also accepts the " +
@@ -433,9 +780,10 @@ class MainActivity : Activity() {
 
     private fun buildVpnPage(): View {
         val page = vbox()
+        page.addView(pageTitle("VPN", "Browse from another country — ads stay blocked"))
         vpnStatus = body("").apply { setTypeface(typeface, Typeface.BOLD) }
         page.addView(vpnStatus)
-        if (!VpnClient.available(this) || !HevTunnel.available) {
+        if (!VpnClient.available(this) || !(HevTunnel.available || VpnClient.previewEngines)) {
             page.addView(body("This build doesn't include the VPN engine."))
             return page
         }
@@ -444,8 +792,10 @@ class MainActivity : Activity() {
             textSize = 16f
             isChecked = settings.vpnEnabled
             setOnCheckedChangeListener { _, on ->
+                if (syncing) return@setOnCheckedChangeListener
                 settings.vpnEnabled = on
                 applyVpn()
+                ControlService.refresh(this@MainActivity)
             }
         }
         page.addView(vpnToggle)
@@ -510,8 +860,9 @@ class MainActivity : Activity() {
         for (p in profiles) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             row.addView(TextView(this).apply {
-                text = "${if (p.id == selected) "◉" else "○"}  ${p.name}"
+                text = "${if (p.id == selected) "◉" else "○"}   ${Flags.of(p.name)}  ${p.name}"
                 textSize = 16f
+                setTextColor(if (p.id == selected) Palette.CYAN else Palette.TEXT)
                 setPadding(0, dp(10), 0, dp(10))
                 setOnClickListener {
                     VpnProfiles.select(this@MainActivity, p.id)
@@ -620,23 +971,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         val on = ShieldVpnService.isRunning
-        statusText.text = if (on) "🛡 Protection ON" else "Protection OFF"
-        statusText.setTextColor(if (on) GREEN else RED)
-        toggleBtn.text = if (on) "Turn off" else "Turn on"
-
-        val total = Stats.total.get()
-        val blocked = Stats.blocked.get()
-        val pct = if (total > 0) blocked * 100 / total else 0
-        statsText.text = ShieldVpnService.lastError
-            ?: buildString {
-                append("Lookups: ${"%,d".format(total)}   Blocked: ${"%,d".format(blocked)} ($pct%)")
-                if (ShieldVpnService.fullTunnel) {
-                    append("\nAll traffic • ${TrafficStats.active.get()} open connections • ")
-                    append("↑ ${mb(TrafficStats.bytesUp.get())} ↓ ${mb(TrafficStats.bytesDown.get())}")
-                    val refused = TrafficStats.blockedConnections.get()
-                    if (refused > 0) append("\n${"%,d".format(refused)} connections to blocked hosts refused")
-                } else if (on) append("\nDNS-only mode")
-            }
+        refreshHome(on)
 
         if (::vpnStatus.isInitialized) {
             vpnStatus.text = buildString {
@@ -656,7 +991,7 @@ class MainActivity : Activity() {
             }
             vpnStatus.setTextColor(
                 if (settings.vpnEnabled && on && VpnClient.lastHandshake > 0) GREEN
-                else if (settings.vpnEnabled && VpnClient.error != null) RED else statsText.currentTextColor
+                else if (settings.vpnEnabled && VpnClient.error != null) RED else Palette.TEXT
             )
         }
 
@@ -675,13 +1010,13 @@ class MainActivity : Activity() {
             }
         }
 
-        if (ticks++ % 5 == 0) {
+        if (ticks++ % 5 == 0 && ::warnText.isInitialized) {
             val w = privateDnsWarning()
             warnText.text = w ?: ""
             warnText.visibility = if (w == null) View.GONE else View.VISIBLE
         }
 
-        if (currentTab == 3 && Stats.version != shownVersion) {
+        if (currentTab == TAB_LOGGER && ::loggerBox.isInitialized && Stats.version != shownVersion) {
             shownVersion = Stats.version
             renderLogger()
         }
@@ -704,22 +1039,53 @@ class MainActivity : Activity() {
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     private fun vbox() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = roundRect(Palette.SURFACE, dp(20).toFloat(), Palette.STROKE, dp(1))
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+    }
+
+    private fun cardParams() = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+
+    private fun cardTitle(t: String) = TextView(this).apply {
+        text = t; textSize = 15f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
+    }
+
+    private fun pageTitle(t: String, sub: String) = vbox().apply {
+        setPadding(0, dp(4), 0, dp(14))
+        addView(TextView(context).apply { text = t; textSize = 26f; setTypeface(Typeface.DEFAULT_BOLD); brandGradient() })
+        addView(small(sub))
+    }
+
     private fun header(t: String) = TextView(this).apply {
-        text = t; textSize = 17f; setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(18), 0, dp(6))
+        text = t; textSize = 16f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
+        setPadding(0, dp(20), 0, dp(6))
     }
 
     private fun body(t: String) = TextView(this).apply {
-        text = t; textSize = 15f; setPadding(0, dp(6), 0, dp(6))
+        text = t; textSize = 14f; setTextColor(Palette.TEXT); setLineSpacing(0f, 1.15f)
+        setPadding(0, dp(6), 0, dp(6))
     }
 
     private fun small(t: String) = TextView(this).apply {
-        text = t; textSize = 13f; alpha = 0.75f
+        text = t; textSize = 12.5f; setTextColor(Palette.MUTED); setLineSpacing(0f, 1.1f)
     }
 
     private fun button(t: String, onClick: () -> Unit) = Button(this).apply {
-        text = t; isAllCaps = false; setOnClickListener { onClick() }
+        text = t; isAllCaps = false; textSize = 14f
+        setTypeface(Typeface.DEFAULT_BOLD)
+        setTextColor(Palette.TEXT)
+        stateListAnimator = null
+        // inset keeps side-by-side buttons from touching
+        background = android.graphics.drawable.InsetDrawable(
+            ripple(roundRect(Palette.SURFACE2, dp(14).toFloat(), Palette.STROKE, dp(1)), dp(14).toFloat()),
+            dp(4), dp(4), dp(4), dp(4),
+        )
+        minHeight = dp(52); minimumHeight = dp(52)
+        setOnClickListener { onClick() }
     }
+
+    private fun field() = roundRect(Palette.SURFACE2, dp(14).toFloat(), Palette.STROKE, dp(1))
 
     private fun multiline(value: String, hint: String) = EditText(this).apply {
         setText(value); this.hint = hint
@@ -727,6 +1093,8 @@ class MainActivity : Activity() {
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         minLines = 6; gravity = Gravity.TOP
         typeface = Typeface.MONOSPACE; textSize = 13f
+        setTextColor(Palette.TEXT); setHintTextColor(Palette.MUTED)
+        background = field(); setPadding(dp(12), dp(12), dp(12), dp(12))
         setHorizontallyScrolling(false)
     }
 
@@ -734,5 +1102,8 @@ class MainActivity : Activity() {
         setText(value); this.hint = hint
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         isSingleLine = true
+        setTextColor(Palette.TEXT); setHintTextColor(Palette.MUTED)
+        background = field(); setPadding(dp(12), dp(12), dp(12), dp(12))
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }
     }
 }
