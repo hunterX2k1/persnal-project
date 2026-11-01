@@ -75,6 +75,13 @@ class ControlService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every startForegroundService() must be answered with startForeground(), even when
+        // the service is already running — otherwise Android silently kills the whole app.
+        runCatching {
+            val n = build()
+            if (Build.VERSION.SDK_INT >= 34) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            else startForeground(ID, n)
+        }.onFailure { DiagLog.error("control", "startForeground failed", it) }
         val s = Settings(this)
         when (intent?.action) {
             ACTION_KILL -> { Emergency.killEverything(this); return START_NOT_STICKY }

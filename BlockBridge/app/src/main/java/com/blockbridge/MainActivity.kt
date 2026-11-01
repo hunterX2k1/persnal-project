@@ -169,6 +169,7 @@ class MainActivity : Activity() {
         }
         ControlService.show(this)
         ListUpdateJob.schedule(this)
+        CrashGuard.takeReport(this)?.let { showCrashReport(it) }
         Updates.checkDaily(this) { u -> runOnUiThread { offerUpdate(u) } }
         handleIntent(intent)
     }
@@ -865,6 +866,19 @@ class MainActivity : Activity() {
             "to Google) would skip the filters. This refuses those servers so they fall back to " +
             "BlockBridge. Needs all-traffic mode."))
 
+        page.addView(CheckBox(this).apply {
+            text = "Safe mode (DNS-only, no traffic engine)"
+            isChecked = settings.safeMode
+            setOnCheckedChangeListener { _, on ->
+                settings.safeMode = on
+                if (ShieldVpnService.isRunning) {
+                    startService(Intent(this@MainActivity, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_RESTART))
+                }
+            }
+        })
+        page.addView(small("Turned on automatically if starting protection crashed. Ad blocking still " +
+            "works; VPN servers, the network analyzer and split tunneling need it off."))
+
         page.addView(header("Control center"))
         page.addView(CheckBox(this).apply {
             text = "Show control-center notification"
@@ -914,7 +928,7 @@ class MainActivity : Activity() {
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_SUBJECT, "BlockBridge debug log")
-                putExtra(Intent.EXTRA_TEXT, diagnostics() + "\n\n" + DiagLog.text())
+                putExtra(Intent.EXTRA_TEXT, diagnostics() + "\n\n" + runCatching { CrashGuard.logFile.readText().takeLast(60_000) }.getOrDefault(DiagLog.text()))
             }, "Share debug log"))
         }, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(dRow)
@@ -1380,6 +1394,35 @@ class MainActivity : Activity() {
             "BlockBridge. Set Settings › Private DNS to Off or Automatic." else null
     }
 
+    // ---------------- crash reports ----------------
+
+    private fun showCrashReport(r: CrashGuard.Report) {
+        if (r.duringEngineStart && !settings.safeMode) {
+            settings.safeMode = true // next start uses DNS-only filtering
+        }
+        AlertDialog.Builder(this)
+            .setTitle("BlockBridge stopped unexpectedly")
+            .setMessage(
+                (if (r.duringEngineStart) "It happened while starting the all-traffic engine, so Safe mode " +
+                    "(DNS-only ad blocking) is now on — protection will start normally. " else "") +
+                    "Please share this report so it can be fixed.\n\n" + r.text.take(1500)
+            )
+            .setPositiveButton("Share report") { _, _ ->
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "BlockBridge crash report")
+                    putExtra(Intent.EXTRA_TEXT, r.text)
+                }, "Share crash report"))
+            }
+            .setNeutralButton("Copy") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("BlockBridge crash", r.text))
+                toast("Copied")
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     // ---------------- updates ----------------
 
     private fun offerUpdate(u: Updates.Available) {
@@ -1401,7 +1444,7 @@ class MainActivity : Activity() {
     internal fun diagnostics(): String = buildString {
         val info = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
         appendLine("BlockBridge ${info?.versionName} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL}")
-        appendLine("Protection: ${if (ShieldVpnService.isRunning) "on" else "off"} · mode: ${if (ShieldVpnService.fullTunnel) "all traffic" else "DNS only"}")
+        appendLine("Protection: ${if (ShieldVpnService.isRunning) "on" else "off"} · mode: ${if (ShieldVpnService.fullTunnel) "all traffic" else "DNS only"}${if (settings.safeMode) " (safe mode)" else ""}")
         ShieldVpnService.lastError?.let { appendLine("Last error: $it") }
         appendLine("Engines: tunnel ${if (HevTunnel.available) "ok" else "missing"} · WireGuard ${if (VpnClient.available(this@MainActivity)) "ok" else "missing"}")
         appendLine("Filters: ${Filter.blockCount} hostnames · ad block ${if (Filter.enabled) "on" else "off"} · DoH guard ${if (DohGuard.enabled) "on" else "off"}")

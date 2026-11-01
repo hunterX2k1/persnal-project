@@ -10,12 +10,21 @@ object DiagLog {
     class Line(val time: Long, val tag: String, val msg: String)
 
     private val lines = ArrayDeque<Line>()
+    @Volatile private var file: java.io.File? = null
+
+    /** Also append every line to [f] (kept under ~200 KB) so it survives crashes. */
+    fun persistTo(f: java.io.File) {
+        file = f
+        runCatching { if (f.length() > 200_000) f.writeText(f.readText().takeLast(100_000)) }
+    }
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     fun add(tag: String, msg: String) {
         synchronized(lines) {
-            lines.addLast(Line(System.currentTimeMillis(), tag, msg.take(500)))
+            val l = Line(System.currentTimeMillis(), tag, msg.take(500))
+            lines.addLast(l)
             while (lines.size > 400) lines.removeFirst()
+            file?.let { f -> runCatching { f.appendText("${fmt.format(Date(l.time))} [${l.tag}] ${l.msg}\n") } }
         }
     }
 

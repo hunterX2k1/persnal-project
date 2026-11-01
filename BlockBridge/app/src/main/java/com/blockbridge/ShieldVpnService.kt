@@ -244,7 +244,9 @@ class ShieldVpnService : VpnService() {
         if (running) return
         val settings = Settings(this)
         // A VPN server needs every connection to pass through, so it forces full mode.
-        val full = (settings.fullTunnel || settings.vpnEnabled) && HevTunnel.available
+        val full = (settings.fullTunnel || settings.vpnEnabled) && HevTunnel.available && !settings.safeMode
+        DiagLog.add("tunnel", "starting: ${if (full) "all traffic" else "DNS only"}${if (settings.safeMode) " (safe mode)" else ""}, " +
+            "engine ${if (HevTunnel.available) "loaded" else "missing"}")
         val v6 = !full || hasIpv6()
         val builder = Builder()
             .setSession("BlockBridge")
@@ -299,7 +301,11 @@ class ShieldVpnService : VpnService() {
             socks = server
             val conf = java.io.File(filesDir, "tunnel.yml").apply { writeText(HevTunnel.config(server, v6)) }
             if (settings.vpnEnabled) DnsHandler.requireVia = true
+            CrashGuard.markStarting(this, true)
+            DiagLog.add("tunnel", "starting hev on fd ${iface.fd}")
             if (HevTunnel.start(conf.path, iface.fd)) {
+                // Survived the risky part; clear the marker after it has run a little.
+                android.os.Handler(mainLooper).postDelayed({ CrashGuard.markStarting(this, false) }, 15_000)
                 fullTunnel = true
                 DiagLog.add("tunnel", "full-traffic mode up (IPv6 ${if (v6) "on" else "off"})")
                 startSupervisor()
@@ -307,6 +313,7 @@ class ShieldVpnService : VpnService() {
                 if (settings.vpnEnabled) thread(name = "blockbridge-vpn") { applyVpn() }
                 return
             }
+            CrashGuard.markStarting(this, false)
             DiagLog.add("tunnel", "hev failed to start")
             lastError = "Full-traffic engine failed to start. Turn off \"Send all app traffic\" " +
                 "and the VPN in Settings, then try again."

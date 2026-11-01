@@ -139,6 +139,10 @@ class Settings(ctx: Context) {
     var torBridgeLines: String
         get() = p.getString("tor_bridge_lines", "")!!
         set(v) = p.edit().putString("tor_bridge_lines", v).apply()
+    /** Safe mode: DNS-only filtering, no native traffic engine (used after a crash). */
+    var safeMode: Boolean
+        get() = p.getBoolean("safe_mode", false)
+        set(v) = p.edit().putBoolean("safe_mode", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()
