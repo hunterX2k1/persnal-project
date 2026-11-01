@@ -89,8 +89,8 @@ games can show their reward ads. The tunnel is rebuilt automatically when the li
 
 ## Free VPN exits: Tor
 
-**VPN › Add Tor** runs Tor inside the app (Guardian Project `tor-android` 0.4.9.5, the newest
-release that builds with this project's Android Gradle plugin) with an optional exit country.
+**VPN › Add Tor** runs Tor inside the app (Guardian Project `tor-android` 0.4.9.14) with an
+optional exit country.
 Ad blocking still applies; DNS goes through Tor's DNSPort. Tor carries TCP only, is slower than a
 VPN, and some sites show CAPTCHAs to Tor users.
 
@@ -108,6 +108,10 @@ VPN, and some sites show CAPTCHAs to Tor users.
 * Keep it always on: Android Settings › Network › VPN › BlockBridge › ⚙ › **Always-on VPN**.
 
 ## Build locally
+
+Requires JDK 17+ (21 recommended), Android SDK platform 37.1 + build-tools 37, NDK 27.2, and Go
+for the VPN helper. Built with Android Gradle Plugin 9.5 (built-in Kotlin 2.4) and Gradle 9.8.
+
 
 ```
 cd BlockBridge

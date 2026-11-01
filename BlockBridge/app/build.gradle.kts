@@ -1,6 +1,5 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("com.android.application") // AGP 9 compiles Kotlin itself (built-in Kotlin)
 }
 
 // Full-traffic mode uses hev-socks5-tunnel (MIT) from src/main/jni/hev-socks5-tunnel.
@@ -16,14 +15,17 @@ val wgOut = layout.buildDirectory.dir("bbwg/jniLibs")
 
 android {
     namespace = "com.blockbridge"
-    compileSdk = 35
+    // tor-android 0.4.9.6+ requires compiling against Android 37.1
+    compileSdk {
+        version = release(37) { minorApiLevel = 1 }
+    }
 
     defaultConfig {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "6.0"
+        versionCode = 7
+        versionName = "6.1"
 
         if (hasHev) {
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -71,7 +73,7 @@ android {
         jniLibs { useLegacyPackaging = true }
     }
     if (goExe != null && hasHev) {
-        sourceSets.getByName("main").jniLibs.srcDir(wgOut)
+        sourceSets.getByName("main").jniLibs.directories.add(wgOut.get().asFile.path)
     }
 
     compileOptions {
@@ -82,28 +84,24 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 dependencies {
     // Tor (Guardian Project, BSD): runs tor in-process; used as a free VPN exit with country choice.
-    implementation("info.guardianproject:tor-android:0.4.9.5") {
-        exclude(group = "org.jetbrains.kotlin") // use the app's own Kotlin stdlib
-    }
+    implementation("info.guardianproject:tor-android:0.4.9.14")
     testImplementation("junit:junit:4.13.2")
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 // Cross-compiles bbwg for each ABI with the NDK's clang (cgo), output as lib/<abi>/libbbwg.so.
-val buildBbwg by tasks.registering {
+val ndkDir = androidComponents.sdkComponents.ndkDirectory
+val buildBbwg = tasks.register("buildBbwg") {
     enabled = goExe != null && hasHev
     inputs.dir(wgSrc)
     outputs.dir(wgOut)
     doLast {
-        val toolchain = android.ndkDirectory.resolve("toolchains/llvm/prebuilt/linux-x86_64/bin")
+        val toolchain = ndkDir.get().asFile.resolve("toolchains/llvm/prebuilt/linux-x86_64/bin")
         val targets = mapOf(
             "arm64-v8a" to Triple("arm64", "aarch64-linux-android26-clang", ""),
             "armeabi-v7a" to Triple("arm", "armv7a-linux-androideabi26-clang", "7"),
