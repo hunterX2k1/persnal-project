@@ -1123,6 +1123,10 @@ class MainActivity : Activity() {
             }
         }
         page.addView(testBtn)
+        page.addView(button("VPN Gate — free servers with ping & speed") { vpnGateDialog() }.apply {
+            background = ripple(gradientRect(dp(14).toFloat(), Palette.CYAN, Palette.VIOLET), dp(14).toFloat())
+            setTextColor(Palette.BG)
+        })
         page.addView(button("Add Tor (free, pick a country)") { torDialog() })
         page.addView(button("Check my location") {
             VpnClient.exitInfo = "Checking…"
@@ -1275,6 +1279,75 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Lists VPN Gate's live servers (country, ping, speed, users); tap one to add it. */
+    private fun vpnGateDialog() {
+        val box = vbox().apply { setPadding(dp(16), dp(8), dp(16), dp(8)) }
+        val status = small("Loading the VPN Gate server list…")
+        box.addView(status)
+        val countries = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        box.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(countries) })
+        val list = vbox()
+        box.addView(list)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("VPN Gate servers")
+            .setView(ScrollView(this).apply { addView(box) })
+            .setNegativeButton("Close", null)
+            .show()
+
+        fun render(all: List<VpnGate.Server>, code: String?) {
+            list.removeAllViews()
+            val shown = all.filter { code == null || it.code == code }.take(60)
+            for (srv in shown) {
+                val row = vbox().apply {
+                    setPadding(0, dp(10), 0, dp(10))
+                    isClickable = true
+                    background = ripple(roundRect(0x00000000, dp(10).toFloat()), dp(10).toFloat())
+                }
+                row.addView(TextView(this).apply {
+                    text = "${Flags.of(srv.code)}  ${srv.country} · ${srv.host}"
+                    textSize = 15f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
+                })
+                row.addView(small("${srv.pingMs} ms · ${"%.0f".format(srv.speedMbps)} Mbps · ${srv.sessions} users · " +
+                    "${srv.proto.uppercase()} ${srv.port} · up ${srv.uptimeDays} days"))
+                row.setOnClickListener {
+                    val p = VpnGate.add(this, srv)
+                    if (settings.lbMode == LbMode.OFF) VpnProfiles.select(this, p.id)
+                    else settings.lbMembers = settings.lbMembers + p.id
+                    if (::vpnList.isInitialized) renderVpnList()
+                    toast("Added ${srv.profileName}")
+                    dialog.dismiss()
+                    if (settings.vpnEnabled) applyVpn()
+                }
+                list.addView(row)
+            }
+        }
+
+        thread(name = "vpngate") {
+            val r = runCatching { VpnGate.fetch() }
+            runOnUiThread {
+                r.onSuccess { all ->
+                    status.text = "${all.size} servers, best first. Ping and speed are VPN Gate's own " +
+                        "measurements — use \"Test servers\" for yours. Volunteer-run (University of Tsukuba): " +
+                        "don't use it for banking or passwords."
+                    val byCountry = all.groupingBy { it.code }.eachCount().entries.sortedByDescending { it.value }
+                    val chips = listOf<Pair<String?, String>>(null to "All (${all.size})") +
+                        byCountry.map { it.key to "${Flags.of(it.key)} ${it.key} (${it.value})" }
+                    for ((code, label) in chips) {
+                        countries.addView(TextView(this).apply {
+                            text = label; textSize = 13f; setTextColor(Palette.TEXT)
+                            setPadding(dp(12), dp(6), dp(12), dp(6))
+                            background = roundRect(Palette.SURFACE2, dp(99).toFloat(), Palette.STROKE, dp(1))
+                            setOnClickListener { render(all, code) }
+                        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6); topMargin = dp(8); bottomMargin = dp(4) })
+                    }
+                    render(all, null)
+                }.onFailure { e ->
+                    status.text = "Couldn't load the list: ${e.message}. vpngate.net may be blocked on your network."
+                }
+            }
+        }
+    }
+
     private fun torDialog() {
         val codes = TorClient.COUNTRIES.keys.toList()
         val labels = codes.map { c -> (if (c.isEmpty()) "🌐" else Flags.of(c)) + "  " + TorClient.COUNTRIES[c] }
@@ -1300,7 +1373,7 @@ class MainActivity : Activity() {
         val conf = multiline("", "[Interface]\nPrivateKey = …\n\n[Peer]\n…")
         box.addView(name); box.addView(conf)
         AlertDialog.Builder(this)
-            .setTitle("Paste WireGuard config")
+            .setTitle("Paste WireGuard or OpenVPN config")
             .setView(box)
             .setPositiveButton("Add") { _, _ ->
                 addProfile(name.text.toString().ifBlank { "VPN server" }, conf.text.toString())
@@ -1310,6 +1383,14 @@ class MainActivity : Activity() {
     }
 
     private fun addProfile(name: String, conf: String) {
+        if (Ovpn.looksLikeOvpn(conf)) {
+            val first = VpnProfiles.all(this).isEmpty()
+            VpnProfiles.add(this, name, Ovpn.PREFIX + conf)
+            if (::vpnList.isInitialized) renderVpnList()
+            toast("Added OpenVPN server $name")
+            if (first && settings.vpnEnabled) applyVpn()
+            return
+        }
         val problem = VpnProfile.validate(conf)
         if (problem != null) { toast("Not a WireGuard config: $problem"); return }
         val first = VpnProfiles.all(this).isEmpty()

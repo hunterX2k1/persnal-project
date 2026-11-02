@@ -195,6 +195,7 @@ var (
 
 func main() {
 	confPath := flag.String("config", "", "WireGuard config (wg-quick format)")
+	ovpnPath := flag.String("ovpn", "", "OpenVPN config (.ovpn) — VPN Gate and other OpenVPN servers")
 	listen := flag.String("listen", "127.0.0.1:0", "SOCKS5 listen address")
 	flag.Parse()
 	username, password = os.Getenv("BB_USER"), os.Getenv("BB_PASS")
@@ -202,17 +203,41 @@ func main() {
 		fail("BB_USER and BB_PASS must be set")
 	}
 
-	text, err := os.ReadFile(*confPath)
-	if err != nil {
-		fail(err.Error())
+	var ln net.Listener
+	if *ovpnPath != "" {
+		link, l, err := startOpenVPN(*ovpnPath, *listen, &net.Dialer{Timeout: 15 * time.Second})
+		if err != nil {
+			fail(err.Error())
+		}
+		ln = l
+		fmt.Printf("READY %d\n", ln.Addr().(*net.TCPAddr).Port)
+		// OpenVPN has no handshake counter to watch: report "alive" while the link is up.
+		go func() {
+			tick := time.NewTicker(20 * time.Second)
+			fmt.Printf("HANDSHAKE %d\n", time.Now().Unix())
+			for {
+				select {
+				case <-link.done:
+					fail("OpenVPN connection closed by the server")
+				case <-tick.C:
+					fmt.Printf("HANDSHAKE %d\n", time.Now().Unix())
+				}
+			}
+		}()
+	} else {
+		text, err := os.ReadFile(*confPath)
+		if err != nil {
+			fail(err.Error())
+		}
+		dev, l, err := start(string(text), *listen)
+		if err != nil {
+			fail(err.Error())
+		}
+		ln = l
+		fmt.Printf("READY %d\n", ln.Addr().(*net.TCPAddr).Port)
+		go watchHandshake(dev)
 	}
-	dev, ln, err := start(string(text), *listen)
-	if err != nil {
-		fail(err.Error())
-	}
-	fmt.Printf("READY %d\n", ln.Addr().(*net.TCPAddr).Port)
 
-	go watchHandshake(dev)
 	go func() { // exit with the app
 		io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)

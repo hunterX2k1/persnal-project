@@ -112,6 +112,16 @@ VPN, and some sites show CAPTCHAs to Tor users.
 * Quick Settings tiles, home-screen widget, background list updates, lifetime stats, password-
   encrypted backups (AES-256-GCM, PBKDF2), update checker, diagnostics + debug log.
 
+## VPN Gate / OpenVPN (7.6)
+
+**VPN tab › VPN Gate** lists the live servers of [VPN Gate](https://www.vpngate.net) (volunteer
+OpenVPN servers, an academic project of the University of Tsukuba) with country, ping, speed and
+users; tap one to add it. Any other OpenVPN `.ovpn` file can be imported too. The OpenVPN protocol
+runs inside bbwg using [minivpn](https://github.com/ooni/minivpn) by OONI (**GPL-3.0**), bridged
+into the same gVisor netstack and SOCKS5 server as WireGuard, so ad blocking, the kill switch, the
+load balancer and the server tester work the same. VPN Gate servers are run by volunteers: don't
+use them for banking or passwords.
+
 ## Signing
 
 The release key is **not** in the repo. Builds read it from `BlockBridge/keystore.properties`

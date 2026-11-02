@@ -111,16 +111,22 @@ class Tunnel(val profile: VpnProfile) {
     fun start(ctx: Context): Boolean {
         if (isTor) return startTor(ctx)
         if (!VpnClient.available(ctx)) return fail("This build doesn't include the VPN engine")
-        val conf = try {
-            VpnClient.resolveEndpoints(profile.conf)
-        } catch (e: Exception) {
-            return fail("Can't find the server address: ${e.message}")
+        val ovpn = Ovpn.isOvpn(profile)
+        val file = if (ovpn) {
+            File(ctx.filesDir, "ovpn-${profile.id}.ovpn").apply { writeText(Ovpn.text(profile)) }
+        } else {
+            val conf = try {
+                VpnClient.resolveEndpoints(profile.conf)
+            } catch (e: Exception) {
+                return fail("Can't find the server address: ${e.message}")
+            }
+            File(ctx.filesDir, "wg-${profile.id}.conf").apply { writeText(conf) }
         }
-        val file = File(ctx.filesDir, "wg-${profile.id}.conf").apply { writeText(conf) }
         val user = VpnClient.token()
         val pass = VpnClient.token()
         val proc = try {
-            ProcessBuilder(File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so").path, "-config", file.path)
+            ProcessBuilder(File(ctx.applicationInfo.nativeLibraryDir, "libbbwg.so").path,
+                if (ovpn) "-ovpn" else "-config", file.path)
                 .redirectErrorStream(true)
                 .apply { environment()["BB_USER"] = user; environment()["BB_PASS"] = pass }
                 .start()
@@ -146,7 +152,8 @@ class Tunnel(val profile: VpnProfile) {
             }
             if (process === proc) { dead = true; upstream = null; fail(error ?: "Disconnected") }
         }
-        val line = first.poll(8, TimeUnit.SECONDS)
+        // OpenVPN does its TLS handshake before READY, so give it longer.
+        val line = first.poll(if (ovpn) 45 else 8, TimeUnit.SECONDS)
         if (line == null || !line.startsWith("READY ")) {
             stop()
             return fail(line?.removePrefix("ERROR ") ?: "VPN engine didn't respond")
