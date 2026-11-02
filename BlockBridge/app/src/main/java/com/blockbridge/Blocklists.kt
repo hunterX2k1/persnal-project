@@ -143,6 +143,10 @@ class Settings(ctx: Context) {
     var safeMode: Boolean
         get() = p.getBoolean("safe_mode", false)
         set(v) = p.edit().putBoolean("safe_mode", v).apply()
+    /** Which Tor to use for Tor servers: "builtin" or "orbot" (the Orbot app). */
+    var torEngine: String
+        get() = p.getString("tor_engine", "builtin")!!
+        set(v) = p.edit().putString("tor_engine", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()

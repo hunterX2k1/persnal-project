@@ -156,8 +156,12 @@ class ShieldVpnService : VpnService() {
     private fun setDnsVia(t: Tunnel?) {
         val up = t?.upstream
         DnsHandler.viaDns = t?.let { VpnClient.dnsOf(it.profile.conf) } ?: emptyList()
-        DnsHandler.viaUdp = if (t != null && t.isTor && TorClient.dnsPort > 0)
-            java.net.InetSocketAddress("127.0.0.1", TorClient.dnsPort) else null
+        DnsHandler.viaUdp = when {
+            t == null || !t.isTor -> null
+            t.usingOrbot -> Orbot.dns
+            TorClient.dnsPort > 0 -> java.net.InetSocketAddress("127.0.0.1", TorClient.dnsPort)
+            else -> null
+        }
         DnsHandler.via = up
     }
 

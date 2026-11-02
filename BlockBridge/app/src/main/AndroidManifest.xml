@@ -12,6 +12,7 @@
 
     <!-- List launchable apps for the app exception picker -->
     <queries>
+        <package android:name="org.torproject.android" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

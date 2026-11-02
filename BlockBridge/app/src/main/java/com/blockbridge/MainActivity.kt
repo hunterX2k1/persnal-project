@@ -1139,6 +1139,29 @@ class MainActivity : Activity() {
                 "you pick. Much slower than a VPN, TCP only, and many sites (Google, Cloudflare) show " +
                 "CAPTCHAs or block Tor. For everyday browsing use a WireGuard server (Proton Free below)."
         ))
+        page.addView(header("Tor engine"))
+        page.addView(small("Built-in runs Tor inside BlockBridge. Orbot uses the Orbot app's Tor (same engine as " +
+            "Orbot) — install Orbot, keep it in proxy mode (not VPN) and choose the exit country in Orbot's settings."))
+        val engineBtn = button("Tor engine: ${if (settings.torEngine == "orbot") "Orbot app" else "Built-in"}") {}
+        engineBtn.setOnClickListener {
+            val orbot = settings.torEngine != "orbot"
+            if (orbot && !Orbot.installed(this)) {
+                AlertDialog.Builder(this)
+                    .setTitle("Orbot isn't installed")
+                    .setMessage("Install Orbot (by the Guardian Project) from the Play Store, open it once and tap Start. " +
+                        "Then choose this option again.")
+                    .setPositiveButton("Open Play Store") { _, _ ->
+                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=${Orbot.PKG}"))) }
+                    }
+                    .setNegativeButton("Cancel", null).show()
+                return@setOnClickListener
+            }
+            settings.torEngine = if (orbot) "orbot" else "builtin"
+            engineBtn.text = "Tor engine: ${if (orbot) "Orbot app" else "Built-in"}"
+            if (settings.vpnEnabled && VpnClient.tunnels.any { it.isTor }) applyVpn()
+        }
+        page.addView(engineBtn)
+
         page.addView(header("Tor bridges"))
         page.addView(small("If Tor is blocked where you are (it won't connect), use a bridge. Snowflake works " +
             "almost everywhere; obfs4 is faster. Custom: paste bridge lines from bridges.torproject.org."))

@@ -86,17 +86,25 @@ object TorClient {
             .putExtra("socksPort", socksPort)
             .putStringArrayListExtra("bridges", ArrayList(bridges)))
 
-        val deadline = System.currentTimeMillis() + if (bridges.isEmpty()) 150_000 else 240_000
+        // Like Orbot: keep waiting while Tor makes progress (loading relay descriptors over a
+        // slow bridge can take many minutes). Give up only after 3 minutes with no progress
+        // at all, or 10 minutes in total.
+        val hardDeadline = System.currentTimeMillis() + 10 * 60_000
+        var lastProgressAt = System.currentTimeMillis()
+        var lastLogSize = 0L
         var lastSummary = ""
-        while (System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() < hardDeadline && System.currentTimeMillis() - lastProgressAt < 180_000) {
+            val logSize = logFile(app).length()
+            if (logSize != lastLogSize) { lastLogSize = logSize; lastProgressAt = System.currentTimeMillis() }
             Thread.sleep(700)
             if (cancelled) { DiagLog.add("tor", "cancelled"); stop(); return null }
             val st = readStatus(app) ?: continue
             val pct = st.optInt("progress")
-            if (pct != progress) { progress = pct; onProgress(pct) }
+            if (pct != progress) { progress = pct; onProgress(pct); lastProgressAt = System.currentTimeMillis() }
             val summary = st.optString("summary")
             if (summary.isNotEmpty() && summary != lastSummary) {
                 lastSummary = summary
+                lastProgressAt = System.currentTimeMillis()
                 DiagLog.add("tor", "bootstrap $pct%: $summary")
             }
             st.optString("error").takeIf { it.isNotEmpty() }?.let { err ->
@@ -115,7 +123,7 @@ object TorClient {
                 return SocksUpstream(st.optInt("socks"), "blockbridge", "tor")
             }
         }
-        DiagLog.add("tor", "timed out at $progress% (${lastSummary.ifEmpty { "no progress" }})")
+        DiagLog.add("tor", "gave up at $progress% (${lastSummary.ifEmpty { "no progress" }}) — downloaded data is kept for the next try")
         tailLog(app)?.let { DiagLog.add("tor", "tor.log:\n$it") }
         stop()
         return null
@@ -203,8 +211,8 @@ class TorHostService : Service() {
                 // (Tor refuses IPv6 destinations by default, and phones prefer IPv6).
                 if (socksPort > 0) appendLine("SocksPort 127.0.0.1:$socksPort IPv6Traffic")
                 appendLine("DNSPort 127.0.0.1:$dnsPort")
-                appendLine("ClientUseIPv6 1")
-                appendLine("AvoidDiskWrites 1")
+                // Tor's defaults, as Orbot uses them: no forced IPv6 relays (can stall on mobile
+                // networks) and no AvoidDiskWrites (it loses downloaded descriptors on restart).
                 appendLine("Log notice file ${TorClient.logFile(this@TorHostService).path}")
                 bridgeConf.forEach { appendLine(it) }
                 if (country.isNotEmpty()) {

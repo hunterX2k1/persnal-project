@@ -95,6 +95,8 @@ class Tunnel(val profile: VpnProfile) {
         private set
 
     val isTor get() = TorClient.isTor(profile)
+    @Volatile var usingOrbot = false
+        private set
     val name get() = profile.name
     val display get() = "${Flags.of(profile.name)} ${profile.name}"
 
@@ -102,7 +104,7 @@ class Tunnel(val profile: VpnProfile) {
     val usable: Boolean
         get() {
             if (dead || upstream == null || probeFailures >= 2) return false
-            if (isTor) return TorClient.healthy()
+            if (isTor) return if (usingOrbot) Orbot.portOpen() else TorClient.healthy()
             // WireGuard: a recent handshake, or still within the first moments after start
             val now = System.currentTimeMillis()
             return lastHandshake > 0 && now - lastHandshake < 200_000 || now - startedAt < 25_000
@@ -164,6 +166,17 @@ class Tunnel(val profile: VpnProfile) {
     }
 
     private fun startTor(ctx: Context): Boolean {
+        if (Settings(ctx).torEngine == "orbot") {
+            state = "Connecting through Orbot…"
+            usingOrbot = true
+            val up = Orbot.start(ctx, { dead }) { msg -> state = msg }
+                ?: return fail("Orbot didn't connect. Install Orbot, open it, set it to proxy mode (not VPN) and tap Start.")
+            upstream = up
+            lastHandshake = System.currentTimeMillis()
+            state = "Connected"
+            StateBus.changed()
+            return true
+        }
         state = "Starting Tor…"
         val up = TorClient.start(ctx, TorClient.countryOf(profile)) { pct -> state = "Building Tor circuit… $pct%" }
             ?: run {
@@ -179,7 +192,7 @@ class Tunnel(val profile: VpnProfile) {
 
     fun stop() {
         dead = true
-        if (isTor) TorClient.stop()
+        if (isTor && !usingOrbot) TorClient.stop()
         val p = process
         process = null
         upstream = null
@@ -298,7 +311,7 @@ object VpnClient {
             .map { Tunnel(it) }
         tunnels = list
         val threads = list.map { t -> thread(name = "vpn-start-${t.name}") { t.start(ctx) } }
-        threads.forEach { it.join(260_000) }
+        threads.forEach { it.join(11 * 60_000L) } // Tor may take up to 10 minutes on slow bridges
         if (generation.get() != gen) { // cancelled while connecting
             list.forEach { it.stop() }
             if (tunnels === list) tunnels = emptyList()
