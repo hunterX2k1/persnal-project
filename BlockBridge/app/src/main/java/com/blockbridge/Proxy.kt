@@ -283,6 +283,19 @@ class Socks5Server(
         out.flush()
     }
 
+    private val failLog = AtomicInteger()
+    @Volatile private var failWindow = 0L
+
+    /** Logs why connections fail (at most 15 a minute), e.g. "vpn: request refused (4)". */
+    private fun logFailure(c: Conn, e: IOException) {
+        val now = System.currentTimeMillis()
+        if (now - failWindow > 60_000) { failWindow = now; failLog.set(0) }
+        if (failLog.incrementAndGet() > 15) return
+        // SOCKS reply codes from a VPN/Tor upstream: 1 general, 2 not allowed, 3 network
+        // unreachable, 4 host unreachable, 5 refused, 6 timed out, 8 address type unsupported
+        DiagLog.add("relay", "${c.label}:${c.dst.port} via ${c.route} failed: ${e.message}")
+    }
+
     private fun appFor(proto: String, src: InetSocketAddress?, dst: InetSocketAddress): AppInfo? {
         val r = appResolver ?: return null
         return src?.let { runCatching { r(proto, it, dst) }.getOrNull() }
@@ -336,6 +349,7 @@ class Socks5Server(
             }
         } catch (e: IOException) {
             ConnTracker.finish(conn, Conn.Status.FAILED, e.message ?: "connect failed")
+            logFailure(conn, e)
             reply(out, if (addr is Inet4Address) 5 else 4)
             return release(ch)
         }

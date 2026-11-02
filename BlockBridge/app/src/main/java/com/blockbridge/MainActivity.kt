@@ -1110,17 +1110,30 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(button("Paste config") { pasteConfigDialog() }, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(row)
+        val testBtn = button("Test servers (ping & speed)") {}
+        testBtn.setOnClickListener {
+            if (ServerTester.running) { ServerTester.cancel(); testBtn.text = "Stopping…"; return@setOnClickListener }
+            val profiles = VpnProfiles.all(this)
+            if (profiles.isEmpty()) { toast("Add a server first"); return@setOnClickListener }
+            testBtn.text = "Stop testing"
+            toast(if (VpnClient.tunnels.isNotEmpty()) "Testing the servers not in use…" else "Testing ${profiles.size} server(s)…")
+            thread(name = "server-test") {
+                ServerTester.testAll(this, profiles) { runOnUiThread { if (::vpnList.isInitialized) renderVpnList() } }
+                runOnUiThread { testBtn.text = "Test servers (ping & speed)" }
+            }
+        }
+        page.addView(testBtn)
         page.addView(button("Add Tor (free, pick a country)") { torDialog() })
         page.addView(button("Check my location") {
             VpnClient.exitInfo = "Checking…"
             thread { VpnClient.checkLocation() }
         })
 
-        page.addView(header("Free: Tor"))
+        page.addView(header("Free: Tor (slow — for testing or privacy)"))
         page.addView(body(
             "No account needed. Traffic hops through 3 volunteer relays and leaves from the country " +
-                "you pick. Slower than a VPN, carries TCP only (calls/QUIC fall back), and Google " +
-                "or some sites may show CAPTCHAs or block Tor."
+                "you pick. Much slower than a VPN, TCP only, and many sites (Google, Cloudflare) show " +
+                "CAPTCHAs or block Tor. For everyday browsing use a WireGuard server (Proton Free below)."
         ))
         page.addView(header("Tor bridges"))
         page.addView(small("If Tor is blocked where you are (it won't connect), use a bridge. Snowflake works " +
@@ -1193,6 +1206,8 @@ class MainActivity : Activity() {
         val selected = VpnProfiles.selected(this)?.id
         val members = settings.lbMembers
         val live = VpnClient.tunnels.associateBy { it.profile.id }
+        val tests = profiles.associate { it.id to ServerTester.result(this, it.id) }
+        val fastest = tests.filterValues { it?.ok == true && it.downMbps > 0 }.maxByOrNull { it.value!!.downMbps }?.key
         for (p in profiles) {
             val on = if (multi) p.id in members else p.id == selected
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1202,6 +1217,22 @@ class MainActivity : Activity() {
                 textSize = 16f
                 setTextColor(if (on) Palette.CYAN else Palette.TEXT)
             })
+            val r = tests[p.id]
+            when {
+                ServerTester.current == p.id ->
+                    info.addView(small("⏳ testing…").apply { setTextColor(Palette.WARN); setPadding(dp(30), 0, 0, 0) })
+                r != null && live[p.id] == null -> {
+                    val ago = (System.currentTimeMillis() - r.time) / 60_000
+                    val text = if (r.ok) "${if (p.id == fastest) "⚡ " else ""}${"%.0f".format(r.pingMs)} ms · " +
+                        "${"%.1f".format(r.downMbps)} Mbps · exit ${r.exit.removePrefix("Cloudflare ")} · " +
+                        (if (ago < 1) "just now" else "${ago} min ago")
+                    else "✗ ${r.error} · ${if (ago < 1) "just now" else "${ago} min ago"}"
+                    info.addView(small(text).apply {
+                        setTextColor(if (r.ok) (if (p.id == fastest) Palette.CYAN else Palette.TEXT) else Palette.BAD)
+                        setPadding(dp(30), 0, 0, 0)
+                    })
+                }
+            }
             live[p.id]?.let { t ->
                 val st = when {
                     t.usable && t.latencyMs >= 0 -> "● working · ${t.latencyMs} ms · ${t.active.get()} open"

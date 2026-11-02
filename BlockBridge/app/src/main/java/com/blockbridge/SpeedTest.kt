@@ -58,13 +58,13 @@ class SpeedTest(
 
     fun cancel() = cancelled.set(true)
 
-    fun run(routeLabel: String): SpeedResult {
+    fun run(routeLabel: String, withUpload: Boolean = true): SpeedResult {
         val (server, ip) = runCatching { trace() }.getOrDefault("?" to "?")
         val (ping, jitter) = latency()
         check(!cancelled.get()) { "cancelled" }
         val down = transfer(Phase.DOWNLOAD)
         check(!cancelled.get()) { "cancelled" }
-        val up = transfer(Phase.UPLOAD)
+        val up = if (withUpload) transfer(Phase.UPLOAD) else 0.0
         onProgress(Phase.DONE, 0.0, 1f)
         return SpeedResult(System.currentTimeMillis(), routeLabel, ping, jitter, down, up, server, ip)
     }

@@ -270,10 +270,19 @@ object VpnClient {
     private val rnd = SecureRandom()
     internal fun token() = (1..24).map { "abcdefghijkmnopqrstuvwxyz23456789"[rnd.nextInt(33)] }.joinToString("")
 
+    private val generation = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Aborts any connect in progress and drops the current servers. Never blocks. */
+    fun cancel() {
+        generation.incrementAndGet()
+        TorClient.cancel()
+        tunnels.forEach { runCatching { it.stop() } }
+    }
+
     /** Connects to every profile in parallel. Blocking; true if at least one is up. */
-    @Synchronized
     fun startAll(ctx: Context, profiles: List<VpnProfile>): Boolean {
         stop()
+        val gen = generation.get()
         error = null
         exitInfo = null
         // Only one Tor instance can run; keep the first Tor profile.
@@ -282,7 +291,12 @@ object VpnClient {
             .map { Tunnel(it) }
         tunnels = list
         val threads = list.map { t -> thread(name = "vpn-start-${t.name}") { t.start(ctx) } }
-        threads.forEach { it.join(130_000) }
+        threads.forEach { it.join(260_000) }
+        if (generation.get() != gen) { // cancelled while connecting
+            list.forEach { it.stop() }
+            if (tunnels === list) tunnels = emptyList()
+            return false
+        }
         LoadBalancer.reset()
         val up = list.any { it.upstream != null }
         if (!up) error = list.mapNotNull { it.error }.distinct().joinToString("\n").ifBlank { "Couldn't connect" }
@@ -298,7 +312,6 @@ object VpnClient {
         return fresh
     }
 
-    @Synchronized
     fun stop() {
         tunnels.forEach { it.stop() }
         tunnels = emptyList()

@@ -57,6 +57,7 @@ class ShieldVpnService : VpnService() {
     /** Emergency kill: tear everything down right now, on the calling thread. */
     fun emergencyStop() {
         Settings(this).wantRunning = false
+        VpnClient.cancel()
         shutdown()
         stopSelf()
     }
@@ -70,31 +71,53 @@ class ShieldVpnService : VpnService() {
     private var output: FileOutputStream? = null
     private val writeLock = Any()
 
+    /**
+     * Start/stop/switch work runs here, one job at a time, never on the main thread:
+     * connecting a server can take minutes (Tor), and the screen must stay responsive.
+     */
+    private val control = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "blockbridge-control").apply { isDaemon = true }
+    }
+    private val applying = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun control(job: () -> Unit) = runCatching {
+        control.execute { try { job() } catch (e: Throwable) { DiagLog.error("control", "job failed", e) } }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            Settings(this).wantRunning = false
-            shutdown()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_RESTART) {
-            if (running) { shutdown(); start() }
-            return START_STICKY
-        }
-        if (intent?.action == ACTION_APPLY_VPN) {
-            if (running) {
-                if (Settings(this).vpnEnabled && !fullTunnel) { shutdown(); start() } // needs full mode
-                else thread(name = "blockbridge-vpn") { applyVpn() }
+        when (intent?.action) {
+            ACTION_STOP -> {
+                Settings(this).wantRunning = false
+                VpnClient.cancel() // abort any connect in progress right away
+                control { shutdown(); stopSelf() }
+                return START_NOT_STICKY
             }
-            return START_STICKY
+            ACTION_RESTART -> {
+                VpnClient.cancel()
+                control { if (running) { shutdown(); start() } }
+            }
+            ACTION_APPLY_VPN -> {
+                VpnClient.cancel()
+                control {
+                    if (running) {
+                        if (Settings(this).vpnEnabled && !fullTunnel) { shutdown(); start() } // needs full mode
+                        else applyVpn()
+                    }
+                }
+            }
+            else -> control { start() }
         }
-        start()
         return START_STICKY
     }
 
     /** Connects to (or disconnects from) the selected VPN server(s). Blocking. */
     @Synchronized
     private fun applyVpn() {
+        applying.set(true)
+        try { applyVpnInner() } finally { applying.set(false) }
+    }
+
+    private fun applyVpnInner() {
         val server = socks ?: return
         val settings = Settings(this)
         RouteConfig.reload(this)
@@ -185,20 +208,20 @@ class ShieldVpnService : VpnService() {
                     val now = System.currentTimeMillis()
                     val ts = VpnClient.tunnels
                     if (ts.isEmpty() || ts.all { it.upstream == null && it.dead }) {
-                        if (now >= nextRetry) {
+                        if (now >= nextRetry && !applying.get()) {
                             DiagLog.add("supervisor", "VPN down, reconnecting (next wait ${backoffMs / 1000}s)")
                             nextRetry = now + backoffMs
                             backoffMs = (backoffMs * 2).coerceAtMost(120_000)
-                            applyVpn()
+                            control { applyVpn() }
                         }
                         continue
                     }
                     for (t in ts) {
                         val stale = !t.isTor && t.upstream != null && t.lastHandshake > 0 &&
                             now - t.lastHandshake > 200_000 && t.probeFailures >= 2
-                        if (t.dead || stale) {
+                        if ((t.dead || stale) && !applying.get()) {
                             DiagLog.add("supervisor", "restarting ${t.name} (${if (stale) "no handshake" else "stopped"})")
-                            VpnClient.restart(this, t)
+                            control { if (t in VpnClient.tunnels) VpnClient.restart(this, t) }
                         }
                     }
                     if (now - lastProbe > 30_000) {

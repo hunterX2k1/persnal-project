@@ -40,7 +40,11 @@ object TorClient {
         private set
     @Volatile var dnsPort = 0
         private set
+    @Volatile private var cancelled = false
     private var appCtx: Context? = null
+
+    /** Makes a running [start] give up promptly (user turned the VPN off or switched). */
+    fun cancel() { cancelled = true }
 
     fun isTor(profile: VpnProfile) = profile.conf.startsWith("tor:")
     fun countryOf(profile: VpnProfile) = profile.conf.removePrefix("tor:").trim().uppercase()
@@ -66,10 +70,12 @@ object TorClient {
     /** Starts Tor in its own process and waits for a working circuit. Blocking. */
     fun start(ctx: Context, country: String, onProgress: (Int) -> Unit): SocksUpstream? {
         stop()
+        cancelled = false
         val app = ctx.applicationContext
         appCtx = app
         progress = 0
         dnsPort = ServerSocket(0).use { it.localPort }
+        val socksPort = ServerSocket(0).use { it.localPort }
         val s = Settings(app)
         val bridges = bridgeLines(app, s.torBridges, s.torBridgeLines)
         statusFile(app).delete()
@@ -77,12 +83,14 @@ object TorClient {
         app.startService(Intent(app, TorHostService::class.java).setAction(TorHostService.ACTION_START)
             .putExtra("country", country)
             .putExtra("dnsPort", dnsPort)
+            .putExtra("socksPort", socksPort)
             .putStringArrayListExtra("bridges", ArrayList(bridges)))
 
         val deadline = System.currentTimeMillis() + if (bridges.isEmpty()) 150_000 else 240_000
         var lastSummary = ""
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(700)
+            if (cancelled) { DiagLog.add("tor", "cancelled"); stop(); return null }
             val st = readStatus(app) ?: continue
             val pct = st.optInt("progress")
             if (pct != progress) { progress = pct; onProgress(pct) }
@@ -130,11 +138,14 @@ object TorClient {
         val app = appCtx ?: return
         runCatching { app.stopService(Intent(app, TorHostService::class.java)) }
         // Wait briefly for the old process to finish shutting down before any restart.
+        // Off the main thread, wait until the old ":tor" process has really exited, so a
+        // new start can never land in a dying process.
         val onMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
-        val until = System.currentTimeMillis() + if (onMain) 0 else 3000
+        val until = System.currentTimeMillis() + if (onMain) 0 else 5000
+        val am = app.getSystemService(android.app.ActivityManager::class.java)
         while (System.currentTimeMillis() < until) {
-            val st = readStatus(app)
-            if (st == null || st.optBoolean("stopped")) break
+            val alive = runCatching { am.runningAppProcesses?.any { it.processName.endsWith(":tor") } }.getOrNull() ?: false
+            if (!alive) break
             Thread.sleep(100)
         }
         dnsPort = 0
@@ -150,6 +161,7 @@ class TorHostService : Service() {
     companion object { const val ACTION_START = "com.blockbridge.tor.START" }
 
     @Volatile private var running = false
+    private var socksPort = 0
     private var tor: TorService? = null
     private var conn: ServiceConnection? = null
     private var pt: IPtProxy.Controller? = null
@@ -162,6 +174,7 @@ class TorHostService : Service() {
             running = true
             val country = intent.getStringExtra("country") ?: ""
             val dns = intent.getIntExtra("dnsPort", 0)
+            socksPort = intent.getIntExtra("socksPort", 0)
             val bridges = intent.getStringArrayListExtra("bridges") ?: arrayListOf()
             thread(name = "tor-host") { runTor(country, dns, bridges) }
         }
@@ -186,6 +199,9 @@ class TorHostService : Service() {
             val bridgeConf = startTransports(bridges)
             TorClient.logFile(this).delete()
             TorService.getTorrc(this).writeText(buildString {
+                // Our own SOCKS port: IPv6Traffic lets apps reach IPv6 sites through Tor
+                // (Tor refuses IPv6 destinations by default, and phones prefer IPv6).
+                if (socksPort > 0) appendLine("SocksPort 127.0.0.1:$socksPort IPv6Traffic")
                 appendLine("DNSPort 127.0.0.1:$dnsPort")
                 appendLine("ClientUseIPv6 1")
                 appendLine("AvoidDiskWrites 1")
@@ -222,18 +238,15 @@ class TorHostService : Service() {
                     Regex("SUMMARY=\"([^\"]*)\"").find(phase)?.groupValues?.get(1)?.let { summary = it }
                     if (svc.getInfo("status/circuit-established") == "1") {
                         val listeners = svc.getInfo("net/listeners/socks") ?: ""
-                        val port = Regex(":(\\d+)").find(listeners)?.groupValues?.get(1)?.toInt() ?: svc.socksPort
+                        val port = if (socksPort > 0 && listeners.contains(":$socksPort")) socksPort
+                            else Regex(":(\\d+)").find(listeners)?.groupValues?.get(1)?.toInt() ?: svc.socksPort
                         if (port > 0) { status(100, "Connected", ready = true, socks = port); return@runCatching }
                     }
                     status(pct, summary)
                 }
                 Thread.sleep(700)
                 // keep the heartbeat fresh once ready
-                if (pct >= 100) runCatching {
-                    val listeners = svc.getInfo("net/listeners/socks") ?: ""
-                    val port = Regex(":(\\d+)").find(listeners)?.groupValues?.get(1)?.toInt() ?: svc.socksPort
-                    status(100, "Connected", ready = port > 0, socks = port)
-                }
+
             }
         } catch (e: Throwable) {
             status(error = "${e.javaClass.simpleName}: ${e.message}")
@@ -250,7 +263,8 @@ class TorHostService : Service() {
             override fun connected(t: String) {}
             override fun error(t: String, e: Exception?) {}
             override fun stopped(t: String, e: Exception?) {}
-        }).also { pt = it }
+        }) ?: throw IllegalStateException("bridge engine didn't start (try again)")
+        pt = c
         val out = mutableListOf("UseBridges 1")
         for (t in names) {
             val name = if (t == "meek") "meek_lite" else t
@@ -271,6 +285,6 @@ class TorHostService : Service() {
         status(stopped = true)
         super.onDestroy()
         // A fresh process for the next start: libtor can't be restarted in the same one.
-        android.os.Handler(mainLooper).postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 }
