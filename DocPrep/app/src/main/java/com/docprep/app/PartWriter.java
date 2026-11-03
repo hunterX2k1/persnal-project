@@ -43,6 +43,22 @@ final class PartWriter {
         this.maxBytes = (long) (maxBytes * 0.95);   // zip headers + index text
     }
 
+    private String pendingPrefix;
+
+    /** Next unit starts a new document: put a document heading in front of it and reset the section context. */
+    void startDocument(String headingMd, String contextName) {
+        markDocStart();
+        pendingPrefix = headingMd;
+        lastHeading = contextName;
+        lastTail = null;
+    }
+
+    int partCount() { return parts.size(); }
+
+    /** Part that received the first unit of the current document (0 = nothing added yet). */
+    int docFirstPart;
+    void markDocStart() { docFirstPart = 0; }
+
     /** Adds a unit, starting a new part when a limit would be exceeded. Returns the part number. */
     int add(Unit u) throws IOException {
         long b = u.bytes(), t = u.tokens();
@@ -53,6 +69,8 @@ final class PartWriter {
             f.getParentFile().mkdirs();
             try (OutputStream o = new FileOutputStream(f)) { o.write(i.jpeg); }
         }
+        if (pendingPrefix != null) { body.write(pendingPrefix); pendingPrefix = null; }
+        if (docFirstPart == 0) docFirstPart = cur.no;
         body.write(u.md);
         body.write("\n\n");
         if (cur.first == null) cur.first = u.label;
@@ -82,7 +100,7 @@ final class PartWriter {
 
     /** Writes one ZIP per part (INDEX.md + document.md + images + manifest.json). */
     List<File> finish(File outDir, String baseName, String title, Indexer idx, String sourceInfo, String settings,
-                      String sourceSha) throws Exception {
+                      String sourcesJson) throws Exception {
         if (body != null) body.close();
         int n = parts.size();
         for (Part p : parts) p.zipName = String.format(java.util.Locale.US, "%s_part%02dof%02d.zip", baseName, p.no, n);
@@ -93,7 +111,7 @@ final class PartWriter {
             String index = idx.render(title, sourceInfo, parts, settings, indexBudget);
             for (Part p : parts) {
                 File z = new File(outDir, p.zipName);
-                zipPart(p, z, index, title, n, sourceSha);
+                zipPart(p, z, index, title, n, sourcesJson);
                 p.zipBytes = z.length();
                 out.add(z);
             }
@@ -101,9 +119,9 @@ final class PartWriter {
         return out;
     }
 
-    private void zipPart(Part p, File zipFile, String index, String title, int n, String sourceSha) throws Exception {
+    private void zipPart(Part p, File zipFile, String index, String title, int n, String sourcesJson) throws Exception {
         StringBuilder manifest = new StringBuilder("{\n  \"document\": ").append(q(title))
-                .append(",\n  \"source_sha256\": ").append(q(sourceSha))
+                .append(",\n  \"sources\": ").append(sourcesJson)
                 .append(",\n  \"part\": ").append(p.no).append(", \"parts\": ").append(n)
                 .append(",\n  \"covers\": ").append(q(p.first + " → " + p.last))
                 .append(",\n  \"files\": {\n");

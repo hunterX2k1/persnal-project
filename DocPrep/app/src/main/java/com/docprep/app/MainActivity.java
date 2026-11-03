@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     "text/*", "image/*", "application/octet-stream"});
+            i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);   // pick several documents at once
             startActivityForResult(i, PICK);
         });
         cancel.setOnClickListener(v -> { cancelled = true; status.setText("Cancelling…"); });
@@ -86,10 +87,14 @@ public class MainActivity extends Activity {
     /** "Open with DocPrep" / "Share → DocPrep" from a file manager or email app. */
     private void handleIncoming(Intent i) {
         if (i == null) return;
-        Uri u = null;
-        if (Intent.ACTION_VIEW.equals(i.getAction())) u = i.getData();
-        else if (Intent.ACTION_SEND.equals(i.getAction())) u = i.getParcelableExtra(Intent.EXTRA_STREAM);
-        if (u != null && worker == null) start(u);
+        List<Uri> us = new ArrayList<>();
+        if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getData() != null) us.add(i.getData());
+        else if (Intent.ACTION_SEND.equals(i.getAction())) { Uri u = i.getParcelableExtra(Intent.EXTRA_STREAM); if (u != null) us.add(u); }
+        else if (Intent.ACTION_SEND_MULTIPLE.equals(i.getAction())) {
+            ArrayList<Uri> l = i.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (l != null) us.addAll(l);
+        }
+        if (!us.isEmpty() && worker == null) start(us);
     }
 
     private Spinner spinner(int id, String[] items, int sel) {
@@ -104,12 +109,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (res != RESULT_OK || data == null || data.getData() == null) return;
-        if (req == PICK) start(data.getData());
-        else if (req == SAVE_TREE) saveTo(data.getData());
+        if (res != RESULT_OK || data == null) return;
+        if (req == PICK) {
+            List<Uri> us = new ArrayList<>();
+            if (data.getClipData() != null) {
+                for (int k = 0; k < data.getClipData().getItemCount(); k++) us.add(data.getClipData().getItemAt(k).getUri());
+            } else if (data.getData() != null) us.add(data.getData());
+            if (!us.isEmpty()) start(us);
+        } else if (req == SAVE_TREE && data.getData() != null) saveTo(data.getData());
     }
 
-    private void start(Uri uri) {
+    private void start(List<Uri> uris) {
         if (worker != null) return;
         Options o = new Options();
         o.maxBytes = SIZES_MB[size.getSelectedItemPosition()] * 1024 * 1024;
@@ -118,21 +128,31 @@ public class MainActivity extends Activity {
         prefs.edit().putInt("size", size.getSelectedItemPosition()).putInt("tokens", tokens.getSelectedItemPosition())
                 .putInt("images", images.getSelectedItemPosition()).apply();
 
-        final String name = displayName(uri);
+        final List<String> names = new ArrayList<>();
+        for (Uri u : uris) names.add(displayName(u));
         cancelled = false;
         busy(true);
-        log.setText("");
-        status.setText("Copying " + name + "…");
+        log.setText(names.size() + " document(s) selected:\n• " + android.text.TextUtils.join("\n• ", names));
+        status.setText("Copying…");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         worker = new Thread(() -> {
             String msg;
             List<File> out = null;
             List<String> warnings = null;
             long t0 = System.currentTimeMillis();
-            File in = new File(getCacheDir(), "input" + ext(name));
+            List<Processor.Input> inputs = new ArrayList<>();
+            File inDir = new File(getCacheDir(), "inputs");
             try {
-                copy(uri, in);
-                Processor.Result r = Processor.run(this, in, name, o, outDir(this), new PdfSource.Progress() {
+                Processor.deleteTree(inDir);
+                inDir.mkdirs();
+                for (int k = 0; k < uris.size(); k++) {
+                    File in = new File(inDir, "input" + k + ext(names.get(k)));
+                    final int kk = k;
+                    runOnUiThread(() -> status.setText("Copying " + (kk + 1) + "/" + uris.size() + ": " + names.get(kk)));
+                    copy(uris.get(k), in);
+                    inputs.add(new Processor.Input(in, names.get(k)));
+                }
+                Processor.Result r = Processor.run(this, inputs, o, outDir(this), new PdfSource.Progress() {
                     long last;
                     @Override public void update(String m, int done, int total) {
                         long now = System.currentTimeMillis();
@@ -156,7 +176,7 @@ public class MainActivity extends Activity {
             } catch (Throwable e) {
                 msg = "❌ " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
             } finally {
-                in.delete();
+                Processor.deleteTree(inDir);
             }
             final String fm = msg;
             final List<File> fo = out;
@@ -166,7 +186,7 @@ public class MainActivity extends Activity {
                 busy(false);
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 status.setText(fm);
-                if (fw != null && !fw.isEmpty()) log.setText("Notes:\n• " + android.text.TextUtils.join("\n• ", fw));
+                if (fw != null && !fw.isEmpty()) log.append("\n\nNotes:\n• " + android.text.TextUtils.join("\n• ", fw));
                 if (fo == null) Processor.deleteTree(outDir(this));
                 showResults();
             });

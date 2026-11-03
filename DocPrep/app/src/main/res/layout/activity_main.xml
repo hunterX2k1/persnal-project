@@ -5,7 +5,7 @@
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp"
             android:textColor="#444"
-            android:text="Turns a big PDF, Word or Excel file into ZIP parts small enough to upload to Claude. Everything runs on this phone – the app has no internet permission. Drawings and tables are kept as images placed exactly where they belong in the text, and every part includes an index of the whole document." />
+            android:text="Turns big PDF, Word or Excel files – one or several at once – into ZIP parts small enough to upload to Claude. Small documents share a part; anything over the limit is split across parts. Everything runs on this phone – the app has no internet permission. Drawings and tables are kept as images placed exactly where they belong in the text, and every part includes an index of the whole document." />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="14dp"
             android:text="Max size of each ZIP" android:textStyle="bold" />
@@ -20,7 +20,7 @@
         <Spinner android:id="@+id/images" android:layout_width="match_parent" android:layout_height="48dp" />
 
         <Button android:id="@+id/pick" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="16dp" android:text="Choose document &amp; process" />
+            android:layout_marginTop="16dp" android:text="Choose document(s) &amp; process" />
         <Button android:id="@+id/cancel" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Cancel" android:visibility="gone" />
 

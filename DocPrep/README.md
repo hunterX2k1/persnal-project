@@ -8,9 +8,18 @@ the app has **no internet permission**, so nothing leaves the device unless you 
 
 ## How to use
 1. Open DocPrep, choose the limits (defaults: 10 MB and ~150k tokens per ZIP) and image mode.
-2. Tap **Choose document & process** (or "Open with → DocPrep" from a file manager).
+2. Tap **Choose document(s) & process** and select **one or several files** (long-press to multi-select),
+   or share/open them into DocPrep from a file manager.
 3. Tap **Share** on a part (e.g. straight to the Claude app) or **Save all to a folder**.
 4. Upload part 1 to Claude and say what you need; upload further parts when Claude asks for them.
+
+## Several documents at once
+All selected files are packed into **one numbered set of parts**: small documents share a part, and any document
+that doesn't fit continues into the next part (always split between pages/sections/row blocks). Each document is
+numbered **D1, D2, …**: its start is marked `# Document D2 of 4: name`, its pages are labelled `D2 · Page 12`, its
+images are named `d2_p0012.jpg`. INDEX.md gets a **Documents** table (file, type, content, which parts, SHA-256) and the
+tag index works **across documents** – e.g. `XV-303 → D1 p.12 (part 1); D2 §4 (part 2); D4 'Interlocks' rows 2–21 (part 3)`.
+A file that can't be read (e.g. an old .doc) is skipped with a note; the others are still processed.
 
 ## What's inside each ZIP
 | File | Purpose |
@@ -37,6 +46,8 @@ bookmarks, repeated header/footer), a Word control narrative (headings, table, f
 - Word: figures placed between their caption and following paragraph with alt text; tables kept as Markdown.
 - Excel: 300-row blocks with header row repeated; tag series and cross-sheet links (PT-1001…1020 in both the
   I/O list and the interlock sheet) captured in the index.
+- Multi-document: a 40-page PDF + Word + unsupported .doc + Excel in one run → 3 parts, PDF continued across
+  parts 1–2, Word and Excel sharing part 2, Excel continuing into part 3, .doc skipped with a note, cross-document tag links in the index.
 The phone UI (file picker, Share, Save) could not be exercised on the emulator and is untested.
 
 ## Limits

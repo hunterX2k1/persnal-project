@@ -62,16 +62,16 @@ final class OfficeSource {
                             if (target != null && opt.imageMode != Options.IMG_NONE) {
                                 ZipEntry e = z.getEntry(target);
                                 Unit.Img img = e == null ? null : Images.fromBytes(
-                                        String.format(java.util.Locale.US, "fig%04d.jpg", figNo + 1), read(z, e));
+                                        idx.img(String.format(java.util.Locale.US, "fig%04d.jpg", figNo + 1)), read(z, e));
                                 figNo++;
                                 String marker;
                                 if (img != null) {
                                     sec.images.add(img);
-                                    marker = "\n**[FIGURE " + figNo + "]** `images/" + img.name + "`"
+                                    marker = "\n**[FIGURE " + idx.fig(String.valueOf(figNo)) + "]** `images/" + img.name + "`"
                                             + (pendingAlt != null && !pendingAlt.isEmpty() ? " – alt text: " + pendingAlt : "")
                                             + " _(the picture sits exactly here in the document; the surrounding text describes it)_\n";
                                 } else {
-                                    marker = "\n**[FIGURE " + figNo + "]** _(image format not supported on the phone: " + target + ")_\n";
+                                    marker = "\n**[FIGURE " + idx.fig(String.valueOf(figNo)) + "]** _(image format not supported on the phone: " + target + ")_\n";
                                 }
                                 if (cell != null) cell.append(marker.trim()).append(' '); else para.append(marker);
                             } else if (target != null) {
@@ -115,7 +115,8 @@ final class OfficeSource {
                 }
             }
             emit(sec, w, idx);
-            idx.notes.add("Word document: " + sectionNo + " sections, " + figNo + " figures. Page numbers don't exist in .docx files, so sections are used instead.");
+            idx.content(sectionNo + " sections, " + figNo + " figures");
+            idx.note("Word document: " + sectionNo + " sections, " + figNo + " figures. Page numbers don't exist in .docx files, so sections are used instead.");
         }
     }
 
@@ -127,16 +128,16 @@ final class OfficeSource {
 
     private static void emit(Section s, PartWriter w, Indexer idx) throws Exception {
         if (s.body.length() == 0 && s.images.isEmpty()) return;
-        String label = "Section " + s.no;
+        String label = idx.label("Section " + s.no);
         String body = s.body.toString();
         // The body already starts with its own heading; only label continuation blocks explicitly.
-        String md = "<!-- section " + s.no + " -->\n" + (body.startsWith("#") ? "" : "## Section " + s.no
-                + (s.heading != null ? " (continued: " + s.heading + ")" : "") + "\n\n") + body;
+        String md = "<!-- section " + s.no + " -->\n" + (body.startsWith("#") && !idx.multi ? "" : "## " + label
+                + (s.heading != null ? (body.startsWith("#") ? "" : " (continued: " + s.heading + ")") : "") + "\n\n") + body;
         Unit u = new Unit(label, md);
         u.images.addAll(s.images);
         u.heading = s.heading;
         int part = w.add(u);
-        Indexer.Loc where = Indexer.Loc.section(s.no, part);
+        Indexer.Loc where = idx.section(s.no, part);
         idx.scan(body, where);
         for (String h : s.headings) idx.addToc(h, where);
     }
@@ -260,7 +261,8 @@ final class OfficeSource {
                 // Remaining rows; or a sheet that only has a header row.
                 if (!buffer.isEmpty() || (header != null && !emitted)) { unitNo++; emitRows(sh[0], header, headerRow, buffer, maxCol, w, idx, unitNo); }
             }
-            idx.notes.add("Excel workbook: " + sheets.size() + " sheet(s). Each block repeats the sheet's header row so columns stay understandable; "
+            idx.content(sheets.size() + " sheet(s), " + unitNo + " row blocks");
+            idx.note("Excel workbook: " + sheets.size() + " sheet(s). Each block repeats the sheet's header row so columns stay understandable; "
                     + "values are shown as stored (dates may appear as numbers, formulas as their last calculated result).");
         }
     }
@@ -268,7 +270,7 @@ final class OfficeSource {
     private static void emitRows(String sheet, String header, int headerRow, TreeMap<Integer, TreeMap<Integer, String>> rows,
                                  int maxCol, PartWriter w, Indexer idx, int unitNo) throws Exception {
         int first = rows.isEmpty() ? headerRow : rows.firstKey(), last = rows.isEmpty() ? headerRow : rows.lastKey();
-        String label = "Sheet '" + sheet + "' rows " + first + "-" + last;
+        String label = idx.label("Sheet '" + sheet + "' rows " + first + "-" + last);
         StringBuilder body = new StringBuilder();
         body.append("<!-- block ").append(unitNo).append(" -->\n## ").append(label).append("\n\n");
         body.append("Header (row ").append(headerRow).append(") repeated for context. First column = original row number.\n\n```csv\n");
@@ -278,7 +280,7 @@ final class OfficeSource {
         Unit u = new Unit(label, body.toString());
         u.heading = "Sheet '" + sheet + "'";
         int part = w.add(u);
-        Indexer.Loc where = Indexer.Loc.block(unitNo, "'" + sheet + "' rows " + first + "–" + last, part);
+        Indexer.Loc where = idx.block(unitNo, "'" + sheet + "' rows " + first + "–" + last, part);
         idx.scan(body.toString(), where);
         idx.addToc("Sheet '" + sheet + "' rows " + first + "-" + last, where);
     }
@@ -350,21 +352,24 @@ final class OfficeSource {
         String all = new String(readAll(new java.io.FileInputStream(f)), StandardCharsets.UTF_8);
         String[] lines = all.split("\n", -1);
         int per = 1500;
+        idx.content(lines.length + " lines");
         for (int i = 0, k = 1; i < lines.length; i += per, k++) {
             int end = Math.min(lines.length, i + per);
-            StringBuilder b = new StringBuilder("## Lines " + (i + 1) + "-" + end + "\n\n");
+            StringBuilder b = new StringBuilder("## " + idx.label("Lines " + (i + 1) + "-" + end) + "\n\n");
             for (int j = i; j < end; j++) b.append(lines[j]).append('\n');
-            Unit u = new Unit("Lines " + (i + 1) + "-" + end, b.toString());
+            Unit u = new Unit(idx.label("Lines " + (i + 1) + "-" + end), b.toString());
             int part = w.add(u);
-            idx.scan(b.toString(), Indexer.Loc.block(k, "lines " + (i + 1) + "–" + end, part));
+            idx.scan(b.toString(), idx.block(k, "lines " + (i + 1) + "–" + end, part));
         }
     }
 
     static void image(File f, String name, PartWriter w, Indexer idx) throws Exception {
-        Unit.Img img = Images.fromBytes("image0001.jpg", readAll(new java.io.FileInputStream(f)));
+        Unit.Img img = Images.fromBytes(idx.img("image0001.jpg"), readAll(new java.io.FileInputStream(f)));
         if (img == null) throw new IllegalArgumentException("This image format can't be read on the phone.");
-        Unit u = new Unit("Image", "## Image\n\n**[FIGURE 1]** `images/image0001.jpg` – original file: " + name + "\n");
+        Unit u = new Unit(idx.label("Image"), "## " + idx.label("Image") + "\n\n**[FIGURE " + idx.fig("1") + "]** `images/"
+                + img.name + "` – original file: " + name + "\n");
         u.images.add(img);
+        idx.content("1 image");
         w.add(u);
     }
 }

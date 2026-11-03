@@ -46,7 +46,8 @@ final class PdfSource {
         MemoryUsageSetting mem = MemoryUsageSetting.setupMixed(64L * 1024 * 1024).setTempDir(tempDir);
         try (PDDocument doc = PDDocument.load(pdf, mem)) {
             int n = doc.getNumberOfPages();
-            idx.notes.add("PDF with " + n + " pages.");
+            idx.note("PDF with " + n + " pages.");
+            idx.content(n + " pages");
 
             // ---- Pass 1: text + "does this page have graphics?" ----
             String[] text = new String[n];
@@ -75,7 +76,7 @@ final class PdfSource {
                 StringBuilder ex = new StringBuilder("Removed repeated header/footer lines (shown once here): ");
                 int k = 0;
                 for (String r : repeated) { if (k++ > 0) ex.append(" | "); ex.append('“').append(r.substring(2)).append('”'); if (k >= 8) break; }
-                idx.notes.add(ex.toString());
+                idx.note(ex.toString());
             }
 
             // ---- Bookmarks → table of contents ----
@@ -93,7 +94,7 @@ final class PdfSource {
                 fd = ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY);
                 native_ = new PdfRenderer(fd);
             } catch (Exception e) {
-                idx.notes.add("Android's PDF renderer could not open this file (protected?); used the slower built-in renderer.");
+                idx.note("Android's PDF renderer could not open this file (protected?); used the slower built-in renderer.");
             }
             PDFRenderer fallback = null;
             String heading = null;
@@ -105,13 +106,13 @@ final class PdfSource {
                 if (marks != null && !marks.isEmpty()) heading = marks.get(marks.size() - 1).trim();
 
                 StringBuilder md = new StringBuilder();
-                md.append("<!-- page ").append(i + 1).append(" -->\n## Page ").append(i + 1).append("\n");
+                md.append("<!-- page ").append(i + 1).append(" -->\n## ").append(idx.label("Page " + (i + 1))).append("\n");
                 if (marks != null) for (String m : marks) md.append("_Bookmark: ").append(m.trim()).append("_\n");
                 md.append('\n');
-                Unit u = new Unit("Page " + (i + 1), "");
+                Unit u = new Unit(idx.label("Page " + (i + 1)), "");
                 if (graphic[i]) {
                     if (opt.imageMode == Options.IMG_NONE) {
-                        md.append("**[FIGURE p").append(i + 1).append("]** _Drawing/table/picture on this page omitted (text-only mode)._\n\n");
+                        md.append("**[FIGURE ").append(idx.fig("p" + (i + 1))).append("]** _Drawing/table/picture on this page omitted (text-only mode)._\n\n");
                     } else {
                         Bitmap big = null;
                         try {
@@ -125,14 +126,14 @@ final class PdfSource {
                                 big = fallback.renderImage(i, scale);
                             }
                         } catch (Throwable e) {      // includes OutOfMemoryError on huge sheets
-                            idx.notes.add("Page " + (i + 1) + ": could not render image (" + e.getClass().getSimpleName() + ").");
+                            idx.note("Page " + (i + 1) + ": could not render image (" + e.getClass().getSimpleName() + ").");
                         }
                         if (big != null) {
-                            String base = String.format(java.util.Locale.US, "p%04d", i + 1);
+                            String base = idx.img(String.format(java.util.Locale.US, "p%04d", i + 1));
                             Images.addPageImages(big, base, opt.imageMode == Options.IMG_HIGH, u.images);
                             big.recycle();
                             pageImages++;
-                            md.append("**[FIGURE p").append(i + 1).append("]** Page image: `images/").append(base).append(".jpg`");
+                            md.append("**[FIGURE ").append(idx.fig("p" + (i + 1))).append("]** Page image: `images/").append(base).append(".jpg`");
                             if (u.images.size() > 1) {
                                 md.append(" · zoom tiles: ");
                                 for (int t = 1; t < u.images.size(); t++) md.append(t > 1 ? ", " : "").append("`images/").append(u.images.get(t).name).append('`');
@@ -148,13 +149,13 @@ final class PdfSource {
                 unit.images.addAll(u.images);
                 unit.heading = heading;
                 int part = w.add(unit);
-                Indexer.Loc where = Indexer.Loc.page(i + 1, part);
+                Indexer.Loc where = idx.page(i + 1, part);
                 idx.scan(clean, where);
                 if (marks != null) for (String m : marks) idx.addToc(m, where);
             }
             if (native_ != null) native_.close();
             if (fd != null) fd.close();
-            idx.notes.add(pageImages + " of " + n + " pages contain drawings/tables/pictures and were included as images.");
+            idx.note(pageImages + " of " + n + " pages contain drawings/tables/pictures and were included as images.");
         }
     }
 

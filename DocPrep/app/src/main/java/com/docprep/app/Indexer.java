@@ -27,9 +27,6 @@ final class Indexer {
     static final class Loc implements Comparable<Loc> {
         final int part, num; final String kind, label;
         Loc(String kind, int num, String label, int part) { this.kind = kind; this.num = num; this.label = label; this.part = part; }
-        static Loc page(int n, int part) { return new Loc("p.", n, null, part); }
-        static Loc section(int n, int part) { return new Loc("§", n, null, part); }
-        static Loc block(int order, String label, int part) { return new Loc("", order, label, part); }
         @Override public int compareTo(Loc o) {
             if (part != o.part) return Integer.compare(part, o.part);
             if (!kind.equals(o.kind)) return kind.compareTo(o.kind);
@@ -39,6 +36,29 @@ final class Indexer {
         @Override public int hashCode() { return part * 31 + num; }
     }
 
+    /** One input document in a (possibly multi-document) run. */
+    static final class Doc {
+        final int no; final String name, sha; final long bytes; String type = "", content = "";
+        int firstPart = -1, lastPart = -1;
+        Doc(int no, String name, String sha, long bytes) { this.no = no; this.name = name; this.sha = sha; this.bytes = bytes; }
+    }
+
+    final List<Doc> docs = new ArrayList<>();
+    Doc doc;                 // document currently being processed
+    boolean multi;           // more than one document: prefix everything with D1, D2, …
+
+    private String dp() { return multi && doc != null ? "D" + doc.no + " " : ""; }
+    /** "Page 12" → "D2 · Page 12" when several documents are processed together. */
+    String label(String l) { return multi && doc != null ? "D" + doc.no + " · " + l : l; }
+    /** Unique image file names across documents. */
+    String img(String name) { return multi && doc != null ? "d" + doc.no + "_" + name : name; }
+    String fig(String id) { return dp() + id; }
+    Loc page(int n, int part) { return new Loc(dp() + "p.", n, null, part); }
+    Loc section(int n, int part) { return new Loc(dp() + "§", n, null, part); }
+    Loc block(int order, String label, int part) { return new Loc(dp(), order, dp() + label, part); }
+    void content(String c) { if (doc != null) doc.content = c; }
+    void note(String n) { notes.add(multi && doc != null ? "D" + doc.no + " (" + doc.name + "): " + n : n); }
+
     static final class Hit { final TreeSet<Loc> def = new TreeSet<>(), ment = new TreeSet<>(); }
 
     final Map<String, Hit> refs = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
@@ -47,7 +67,7 @@ final class Indexer {
     final List<String> notes = new ArrayList<>();
     private int tagOverflow;
 
-    void addToc(String title, Loc where) { if (toc.size() < 3000) toc.put(title, where); }
+    void addToc(String title, Loc where) { if (toc.size() < 3000) toc.put(label(title.trim()), where); }
 
     void scan(String text, Loc where) {
         for (String line : text.split("\n")) {
@@ -143,14 +163,31 @@ final class Indexer {
         StringBuilder s = new StringBuilder();
         s.append("# INDEX – ").append(title).append("\n\n").append(sourceInfo).append("\n").append(settings).append("\n\n");
         s.append("## How to read this package (for Claude)\n");
-        s.append("- The original document was split into **").append(parts.size())
-         .append(" part(s)**. Every part contains this same INDEX.md, so you always have the map of the whole document.\n");
+        if (multi) {
+            s.append("- This package holds **").append(docs.size()).append(" documents** (D1, D2, … in the Documents table), packed into **")
+             .append(parts.size()).append(" part(s)**. Small documents share a part; large ones continue across parts. ")
+             .append("Every page/section label and image name starts with its document number.");
+        } else {
+            s.append("- The original document was split into **").append(parts.size()).append(" part(s)**.");
+        }
+        s.append(" Every part contains this same INDEX.md, so you always have the map of everything.\n");
+        s.append("- Tags and figure numbers are indexed **across all documents**, so a tag that appears in several documents shows every place it occurs.\n");
         s.append("- `document.md` holds this part's content **in original reading order**. `## Page N` / `## Section N` headings mark where each original page/section starts.\n");
         s.append("- `**[FIGURE …]**` lines show exactly where an image belongs. The file in `images/` is the picture/drawing/table **from that same place**; the text right after it comes from the same page, so labels in the image match the words.\n");
         s.append("- `_t1…_t4` images are zoomed tiles (top-left, top-right, bottom-left, bottom-right) of a large drawing for reading small print.\n");
         s.append("- If something refers to a page, figure or tag in **another part**, the lists below say which part has it – ask the user to upload that part.\n");
         s.append("- `manifest.json` lists a SHA-256 fingerprint of every file; check them to confirm nothing was changed.\n\n");
 
+        if (multi) {
+            s.append("## Documents\n| Doc | File | Type | Content | In part(s) | Size | SHA-256 |\n|---|---|---|---|---|---|---|\n");
+            for (Doc d : docs) {
+                s.append("| D").append(d.no).append(" | ").append(d.name).append(" | ").append(d.type).append(" | ").append(d.content)
+                 .append(" | ").append(d.firstPart < 0 ? "–" : d.firstPart == d.lastPart ? String.valueOf(d.firstPart) : d.firstPart + "–" + d.lastPart)
+                 .append(" | ").append(String.format(java.util.Locale.US, "%.1f MB", d.bytes / 1048576.0))
+                 .append(" | `").append(d.sha.substring(0, 16)).append("…` |\n");
+            }
+            s.append('\n');
+        }
         s.append("## Parts\n| Part | File | Covers | Approx. tokens | Size |\n|---|---|---|---|---|\n");
         for (PartWriter.Part p : parts) {
             s.append("| ").append(p.no).append(" | ").append(p.zipName).append(" | ").append(p.first)
