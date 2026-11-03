@@ -1,0 +1,42 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="#FAF7F2">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="16dp">
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp"
+            android:textColor="#444"
+            android:text="Turns a big PDF, Word or Excel file into ZIP parts small enough to upload to Claude. Everything runs on this phone – the app has no internet permission. Drawings and tables are kept as images placed exactly where they belong in the text, and every part includes an index of the whole document." />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="14dp"
+            android:text="Max size of each ZIP" android:textStyle="bold" />
+        <Spinner android:id="@+id/size" android:layout_width="match_parent" android:layout_height="48dp" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:text="Max content per ZIP (how much Claude reads at once)" android:textStyle="bold" />
+        <Spinner android:id="@+id/tokens" android:layout_width="match_parent" android:layout_height="48dp" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:text="Drawings, tables &amp; pictures" android:textStyle="bold" />
+        <Spinner android:id="@+id/images" android:layout_width="match_parent" android:layout_height="48dp" />
+
+        <Button android:id="@+id/pick" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:text="Choose document &amp; process" />
+        <Button android:id="@+id/cancel" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Cancel" android:visibility="gone" />
+
+        <ProgressBar android:id="@+id/bar" style="@android:style/Widget.Material.ProgressBar.Horizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" />
+        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textSize="14sp" />
+
+        <LinearLayout android:id="@+id/results" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:layout_marginTop="8dp" />
+        <Button android:id="@+id/share_all" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Share all parts" android:visibility="gone" />
+        <Button android:id="@+id/save_all" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Save all to a folder…" android:visibility="gone" />
+
+        <TextView android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textSize="12sp" android:textColor="#666" />
+    </LinearLayout>
+</ScrollView>
