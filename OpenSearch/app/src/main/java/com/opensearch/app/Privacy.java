@@ -22,19 +22,24 @@ final class Privacy {
 
     // ---- IP masking ----
     static final String[] PROXY_MODES = {
-            "Tor via Orbot (recommended)",
+            "Built-in Tor – choose any country (recommended)",
+            "Tor via the Orbot app",
             "My own proxy / VPN server",
             "Off – sites see my real IP",
     };
-    static final int MODE_TOR = 0, MODE_CUSTOM = 1, MODE_OFF = 2;
+    static final int MODE_BUILTIN = 0, MODE_TOR = 1, MODE_CUSTOM = 2, MODE_OFF = 3;
     static final String TOR_SOCKS = "socks5://127.0.0.1:9050";
     static final String ORBOT_PKG = "org.torproject.android";
+    /** Unreachable proxy used while Tor is starting, so nothing can slip out directly. */
+    static final String BLACKHOLE = "socks5://127.0.0.1:1";
 
-    static int proxyMode(SharedPreferences p) { return p.getInt("proxy_mode", MODE_TOR); }
+    static int proxyMode(SharedPreferences p) { return p.getInt("ip_mode", MODE_BUILTIN); }
 
     /** Proxy rule for the current mode, or null when off. */
     static String proxyRule(SharedPreferences p) {
         switch (proxyMode(p)) {
+            case MODE_BUILTIN:
+                return TorManager.isReady() ? "socks5://127.0.0.1:" + TorManager.socksPort() : BLACKHOLE;
             case MODE_TOR: return TOR_SOCKS;
             case MODE_CUSTOM: {
                 String r = p.getString("proxy_custom", "").trim();
@@ -52,6 +57,18 @@ final class Privacy {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ---- Country you appear to be in (built-in Tor) ----
+    /** Preference value: "" = any/fastest, "random", or a 2-letter country code. */
+    static String countryPref(SharedPreferences p) { return p.getString("exit_country", ""); }
+
+    static boolean mimic(SharedPreferences p) { return p.getBoolean("mimic", true); }
+
+    /** The country being imitated right now, or null. */
+    static Countries.Country mimicCountry(SharedPreferences p) {
+        if (proxyMode(p) != MODE_BUILTIN || !mimic(p)) return null;
+        return Countries.byCode(TorManager.activeCountry());
     }
 
     // ---- Search region (what country the engine thinks you're in) ----
@@ -79,6 +96,8 @@ final class Privacy {
     }
 
     static String[] region(SharedPreferences p) {
+        Countries.Country c = mimicCountry(p);
+        if (c != null) return new String[]{c.name, c.code, c.ddg(), c.lang};
         int i = p.getInt("region", 0);
         return REGIONS[(i >= 0 && i < REGIONS.length) ? i : 0];
     }
@@ -111,6 +130,11 @@ final class Privacy {
 
     /** {lat, lon} or null when location is blocked / custom values are invalid. */
     static double[] fakeLocation(SharedPreferences p) {
+        Countries.Country c = mimicCountry(p);
+        if (c != null) {
+            // Somewhere in that country's big city, ~3 km random spread.
+            return new double[]{c.lat + (JITTER[0] - 0.5) * 0.05, c.lon + (JITTER[1] - 0.5) * 0.05};
+        }
         int i = p.getInt("location", LOC_BLOCK);
         if (i <= LOC_BLOCK || i > LOC_CUSTOM) return null;
         String la = i == LOC_CUSTOM ? p.getString("lat", "") : LOCATIONS[i][1];
@@ -119,12 +143,23 @@ final class Privacy {
             double lat = Double.parseDouble(la.trim()), lon = Double.parseDouble(lo.trim());
             if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
             // Tiny random jitter (~100 m) so it doesn't look like a city-centre preset.
-            lat += (Math.random() - 0.5) * 0.002;
-            lon += (Math.random() - 0.5) * 0.002;
+            lat += (JITTER[0] - 0.5) * 0.002;
+            lon += (JITTER[1] - 0.5) * 0.002;
             return new double[]{lat, lon};
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Fixed per app session so the fake position doesn't jump around between pages. */
+    private static final double[] JITTER = {Math.random(), Math.random()};
+
+    /** Label for the status bar. */
+    static String locationLabel(SharedPreferences p) {
+        Countries.Country c = mimicCountry(p);
+        if (c != null) return c.name;
+        int i = p.getInt("location", LOC_BLOCK);
+        return fakeLocation(p) == null ? null : LOCATIONS[i][0];
     }
 
     // ---- Browser identity ----
@@ -152,6 +187,22 @@ final class Privacy {
                 + "clearWatch:function(){}};\n");
         js.append("try{Object.defineProperty(Navigator.prototype,'geolocation',"
                 + "{get:function(){return geo;},configurable:true});}catch(e){}\n");
+        Countries.Country c = mimicCountry(p);
+        if (c != null) {
+            // Time zone + language of the imitated country.
+            int off = -java.util.TimeZone.getTimeZone(c.tz).getOffset(System.currentTimeMillis()) / 60000;
+            js.append("var TZ='").append(c.tz).append("',OFF=").append(off)
+              .append(",LANG='").append(c.lang).append("';\n");
+            js.append("try{var D=Intl.DateTimeFormat;var P=function(l,o){o=Object.assign({},o||{});"
+                    + "if(!o.timeZone)o.timeZone=TZ;return new D(l,o);};P.prototype=D.prototype;"
+                    + "P.supportedLocalesOf=D.supportedLocalesOf;Intl.DateTimeFormat=P;}catch(e){}\n");
+            js.append("try{Date.prototype.getTimezoneOffset=function(){return OFF;};"
+                    + "['toLocaleString','toLocaleDateString','toLocaleTimeString'].forEach(function(m){"
+                    + "var f=Date.prototype[m];Date.prototype[m]=function(l,o){o=Object.assign({},o||{});"
+                    + "if(!o.timeZone)o.timeZone=TZ;return f.call(this,l,o);};});}catch(e){}\n");
+            js.append("try{Object.defineProperty(Navigator.prototype,'language',{get:function(){return LANG;},configurable:true});"
+                    + "Object.defineProperty(Navigator.prototype,'languages',{get:function(){return [LANG,LANG.split('-')[0]];},configurable:true});}catch(e){}\n");
+        }
         if (blockWebRtc(p)) {
             js.append("['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel',"
                     + "'RTCSessionDescription','RTCIceCandidate'].forEach(function(n){"

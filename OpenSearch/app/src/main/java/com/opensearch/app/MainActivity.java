@@ -40,7 +40,11 @@ import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
@@ -58,6 +62,7 @@ public class MainActivity extends Activity {
     private String pendingUrl;
     private ScriptHandler scriptHandler;
     private String injectedScript;
+    private boolean reloadWhenNewIp = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,6 +90,8 @@ public class MainActivity extends Activity {
         });
 
         setupWebView();
+        status.setOnClickListener(v -> pickCountry());
+        TorManager.setListener(this::onTorChanged);
         applyPrivacy();
 
         input.setOnEditorActionListener((v, actionId, event) -> {
@@ -172,6 +179,9 @@ public class MainActivity extends Activity {
             injectedScript = script;
         }
 
+        if (Privacy.proxyMode(prefs) == Privacy.MODE_BUILTIN) TorManager.start(this, Privacy.countryPref(prefs));
+        else TorManager.stop(this);
+
         final String rule = Privacy.proxyRule(prefs);
         final String want = rule == null ? "" : rule;
         if (want.equals(activeRule)) { updateStatus(); return; }
@@ -208,16 +218,40 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void onTorChanged() {
+        if (reloadWhenNewIp && TorManager.exitIp() != null && web.getVisibility() == View.VISIBLE) {
+            reloadWhenNewIp = false;
+            web.reload();
+        }
+        applyPrivacy();   // picks up the Tor port / country once ready; also refreshes the status bar
+    }
+
     private void updateStatus() {
         int mode = Privacy.proxyMode(prefs);
-        String ip = mode == Privacy.MODE_TOR ? "🧅 IP hidden by Tor"
+        if (mode == Privacy.MODE_BUILTIN) {
+            String cc = TorManager.activeCountry();
+            Countries.Country c = Countries.byCode(cc);
+            String where = c == null ? "🌍 any country" : c.flag() + " " + c.name;
+            String text;
+            if (TorManager.error() != null && !TorManager.isReady()) {
+                text = "⚠ " + TorManager.error();
+            } else if (!TorManager.isReady()) {
+                text = "⏳ Starting Tor… " + TorManager.progress() + "%   (" + where + ")";
+            } else {
+                String ip = TorManager.exitIp();
+                text = "🧅 " + where + "  ·  IP " + (ip == null ? "changing…" : ip);
+                if (Privacy.mimic(prefs) && c != null) text += "  ·  GPS/time/lang mimicked";
+            }
+            status.setText(text + "   ▾ change");
+            status.setBackgroundColor(TorManager.isReady() ? 0xFF14532D : 0xFF374151);
+            return;
+        }
+        String ip = mode == Privacy.MODE_TOR ? "🧅 IP hidden by Tor (Orbot)"
                 : mode == Privacy.MODE_CUSTOM ? "🛡 IP hidden by proxy"
                 : "⚠ Real IP visible";
         if (activeRule == null && mode != Privacy.MODE_OFF) ip = "⏳ connecting proxy…";
-        double[] loc = Privacy.fakeLocation(prefs);
-        int li = prefs.getInt("location", Privacy.LOC_BLOCK);
-        String where = loc == null ? "📍 location blocked"
-                : "📍 fake: " + Privacy.LOCATIONS[li][0];
+        String fake = Privacy.locationLabel(prefs);
+        String where = fake == null ? "📍 location blocked" : "📍 fake: " + fake;
         String region = Privacy.region(prefs)[1];
         status.setText(ip + "   " + where + (region.isEmpty() ? "" : "   🌐 " + region.toUpperCase()));
         status.setBackgroundColor(mode == Privacy.MODE_OFF ? 0xFFB45309 : 0xFF14532D);
@@ -269,12 +303,73 @@ public class MainActivity extends Activity {
     }
 
     private void load(String url) {
+        if (Privacy.proxyMode(prefs) == Privacy.MODE_BUILTIN && !TorManager.isReady()) {
+            pendingUrl = url;   // Tor still starting: loads automatically when it's connected
+            updateStatus();
+            return;
+        }
         String want = Privacy.proxyRule(prefs);
         if (activeRule == null || !activeRule.equals(want == null ? "" : want)) {
             pendingUrl = url;   // proxy not ready yet; applyPrivacy() will load it
             return;
         }
-        web.loadUrl(url);
+        Countries.Country c = Privacy.mimicCountry(prefs);
+        if (c != null) {
+            Map<String, String> h = new HashMap<>();
+            h.put("Accept-Language", c.lang + "," + c.lang.substring(0, 2) + ";q=0.9,en;q=0.5");
+            web.loadUrl(url, h);
+        } else {
+            web.loadUrl(url);
+        }
+    }
+
+    /** Server list: pick which country websites should think you are in. */
+    private void pickCountry() {
+        if (Privacy.proxyMode(prefs) != Privacy.MODE_BUILTIN) {
+            startActivity(new Intent(this, SettingsActivity.class));
+            return;
+        }
+        Map<String, Integer> counts = TorManager.serverCounts;
+        if (counts == null && TorManager.isReady()) TorManager.refreshServerCounts();
+        final List<String> codes = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        codes.add(""); labels.add("🌍 Any country (fastest)");
+        codes.add("random"); labels.add("🎲 Random country");
+        List<Countries.Country> list = new ArrayList<>(java.util.Arrays.asList(Countries.ALL));
+        if (counts != null) {   // most servers first
+            Collections.sort(list, (x, y) -> Integer.compare(
+                    counts.containsKey(y.code) ? counts.get(y.code) : 0,
+                    counts.containsKey(x.code) ? counts.get(x.code) : 0));
+        }
+        for (Countries.Country c : list) {
+            Integer n = counts == null ? null : counts.get(c.code);
+            String extra = counts == null ? "" : (n == null || n == 0) ? "   – no servers right now" : "   – " + n + " servers";
+            codes.add(c.code);
+            labels.add(c.flag() + "  " + c.name + extra);
+        }
+        String cur = Privacy.countryPref(prefs);
+        int sel = Math.max(0, codes.indexOf(cur));
+        int total = 0;
+        if (counts != null) for (int n : counts.values()) total += n;
+        new AlertDialog.Builder(this)
+                .setTitle(counts == null ? "Appear to be in…" : "Appear to be in… (" + total + " exit servers live)")
+                .setSingleChoiceItems(labels.toArray(new String[0]), sel, (d, which) -> {
+                    String code = codes.get(which);
+                    Integer n = counts == null ? null : counts.get(code);
+                    if (counts != null && code.length() == 2 && (n == null || n == 0)) {
+                        Toast.makeText(this, "No Tor servers in that country right now – pages won't load until one appears.",
+                                Toast.LENGTH_LONG).show();
+                    }
+                    prefs.edit().putString("exit_country", code).apply();
+                    TorManager.setCountry(code);
+                    reloadWhenNewIp = true;
+                    injectedScript = null;   // force re-inject with the new country's GPS / time zone
+                    applyPrivacy();
+                    d.dismiss();
+                })
+                .setNeutralButton("New IP, same country", (d, w) -> { reloadWhenNewIp = true; TorManager.newIp(); })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void askForOrbot(String url) {
@@ -322,6 +417,10 @@ public class MainActivity extends Activity {
         pm.getMenu().add(0, 1, 0, "Open in browser");
         pm.getMenu().add(0, 2, 0, "Share link");
         pm.getMenu().add(0, 3, 0, "Clear history & cookies");
+        if (Privacy.proxyMode(prefs) == Privacy.MODE_BUILTIN) {
+            pm.getMenu().add(0, 6, 0, "Change country / server");
+            pm.getMenu().add(0, 7, 0, "New IP address");
+        }
         pm.getMenu().add(0, 5, 0, "Check my IP & location");
         pm.getMenu().add(0, 4, 0, "Privacy & settings");
         pm.setOnMenuItemClickListener(item -> {
@@ -340,10 +439,17 @@ public class MainActivity extends Activity {
                                 .setNegativeButton("Cancel", null).show();
                     }
                     return true;
+                case 6:
+                    pickCountry();
+                    return true;
+                case 7:
+                    reloadWhenNewIp = true;
+                    TorManager.newIp();
+                    return true;
                 case 5:
                     home.setVisibility(View.GONE);
                     web.setVisibility(View.VISIBLE);
-                    guardedLoad(Privacy.proxyMode(prefs) == Privacy.MODE_TOR
+                    guardedLoad(Privacy.proxyMode(prefs) <= Privacy.MODE_TOR
                             ? "https://check.torproject.org/" : "https://browserleaks.com/ip");
                     return true;
                 case 2:
@@ -375,6 +481,15 @@ public class MainActivity extends Activity {
         web.setVisibility(View.GONE);
         home.setVisibility(View.VISIBLE);
         Toast.makeText(this, "Cleared", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (isFinishing()) {
+            TorManager.setListener(null);
+            TorManager.stop(this);
+        }
+        super.onDestroy();
     }
 
     @Override

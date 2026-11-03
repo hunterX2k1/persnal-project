@@ -8,15 +8,25 @@
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="20dp" android:text="🧅 Hide my IP address" android:textStyle="bold" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
-            android:text="Tor: install the free Orbot app and tap Start. In Orbot's settings you can also pick which country your traffic exits from. If the proxy is down, nothing loads, so your real IP never leaks." />
+            android:text="Built-in Tor sends your searches through 3 volunteer servers; the last one (in the country you choose) is the IP websites see. If Tor/the proxy is down, nothing loads, so your real IP never leaks." />
         <Spinner android:id="@+id/proxy_mode" android:layout_width="match_parent" android:layout_height="48dp" />
+        <LinearLayout android:id="@+id/tor_box" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="Country websites see (Tor exit server)" />
+            <Spinner android:id="@+id/country" android:layout_width="match_parent" android:layout_height="48dp" />
+            <CheckBox android:id="@+id/mimic" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Mimic that country: fake GPS, time zone, language and search region all match it" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+                android:text="Tip: tap the green bar on the main screen to switch country instantly and see live server counts." />
+        </LinearLayout>
         <EditText android:id="@+id/proxy_custom" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:hint="socks5://host:1080  or  http://host:8080" android:inputType="textUri" android:singleLine="true" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="20dp" android:text="📍 Location shown to websites" android:textStyle="bold" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
-            android:text="The app has no permission to read your real GPS. Pages asking for location get nothing, or this fake place." />
+            android:text="The app has no permission to read your real GPS. Pages asking for location get nothing, or this fake place. (Ignored while 'Mimic that country' is on.)" />
         <Spinner android:id="@+id/location" android:layout_width="match_parent" android:layout_height="48dp" />
         <LinearLayout android:id="@+id/custom_loc" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal">
