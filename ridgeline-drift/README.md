@@ -6,8 +6,9 @@ A 2.5D drift game on a winding mountain road with a cliff drop on both sides. Th
 
 Open `index.html` in any modern browser. It's a single file with no build step.
 
-- **Hold left half of the screen / ← / A**: drift left
-- **Hold right half / → / D**: drift right
+- **Touch and hold anywhere**: the further left or right of centre your finger is, the harder you steer and drift. Slide your finger to adjust mid-corner. Let go and the car straightens itself.
+- **← / A and → / D**: full-lock steering on a keyboard
+- Counter-steering (pushing the other way mid-slide) catches the slide faster.
 - **M**: mute or unmute
 
 ## Look
@@ -16,6 +17,22 @@ Open `index.html` in any modern browser. It's a single file with no build step.
 - Miniature retro cars built from stacked slices, so they have real height and shading.
 - Textured asphalt with patches and cracks, double yellow centre line, gravel shoulder, reflector posts, and red/white kerbs on tight bends.
 - Effects: tyre smoke (gold during big combos), dust on the gravel, sparks, drifting clouds and their shadows, distance haze, vignette, wind streaks at speed, brake-light glow, and slow motion plus a dust cloud when you go over.
+
+## The road
+
+- Hills, dips and crests (altitude and gradient shown under the score). Climbs slow you down, descents speed you up.
+- Sharp crests at speed launch the car: airtime earns AIR points, and you can't steer in the air.
+- Grassy, rocky mountainside with pine trees falls away on both sides down to the valley.
+
+## Obstacles
+
+| Obstacle | What happens |
+|---|---|
+| Fallen boulder | Bounces you off, cuts your speed and loses unbanked drift points |
+| Slow hay truck | Honks as you close in; overtake it or crash into it like a boulder |
+| Traffic cones | Knock them flying; slows you a little |
+| Oil slick | Almost no grip for a moment |
+| Gold coins | Lined along the inside of bends: +20, +40, +60… for collecting in a row |
 
 ## Garage
 
