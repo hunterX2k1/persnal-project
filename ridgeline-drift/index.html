@@ -84,7 +84,7 @@ h2 { font-size: 30px; color: var(--danger); }
   appearance: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.06); color: var(--ink); font-size: 18px; cursor: pointer;
 }
-#preview { width: 100%; height: 130px; display: block; }
+#preview { width: 100%; height: 150px; display: block; }
 .car-name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .car-name b { font-family: var(--display); font-weight: 400; font-size: 20px; }
 .car-name span { font-size: 15px; color: var(--muted); }
@@ -227,7 +227,7 @@ h2 { font-size: 30px; color: var(--danger); }
     dpr = Math.min(2, window.devicePixelRatio || 1);
     cw = window.innerWidth; ch = window.innerHeight;
     cvs.width = Math.round(cw * dpr); cvs.height = Math.round(ch * dpr);
-    unit = Math.min(cw, ch * 1.2) / 400;
+    unit = Math.min(cw, ch * 1.2) / 680;
     const pr = ui.preview.getBoundingClientRect();
     ui.preview.width = Math.max(1, Math.round(pr.width * dpr)); ui.preview.height = Math.max(1, Math.round(pr.height * dpr));
   }
@@ -274,66 +274,146 @@ h2 { font-size: 30px; color: var(--danger); }
   })();
 
   // ---------- cars: miniature retro models, built as stacked slices ----------
-  const CARS = [
-    { id: 'rally', name: 'Rally 72', year: '1972 rally coupe', unlock: 0, top: 1.0, turn: 2.5, slide: 1.7, mult: 1,
-      L: 46, W: 24, r: 6, body: '#e8413c', roof: '#c9302c', bodyZ: [4, 11], cab: [-9, 7, 3, 4], glassZ: [12, 15], roofZ: [16, 17], stripes: '#f4f0e8' },
-    { id: 'pocket', name: 'Pocket', year: '1964 city mini', unlock: 600, top: 0.95, turn: 2.85, slide: 1.95, mult: 1,
-      L: 38, W: 22, r: 5, body: '#2f7d55', roof: '#f1efe8', bodyZ: [4, 11], cab: [-10, 9, 2, 3], glassZ: [12, 16], roofZ: [17, 18] },
-    { id: 'bubble', name: 'Bubble', year: '1958 round runabout', unlock: 1400, top: 0.98, turn: 2.6, slide: 1.45, mult: 1.1,
-      L: 42, W: 25, r: 11, body: '#7cc6d6', roof: '#8fd0de', bodyZ: [4, 12], cab: [-10, 6, 3, 9], glassZ: [13, 17], roofZ: [18, 20] },
-    { id: 'comet', name: 'Comet GT', year: '1969 muscle fastback', unlock: 2600, top: 1.09, turn: 2.3, slide: 1.4, mult: 1.2,
-      L: 52, W: 25, r: 5, body: '#f2b134', roof: '#2a2a2a', bodyZ: [4, 10], cab: [-2, 13, 3, 4], glassZ: [11, 13], roofZ: [14, 15], stripes: '#1d1d1d' },
-    { id: 'camper', name: 'Camper', year: '1966 split-window van', unlock: 4000, top: 0.92, turn: 2.25, slide: 2.3, mult: 1.3,
-      L: 48, W: 25, r: 7, body: '#d9573a', roof: '#f2ead8', bodyZ: [4, 12], cab: [-21, 22, 1, 6], glassZ: [13, 16], roofZ: [17, 21], upper: '#f2ead8' },
-  ];
-
-  function buildModel(c) {
+  // Each model is a list of height levels; every level is a set of flat shapes drawn at that height.
+  // Front of the car is -y. Shapes: rr (rounded rect), rect, circ, ell, poly, wheel.
+  const GLASS = '#2b3e4b', CHROME = '#d5dade', TYRE = '#1b1b1d', LENS = '#fff6d2', TAIL = '#cf2a22';
+  function modelKit() {
     const levels = new Map();
-    const add = (z0, z1, op, base, top) => {
-      for (let z = z0; z <= z1; z++) {
-        const k = z1 === z0 ? 1 : (z - z0) / (z1 - z0);
-        const col = z === z1 && top ? shade(base, top) : shade(base, -0.32 * (1 - k));
-        if (!levels.has(z)) levels.set(z, []);
-        levels.get(z).push(Object.assign({}, op, { c: col }));
-      }
+    const put = (z, op) => { if (!levels.has(z)) levels.set(z, []); levels.get(z).push(op); };
+    const col = (base, k, top, dark, isTop) => (isTop && top ? shade(base, top) : shade(base, -dark * (1 - k)));
+    const lerpOp = (a, b, k) => {
+      const o = Object.assign({}, a);
+      for (const key of ['x', 'y', 'w', 'h', 'r', 'rx', 'ry']) if (typeof a[key] === 'number' && typeof b[key] === 'number') o[key] = a[key] + (b[key] - a[key]) * k;
+      return o;
     };
-    const hl = c.L / 2, hw = c.W / 2;
-    // wheels and chrome bumpers
-    for (const [x, y, f] of [[-hw + 1, -hl + 10, 1], [hw - 1, -hl + 10, 1], [-hw + 1, hl - 10, 0], [hw - 1, hl - 10, 0]]) add(0, 7, { t: 'wheel', x, y, front: f }, '#2a2a2c', 0.1);
-    add(4, 6, { t: 'rr', x: -hw + 2, y: -hl - 1.5, w: c.W - 4, h: 3, r: 1.5 }, '#d4d8dc', 0.2);
-    add(4, 6, { t: 'rr', x: -hw + 2, y: hl - 1.5, w: c.W - 4, h: 3, r: 1.5 }, '#d4d8dc', 0.2);
-    // body
-    add(c.bodyZ[0], c.bodyZ[1], { t: 'rr', x: -hw, y: -hl, w: c.W, h: c.L, r: c.r }, c.body, 0.12);
-    // lights on the body sides
-    add(7, 9, { t: 'rr', x: -hw + 2, y: -hl - 0.5, w: 5, h: 2.5, r: 1 }, '#fff1c2', 0.1);
-    add(7, 9, { t: 'rr', x: hw - 7, y: -hl - 0.5, w: 5, h: 2.5, r: 1 }, '#fff1c2', 0.1);
-    add(7, 9, { t: 'rr', x: -hw + 2, y: hl - 2, w: 4, h: 2.5, r: 1 }, '#c3221d', 0.1);
-    add(7, 9, { t: 'rr', x: hw - 6, y: hl - 2, w: 4, h: 2.5, r: 1 }, '#c3221d', 0.1);
-    // cabin: glass band then roof
-    const [cy0, cy1, inset, cr] = c.cab;
-    const cab = { t: 'rr', x: -hw + inset, y: cy0, w: c.W - inset * 2, h: cy1 - cy0, r: cr };
-    if (c.upper) add(c.bodyZ[1] + 1, c.glassZ[0], Object.assign({}, cab, { x: -hw + 0.5, w: c.W - 1, r: c.r }), c.upper, 0);
-    add(c.glassZ[0], c.glassZ[1], c.upper ? Object.assign({}, cab, { x: -hw + 0.5, w: c.W - 1, r: c.r }) : cab, '#2b3f4c', 0.25);
-    add(c.roofZ[0], c.roofZ[1], c.upper ? Object.assign({}, cab, { x: -hw + 1, w: c.W - 2, r: c.r }) : Object.assign({}, cab, { x: cab.x + 0.6, w: cab.w - 1.2 }), c.roof, 0.14);
-    // stripes and roof details on the top slices
-    if (c.stripes) {
-      const zTop = c.bodyZ[1];
-      const s = levels.get(zTop) || []; const sr = levels.get(c.roofZ[1]) || [];
-      for (const x of [-4.5, 1.5]) {
-        s.push({ t: 'rect', x, y: -hl, w: 3, h: c.L, c: c.stripes });
-        sr.push({ t: 'rect', x, y: cy0, w: 3, h: cy1 - cy0, c: c.stripes });
-      }
-    }
-    if (c.id === 'camper') {
-      const sr = levels.get(c.roofZ[1]);
-      for (let y = -14; y <= 14; y += 7) sr.push({ t: 'rect', x: -hw + 4, y, w: c.W - 8, h: 1.2, c: '#c9bfa8' });
-      const s = levels.get(c.bodyZ[1]);
-      s.push({ t: 'rect', x: -6, y: -hl + 1, w: 12, h: 3, c: '#f2ead8' }); // V-shaped nose panel
-    }
-    const zs = [...levels.keys()].sort((a, b) => a - b);
-    return zs.map((z) => ({ z, ops: levels.get(z) }));
+    return {
+      slab(z0, z1, op, base, top = 0.12, dark = 0.32) {
+        for (let z = z0; z <= z1; z++) { const k = z1 === z0 ? 1 : (z - z0) / (z1 - z0); put(z, Object.assign({}, op, { c: col(base, k, top, dark, z === z1) })); }
+      },
+      loft(z0, z1, a, b, base, top = 0.12, dark = 0.3) {
+        for (let z = z0; z <= z1; z++) { const k = z1 === z0 ? 1 : (z - z0) / (z1 - z0); put(z, Object.assign(lerpOp(a, b, k), { c: col(base, k, top, dark, z === z1) })); }
+      },
+      at(z, op, c) { put(z, Object.assign({}, op, { c })); },
+      wheels(wb, tw, front = 1) {
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) this.slab(0, 7, { t: 'wheel', x: sx * tw, y: sy * wb, front: sy < 0 ? front : 0 }, TYRE, 0.15, 0.2);
+      },
+      done() { return [...levels.keys()].sort((a, b) => a - b).map((z) => ({ z, ops: levels.get(z) })); },
+    };
   }
-  CARS.forEach((c) => { c.model = buildModel(c); });
+  const R_ = (x, y, w, h, r = 0) => ({ t: 'rr', x, y, w, h, r });
+  const RECT = (x, y, w, h) => ({ t: 'rect', x, y, w, h });
+  const CIRC = (x, y, r) => ({ t: 'circ', x, y, r });
+  const ELL = (x, y, rx, ry) => ({ t: 'ell', x, y, rx, ry });
+
+  const BUILD = {
+    // 1970s two-door rally saloon: boxy, flared arches, four spotlights, mud flaps, roof roundel
+    rally(m) {
+      const body = '#f1eee6', blue = '#1d4f9a';
+      m.wheels(14, 10.6);
+      m.slab(4, 11, R_(-11, -22, 22, 44, 4), body, 0.1);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) m.slab(4, 8, R_(sx > 0 ? 10 : -12.6, sy * 14 - 7, 2.6, 14, 1.3), '#2a2a2a', 0.15);
+      m.slab(5, 6, R_(-10.5, -23.6, 21, 2.2, 1), CHROME, 0.25); m.slab(5, 6, R_(-10.5, 21.6, 21, 2, 1), CHROME, 0.25);
+      for (const x of [-7.5, -2.5, 2.5, 7.5]) { m.slab(6, 9, CIRC(x, -24.6, 2.1), '#262626', 0.1); m.at(9, CIRC(x, -24.6, 1.5), '#ffe58a'); }
+      m.slab(8, 10, R_(-4.5, -22.4, 9, 1.6, 0.6), '#1d1d1d', 0.1);
+      for (const sx of [-1, 1]) { m.slab(9, 11, CIRC(sx * 7, -20.4, 2.2), CHROME, 0.2); m.at(11, CIRC(sx * 7, -20.4, 1.5), LENS); }
+      for (const sx of [-1, 1]) m.slab(8, 9, R_(sx * 8 - 2, 21.2, 4, 1.4, 0.6), TAIL, 0.2);
+      for (const sx of [-1, 1]) m.slab(1, 4, RECT(sx * 10.6 - 1.5, 21, 3, 1), '#111');
+      m.at(11, RECT(-3.6, -22, 2.4, 44), blue); m.at(11, RECT(1.2, -22, 2.4, 44), blue); m.at(11, RECT(-0.9, -22, 1.8, 44), '#d33b2f');
+      m.at(11, RECT(-6.5, -19, 1.2, 2.6), '#111'); m.at(11, RECT(5.3, -19, 1.2, 2.6), '#111');
+      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 10.6 : -12.6, -7, 2, 2), body, 0.1);
+      m.loft(12, 17, R_(-9.6, -8, 19.2, 18, 3), R_(-7.6, -4, 15.2, 11, 3), GLASS, 0.3, 0.1);
+      m.slab(18, 19, R_(-7.6, -4, 15.2, 11, 3), body, 0.1);
+      m.at(19, RECT(-3.6, -4, 2.4, 11), blue); m.at(19, RECT(1.2, -4, 2.4, 11), blue);
+      m.at(19, CIRC(0, 1.5, 3.3), '#ffffff'); m.at(19, RECT(-0.9, 0, 1.8, 3), '#111');
+    },
+    // 1960s British city mini: tiny, wheels at the corners, white roof, chrome grille, bonnet stripes
+    pocket(m) {
+      const body = '#1f6b46', roof = '#f4f2ea';
+      m.wheels(12.6, 9.9);
+      m.slab(4, 11, R_(-10.5, -18, 21, 36, 5), body, 0.12);
+      m.slab(5, 6, R_(-9.5, -19.3, 19, 2, 1), CHROME, 0.25); m.slab(5, 6, R_(-9.5, 17.3, 19, 2, 1), CHROME, 0.25);
+      m.slab(6, 9, R_(-5, -18.7, 10, 1.8, 0.8), CHROME, 0.2);
+      for (let i = -2; i <= 2; i++) m.at(9, RECT(i * 2 - 0.3, -18.7, 0.6, 1.8), '#444');
+      for (const sx of [-1, 1]) { m.slab(9, 11, CIRC(sx * 7.2, -15.6, 2.4), CHROME, 0.2); m.at(11, CIRC(sx * 7.2, -15.6, 1.6), LENS); }
+      for (const sx of [-1, 1]) m.slab(8, 10, R_(sx * 8.4 - 0.8, 16.4, 1.6, 1.8, 0.6), TAIL, 0.2);
+      m.at(11, RECT(-3.2, -18, 2.2, 11), roof); m.at(11, RECT(1, -18, 2.2, 11), roof);
+      for (const sx of [-1, 1]) m.at(11, CIRC(sx * 9.6, 8.5, 0.9), CHROME);
+      for (const sx of [-1, 1]) m.slab(11, 12, CIRC(sx * 11.2, -6.5, 1.1), CHROME, 0.2);
+      m.loft(12, 17, R_(-9.6, -7, 19.2, 19, 2.2), R_(-8.8, -6, 17.6, 17, 2.2), GLASS, 0.3, 0.1);
+      m.slab(18, 19, R_(-9.1, -6.5, 18.2, 18, 2.6), roof, 0.08, 0.15);
+    },
+    // 1950s air-cooled round car: separate fenders, running boards, domed roof, louvred engine lid
+    bubble(m) {
+      const body = '#86c5d4';
+      m.wheels(13, 10.4);
+      m.slab(4, 5, R_(-11.6, -8, 23.2, 16, 1), '#2a2a2a', 0.1);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) m.loft(4, 10, ELL(sx * 9.6, sy * 13, 4.8, 8.2), ELL(sx * 9.2, sy * 13, 3.4, 6.6), body, 0.14);
+      m.loft(5, 12, R_(-9, -21, 18, 42, 8.5), R_(-7.4, -19.2, 14.8, 37.5, 7), body, 0.12);
+      m.slab(5, 6, R_(-11, -22.6, 22, 1.6, 0.8), CHROME, 0.25); m.slab(5, 6, R_(-11, 21, 22, 1.6, 0.8), CHROME, 0.25);
+      for (const sx of [-1, 1]) { m.slab(5, 7, RECT(sx * 5 - 0.6, -23.4, 1.2, 2.6), CHROME, 0.2); m.slab(5, 7, RECT(sx * 5 - 0.6, 20.8, 1.2, 2.6), CHROME, 0.2); }
+      for (const sx of [-1, 1]) { m.slab(10, 11, CIRC(sx * 9.4, -17.4, 2.2), CHROME, 0.2); m.at(11, CIRC(sx * 9.4, -17.4, 1.5), LENS); }
+      for (const sx of [-1, 1]) m.at(10, ELL(sx * 9.4, 18.6, 1.2, 1.9), TAIL);
+      for (let i = 0; i < 4; i++) m.at(12, RECT(-3, 13.5 + i * 1.6, 6, 0.6), '#4e7d88');
+      m.at(12, RECT(-0.5, -18, 1, 2.2), CHROME);
+      for (const sx of [-1, 1]) m.slab(12, 13, CIRC(sx * 9.4, -6.4, 1), CHROME, 0.2);
+      m.loft(13, 18, R_(-8, -6.5, 16, 17.5, 6), R_(-5.6, -2.8, 11.2, 10.4, 5), GLASS, 0.3, 0.1);
+      m.loft(19, 21, R_(-5.6, -2.8, 11.2, 10.4, 5), R_(-4.4, -1.6, 8.8, 8, 4), body, 0.14);
+    },
+    // late-1960s fastback muscle coupe: long hood with scoop, sloping rear glass, tri-bar tail lights, twin stripes
+    comet(m) {
+      const body = '#efb030', stripe = '#161616';
+      m.wheels(17, 11.6);
+      m.slab(4, 10, R_(-12.5, -26, 25, 52, 4), body, 0.12);
+      m.slab(5, 6, R_(-12, -27.1, 24, 1.8, 0.9), CHROME, 0.25); m.slab(5, 6, R_(-12, 25.3, 24, 1.8, 0.9), CHROME, 0.25);
+      m.slab(6, 9, R_(-11, -26.7, 22, 2, 1), '#151515', 0.1);
+      for (const sx of [-1, 1]) { m.slab(7, 9, CIRC(sx * 8.6, -25.4, 1.9), CHROME, 0.2); m.at(9, CIRC(sx * 8.6, -25.4, 1.3), LENS); }
+      for (const sx of [-1, 1]) for (const k of [0, 1, 2]) m.slab(7, 9, R_(sx * (4.5 + k * 2.8) - 1.2, 25.4, 2.4, 1.2, 0.5), TAIL, 0.25);
+      for (const sx of [-1, 1]) m.slab(1, 3, CIRC(sx * 5, 26.9, 1), CHROME, 0.2);
+      for (const sx of [-1, 1]) m.slab(7, 9, RECT(sx > 0 ? 12.4 : -13.2, 4, 0.8, 4), '#111');
+      m.at(10, RECT(-4.2, -26, 2.8, 52), stripe); m.at(10, RECT(1.4, -26, 2.8, 52), stripe);
+      m.slab(11, 12, R_(-3.6, -19, 7.2, 8, 1.6), '#d99c22', 0.1);
+      m.at(12, RECT(-2.6, -19.2, 5.2, 1.1), '#111');
+      for (const sx of [-1, 1]) m.slab(10, 11, RECT(sx > 0 ? 12.5 : -14, -5, 1.5, 1.6), CHROME, 0.2);
+      m.loft(11, 14, R_(-11.2, -6, 22.4, 27, 3), R_(-8, -2, 16, 10, 3), GLASS, 0.3, 0.1);
+      m.slab(15, 16, R_(-8, -2, 16, 10, 3), body, 0.12);
+      m.at(16, RECT(-4.2, -2, 2.8, 10), stripe); m.at(16, RECT(1.4, -2, 2.8, 10), stripe);
+    },
+    // 1960s split-window camper bus: two-tone, V-front panel, split windscreen, roof rack and surfboard
+    camper(m) {
+      const lower = '#d9573a', cream = '#f2ead8';
+      m.wheels(14, 10.6);
+      m.slab(4, 12, R_(-12, -23, 24, 46, 7), lower, 0.1);
+      m.at(12, { t: 'poly', pts: [[-11, -22.6], [11, -22.6], [0, -13.5]] }, cream);
+      m.slab(5, 6, R_(-11, -24.2, 22, 1.8, 0.9), CHROME, 0.25); m.slab(5, 6, R_(-11, 22.4, 22, 1.8, 0.9), CHROME, 0.25);
+      for (const sx of [-1, 1]) { m.slab(7, 9, CIRC(sx * 8, -23, 2.5), CHROME, 0.2); m.at(9, CIRC(sx * 8, -23, 1.7), LENS); }
+      for (const sx of [-1, 1]) m.slab(8, 10, R_(sx * 9.2 - 0.8, 22.4, 1.6, 1.4, 0.5), TAIL, 0.2);
+      m.at(12, CIRC(0, -20.5, 2.2), CHROME); m.at(12, CIRC(0, -20.5, 1.4), lower);
+      m.loft(13, 16, R_(-11.6, -22.6, 23.2, 45.2, 7), R_(-11.2, -21.8, 22.4, 43.6, 6.6), GLASS, 0.35, 0.05);
+      m.slab(13, 16, RECT(-0.6, -22.8, 1.2, 2.2), cream, 0.05, 0.1);
+      for (let y = -12; y <= 16; y += 7) for (const sx of [-1, 1]) m.slab(13, 16, RECT(sx > 0 ? 10.4 : -11.8, y, 1.4, 1.2), cream, 0.05, 0.1);
+      for (const sx of [-1, 1]) m.slab(13, 14, RECT(sx > 0 ? 12 : -14.6, -17, 2.6, 1.1), CHROME, 0.2);
+      m.loft(17, 20, R_(-11.2, -21.8, 22.4, 43.6, 6.6), R_(-10.6, -20.8, 21.2, 41.6, 6), cream, 0.08, 0.2);
+      for (let y = -15; y <= 15; y += 5) m.at(20, RECT(-8, y, 16, 0.7), '#dccfb4');
+      m.slab(21, 22, RECT(-9, -13, 1, 27), '#595959', 0.1); m.slab(21, 22, RECT(8, -13, 1, 27), '#595959', 0.1);
+      m.slab(21, 22, RECT(-9, -13, 18, 1), '#595959', 0.1); m.slab(21, 22, RECT(-9, 13, 18, 1), '#595959', 0.1);
+      m.slab(23, 24, ELL(0, 0, 4.4, 17), '#f4d688', 0.12);
+      m.at(24, RECT(-0.4, -15.5, 0.8, 31), '#e06a3b');
+    },
+  };
+
+  const CARS = [
+    { id: 'rally', name: 'Rally 72', year: '1972 rally saloon', unlock: 0, top: 1.0, turn: 2.5, slide: 1.7, mult: 1, L: 44, W: 22, r: 4,
+      snd: { base: 60, span: 120, h2: 0.45, sub: 0.15, am: 0.12, div: 2, lp: 2400, wave: 'sawtooth', pops: true, whine: 0, gears: [0, 90, 150, 210, 280, 350, 999] } },
+    { id: 'pocket', name: 'Pocket', year: '1964 city mini', unlock: 600, top: 0.95, turn: 2.85, slide: 1.95, mult: 1, L: 36, W: 21, r: 5,
+      snd: { base: 74, span: 135, h2: 0.6, sub: 0.04, am: 0.1, div: 2, lp: 2800, wave: 'square', pops: false, whine: 0.012, gears: [0, 100, 170, 250, 340, 999] } },
+    { id: 'bubble', name: 'Bubble', year: '1958 air-cooled runabout', unlock: 1400, top: 0.98, turn: 2.6, slide: 1.45, mult: 1.1, L: 42, W: 24, r: 9,
+      snd: { base: 42, span: 70, h2: 0.25, sub: 0.3, am: 0.6, div: 1, lp: 1300, wave: 'sawtooth', pops: false, whine: 0, gears: [0, 120, 200, 300, 999] } },
+    { id: 'comet', name: 'Comet GT', year: '1969 fastback muscle coupe', unlock: 2600, top: 1.09, turn: 2.3, slide: 1.4, mult: 1.2, L: 52, W: 25, r: 4,
+      snd: { base: 33, span: 78, h2: 0.3, sub: 0.65, am: 0.38, div: 0.5, lp: 1500, wave: 'sawtooth', pops: true, whine: 0, lumpy: true, gears: [0, 160, 290, 999] } },
+    { id: 'camper', name: 'Camper', year: '1966 split-window bus', unlock: 4000, top: 0.92, turn: 2.25, slide: 2.3, mult: 1.3, L: 46, W: 24, r: 7,
+      snd: { base: 39, span: 62, h2: 0.2, sub: 0.35, am: 0.48, div: 1, lp: 1100, wave: 'sawtooth', pops: false, whine: 0.03, gears: [0, 110, 190, 290, 999] } },
+  ];
+  CARS.forEach((c) => { const m = modelKit(); BUILD[c.id](m); c.model = m.done(); });
 
   function drawModel(g, model, setZ, steer) {
     for (const lvl of model) {
@@ -342,8 +422,11 @@ h2 { font-size: 30px; color: var(--danger); }
         g.fillStyle = op.c;
         if (op.t === 'wheel') {
           g.save(); g.translate(op.x, op.y); if (op.front) g.rotate(steer * 0.45);
-          g.fillRect(-3.5, -6, 7, 12); g.restore();
+          rr(g, -3.6, -6, 7.2, 12, 1.6); g.fill(); g.restore();
         } else if (op.t === 'rect') g.fillRect(op.x, op.y, op.w, op.h);
+        else if (op.t === 'circ') { g.beginPath(); g.arc(op.x, op.y, op.r, 0, Math.PI * 2); g.fill(); }
+        else if (op.t === 'ell') { g.beginPath(); g.ellipse(op.x, op.y, op.rx, op.ry, 0, 0, Math.PI * 2); g.fill(); }
+        else if (op.t === 'poly') { g.beginPath(); op.pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); g.fill(); }
         else { rr(g, op.x, op.y, op.w, op.h, op.r); g.fill(); }
       }
     }
@@ -420,6 +503,8 @@ h2 { font-size: 30px; color: var(--danger); }
     ui.title.hidden = true; ui.over.hidden = true;
     resetCar();
     G.mode = 'count'; G.count = 1.6;
+    setEngine();
+    sfx.startup();
     sfx.countdown();
   }
   const score = () => Math.floor(G.dist * M_PER_UNIT) + G.bank;
@@ -465,6 +550,7 @@ h2 { font-size: 30px; color: var(--danger); }
   function cycleCar(d) {
     carIdx = (carIdx + d + CARS.length) % CARS.length;
     if (unlocked(spec())) store.set('car', spec().id);
+    setEngine();
     sfx.click();
     renderGarage();
   }
@@ -489,7 +575,7 @@ h2 { font-size: 30px; color: var(--danger); }
     const g = ui.preview.getContext('2d');
     const w = ui.preview.width, h = ui.preview.height;
     g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, h);
-    const s = Math.min(w / 80, h / 46);
+    const s = Math.min(w / 64, h / 44);
     const c = spec();
     const ang = t / 1600;
     // turntable shadow
@@ -524,8 +610,16 @@ h2 { font-size: 30px; color: var(--danger); }
     shaper.curve = curve;
     N.eF = AC.createBiquadFilter(); N.eF.type = 'lowpass'; N.eF.Q.value = 3;
     N.eG = AC.createGain(); N.eG.gain.value = 0;
-    N.e1.connect(shaper); N.e2.connect(e2g); e2g.connect(shaper); shaper.connect(N.eF); N.eF.connect(N.eG); N.eG.connect(master);
-    N.e1.start(); N.e2.start();
+    N.e2g = e2g;
+    N.sub = AC.createOscillator(); N.sub.type = 'sine'; N.subG = AC.createGain(); N.subG.gain.value = 0;
+    N.amp = AC.createGain(); N.amp.gain.value = 1;
+    N.puls = AC.createOscillator(); N.puls.type = 'sine'; N.pulsG = AC.createGain(); N.pulsG.gain.value = 0;
+    N.puls.connect(N.pulsG); N.pulsG.connect(N.amp.gain);
+    N.e1.connect(shaper); N.e2.connect(e2g); e2g.connect(shaper); N.sub.connect(N.subG); N.subG.connect(shaper);
+    shaper.connect(N.eF); N.eF.connect(N.amp); N.amp.connect(N.eG); N.eG.connect(master);
+    N.wh = AC.createOscillator(); N.wh.type = 'sine'; N.whG = AC.createGain(); N.whG.gain.value = 0; N.wh.connect(N.whG); N.whG.connect(master);
+    N.e1.start(); N.e2.start(); N.sub.start(); N.puls.start(); N.wh.start();
+    setEngine();
     N.sq = AC.createOscillator(); N.sq.type = 'sawtooth';
     const lfo = AC.createOscillator(); lfo.frequency.value = rnd(7, 11); const lg = AC.createGain(); lg.gain.value = 55;
     lfo.connect(lg); lg.connect(N.sq.frequency); lfo.start();
@@ -563,8 +657,35 @@ h2 { font-size: 30px; color: var(--danger); }
     const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.05, dur / 4)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     s.connect(f); f.connect(g); g.connect(out(pan)); s.start(t, rnd(0, 1.2), dur + 0.05);
   }
-  const GEARS = [0, 110, 175, 245, 320, 400, 999];
+  // each car's engine character: pitch range, harmonics, firing chug, gearing, exhaust pops
+  function setEngine() {
+    if (!AC) return;
+    const e = spec().snd;
+    N.e1.type = e.wave;
+    N.e2g.gain.value = e.h2;
+    N.subG.gain.value = e.sub;
+    N.amp.gain.value = 1 - e.am / 2;
+    N.pulsG.gain.value = e.am / 2;
+    N.eF.Q.value = e.lumpy ? 5 : 3;
+    N.gear = 0;
+  }
   const sfx = {
+    startup() {
+      // starter motor cranks, then the engine catches and blips
+      const e = spec().snd;
+      const n = 2 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) { tone(rp(95, 0.08), 0.13, 'square', 0.05, i * rnd(0.14, 0.18), rp(70)); burst(0.1, 0.03, 'bandpass', rp(1200), 2, i * 0.16); }
+      const t0 = n * 0.16 + 0.05;
+      tone(e.base * 0.9, 0.55, e.wave, 0.09, t0, e.base * 2.2);
+      tone(e.base * 0.45, 0.6, 'sine', 0.12 * (0.4 + e.sub), t0, e.base * 0.9);
+      burst(0.25, 0.08, 'lowpass', 900, 1, t0);
+      if (e.pops) sfx.pops(t0 + 0.5);
+    },
+    pops(delay = 0) {
+      // exhaust crackle on lift-off
+      const n = 2 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) { const d = delay + rnd(0, 0.35); burst(rnd(0.02, 0.05), rnd(0.08, 0.16), 'highpass', rp(1500, 0.4), 0.7, d); tone(rp(90, 0.3), 0.05, 'sine', 0.12, d); }
+    },
     countdown() { tone(rp(660, 0.01), 0.14, 'square', 0.08, 0.05); tone(rp(660, 0.01), 0.14, 'square', 0.08, 0.6); tone(990, 0.35, 'square', 0.09, 1.15); },
     shift() { tone(rp(70), 0.08, 'sine', 0.15); burst(0.05, 0.05, 'highpass', rp(2500)); },
     bank(combo) {
@@ -599,16 +720,22 @@ h2 { font-size: 30px; color: var(--danger); }
     const t = AC.currentTime, c = G.car;
     const spd = Math.hypot(c.vx, c.vy);
     const live = G.mode === 'play' || G.mode === 'count';
+    const E = spec().snd, GEARS = E.gears;
     let gear = 0; while (gear < GEARS.length - 2 && spd > GEARS[gear + 1]) gear++;
-    if (G.mode === 'play' && gear > N.gear) sfx.shift();
+    if (G.mode === 'play' && gear > N.gear) { sfx.shift(); if (E.pops && Math.random() < 0.6) sfx.pops(0.05); }
     N.gear = gear;
     const lo = GEARS[gear], hi = GEARS[gear + 1] === 999 ? 520 : GEARS[gear + 1];
     let rpm = clamp((spd - lo) / (hi - lo), 0, 1);
     if (G.mode === 'count') rpm = 0.35 + 0.3 * Math.abs(Math.sin(t * 5));
-    const f = (48 + gear * 5 + rpm * 85 + Math.abs(c.slip) * 12) * (spec().id === 'camper' ? 0.85 : spec().id === 'pocket' ? 1.15 : 1);
+    const f = E.base + gear * 3 + rpm * E.span + Math.abs(c.slip) * 10;
     N.e1.frequency.setTargetAtTime(f, t, 0.04);
     N.e2.frequency.setTargetAtTime(f * 2.01, t, 0.04);
-    N.eF.frequency.setTargetAtTime(500 + rpm * 1600, t, 0.05);
+    N.sub.frequency.setTargetAtTime(f * 0.5, t, 0.04);
+    const pulse = (f / E.div) * (E.lumpy ? 1 + 0.18 * Math.sin(t * 6.3) * Math.sin(t * 2.1) : 1);
+    N.puls.frequency.setTargetAtTime(Math.min(pulse, 120), t, 0.05);
+    N.eF.frequency.setTargetAtTime(E.lp * (0.35 + rpm * 0.75), t, 0.05);
+    N.wh.frequency.setTargetAtTime(spd * 4.2 + 200, t, 0.05);
+    N.whG.gain.setTargetAtTime(live ? E.whine * clamp(spd / 300, 0, 1) : 0, t, 0.1);
     N.eG.gain.setTargetAtTime(live ? 0.06 + rpm * 0.03 : 0, t, 0.08);
     const slip = G.mode === 'play' ? clamp(Math.abs(c.slip) - 0.12, 0, 0.9) : 0;
     const k = slip * clamp(spd / 300, 0, 1.3);
@@ -785,6 +912,7 @@ h2 { font-size: 30px; color: var(--danger); }
       popup('+' + pts, G.combo >= 3 ? '#ffd166' : '#7fe0a8', G.car.x, G.car.y, 34, 1.1, G.combo > 1 ? 'DRIFT x' + G.combo : 'DRIFT');
       if (G.combo >= 3) sparks(G.car, 16);
       sfx.bank(G.combo);
+      if (spec().snd.pops && Math.random() < 0.7) sfx.pops(0.02);
     }
     G.drift = 0; G.driftT = 0; G.combo = 1; G.offT = 0;
   }
@@ -1191,7 +1319,7 @@ h2 { font-size: 30px; color: var(--danger); }
 
   function render(t) {
     setCam();
-    const i0 = Math.max(0, G.idx - 40), i1 = Math.min(R.pts.length - 2, G.idx + 95);
+    const i0 = Math.max(0, G.idx - 40), i1 = Math.min(R.pts.length - 2, G.idx + 120);
     drawValley();
     const fallingFar = G.mode === 'fall' && screenNy(Math.cos(R.pts[G.idx].a) * G.failSide, Math.sin(R.pts[G.idx].a) * G.failSide) < 0;
     if (G.mode === 'fall' && G.fall.landed) { drawCar(); }

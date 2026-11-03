@@ -19,13 +19,17 @@ Open `index.html` in any modern browser. It's a single file with no build step.
 
 ## Garage
 
-| Car | Unlock (best score) | Character |
-|---|---|---|
-| Rally 72 | free | Balanced |
-| Pocket | 600 | Quick steering, grippy, slower |
-| Bubble | 1400 | Slides easily, drift x1.1 |
-| Comet GT | 2600 | Fastest, slow to turn, drift x1.2 |
-| Camper | 4000 | Heavy and grippy, hard to drift, drift x1.3 |
+Miniature models inspired by classic car shapes (no real names or badges):
+
+| Car | Inspired by | Details | Engine sound | Unlock |
+|---|---|---|---|---|
+| Rally 72 | 1970s rally saloon | Four spotlights, flared arches, mud flaps, roof roundel, stripes | Rev-happy four with exhaust pops | free |
+| Pocket | 1960s British mini | Wheels at the corners, white roof, chrome grille, bonnet stripes, twin fuel caps | Buzzy small four with gear whine | 600 |
+| Bubble | 1950s air-cooled bug | Separate round fenders, running boards, domed roof, louvred engine lid | Chugging flat-four | 1400 |
+| Comet GT | Late-60s fastback muscle coupe | Long hood with scoop, sloping rear glass, tri-bar tail lights, twin stripes, dual exhausts | Lumpy V8 burble with crackle | 2600 |
+| Camper | 1960s split-window bus | Two-tone with V-front, split windscreen, roof rack and surfboard | Wheezy flat-four with gear whine | 4000 |
+
+Each car cranks and starts before the countdown, has its own gearing, and handles differently.
 
 ## Scoring
 
