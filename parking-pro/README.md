@@ -29,6 +29,10 @@ Open `index.html` in any modern browser. It's a single file with no build step.
 - **Obstacles**: parked cars, vans, pickups, or cones.
 - **Paints**: 7 car colors unlock as you park cars and land Perfects across runs.
 
+## Leaderboard
+
+When the game runs as a claude.ai artifact, a shared leaderboard shows the top 5 drivers and your position. The game-over screen tells you how many points you need to pass the next player.
+
 ## Fair failure
 
 When a run ends, the street shows a ghost of the ideal stop, a green **Brake here** flag and a red **You braked** flag. The result card shows your brake timing in seconds (early or late) on a bar against the window that would have worked, plus the stopping distance at your speed.

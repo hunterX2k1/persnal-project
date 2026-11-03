@@ -138,6 +138,22 @@ h2 { font-size: 30px; color: var(--danger); }
   font-family: var(--display); font-size: 17px; letter-spacing: 0.03em;
 }
 .keys { text-align: center; font-size: 14px; color: var(--muted); }
+.board { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.board-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.board-head h3 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 16px; }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rows li {
+  display: grid; grid-template-columns: 28px 24px minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 5px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); font-size: 17px;
+}
+.rows li.me { background: rgba(255, 138, 31, 0.2); box-shadow: inset 0 0 0 1px rgba(255, 138, 31, 0.6); }
+.rows .rank { font-family: var(--display); font-size: 13px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.rows li:nth-child(1) .rank { color: var(--gold); }
+.rows img { width: 24px; height: 24px; border-radius: 50%; display: block; }
+.rows .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rows .pts { font-family: var(--display); font-size: 14px; font-variant-numeric: tabular-nums; }
+.rows .gap { grid-column: 1 / -1; text-align: center; color: var(--muted); background: none; padding: 0; font-size: 14px; }
+.board-note { font-size: 15px !important; }
 @media (max-height: 560px) {
   .card { gap: 8px; padding: 16px; }
   .rules, .keys { display: none; }
@@ -185,6 +201,7 @@ h2 { font-size: 30px; color: var(--danger); }
   <p>A gentle bump or a few cm sticking out costs your points, not your run. A real crash ends it.</p>
   <div class="garage" id="garageHome"></div>
   <button class="btn" type="button" id="startBtn">Start driving</button>
+  <div id="boardHome"></div>
   <div class="keys">Tap anywhere, or press Space</div>
 </section>
 
@@ -207,7 +224,14 @@ h2 { font-size: 30px; color: var(--danger); }
   <div class="garage" id="garageOver"></div>
   <button class="btn" type="button" id="againBtn">Drive again</button>
   <div class="keys">Tap anywhere, or press Space</div>
+  <div id="boardOver"></div>
 </section>
+
+<div class="board" id="board">
+  <div class="board-head"><h3>Leaderboard</h3><span class="label" id="boardCount"></span></div>
+  <ol class="rows" id="rows"></ol>
+  <p class="board-note" id="boardNote">Loading scores…</p>
+</div>
 
 <div id="garage" class="garage">
   <span class="label">Paint</span>
@@ -228,6 +252,7 @@ h2 { font-size: 30px; color: var(--danger); }
     title: $('titleCard'), over: $('overCard'), t2: $('t2'), reason: $('reason'), newbest: $('newbest'),
     oScore: $('oScore'), oParked: $('oParked'), oPerfect: $('oPerfect'), mute: $('mute'),
     timing: $('timing'), tText: $('tText'), tZone: $('tZone'), tMark: $('tMark'), tip: $('tip'), hope: $('hope'),
+    board: $('board'), rows: $('rows'), boardNote: $('boardNote'), boardCount: $('boardCount'), boardHome: $('boardHome'), boardOver: $('boardOver'),
     garage: $('garage'), paints: $('paints'), paintCap: $('paintCap'), garageHome: $('garageHome'), garageOver: $('garageOver'),
   };
   const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -507,7 +532,10 @@ h2 { font-size: 30px; color: var(--danger); }
     else hope = 'Every spot you park counts toward new paint for your car.';
     const nu = nextUnlock();
     if (nu) hope += ' Next paint: ' + nu.name + ', ' + needText(nu) + '.';
-    ui.hope.textContent = hope;
+    const rival = LB.rivalFor(S.score);
+    ui.hope.textContent = (rival ? rival + ' ' : '') + hope;
+    LB.submit(S.score).then(() => { const r2 = LB.rivalFor(S.score); ui.hope.textContent = (r2 ? r2 + ' ' : '') + hope; });
+    LB.mount(ui.boardOver);
 
     renderGarage(ui.garageOver);
     ui.over.hidden = false;
@@ -578,6 +606,7 @@ h2 { font-size: 30px; color: var(--danger); }
   }
   window.addEventListener('pointerdown', (e) => {
     if (e.target === ui.mute) return;
+    if (e.target.closest && e.target.closest('.board')) return;
     if (e.button !== undefined && e.button > 0) return;
     action();
   });
@@ -1332,6 +1361,88 @@ h2 { font-size: 30px; color: var(--danger); }
     ui.hint.hidden = !(S.mode === 'drive' && S.round <= 2);
   }
 
+  // ---------- leaderboard ----------
+  // Scores live in the artifact's shared store: everyone reads, each player writes only their own row.
+  const LB = {
+    db: null, user: null, uid: null, rows: [], status: 'loading', readOnly: false, writing: Promise.resolve(),
+    async init() {
+      if (!(window.claude && window.claude.use)) { this.status = 'off'; this.render(); return; }
+      let db = null, user = null;
+      try { [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]); } catch (e) { /* unavailable */ }
+      this.user = user;
+      if (!db) { this.status = 'off'; this.render(); return; }
+      this.db = db;
+      this.uid = user ? await user.id() : null;
+      if (user) { const can = await user.can('data.write'); if (can === false) this.readOnly = true; }
+      if (!this.uid) this.readOnly = true;
+      const timer = setTimeout(() => { if (this.status === 'loading') { this.status = 'slow'; this.render(); } }, 10000);
+      db.collection('scores').orderBy('best', 'desc').limit(50).onSnapshot((snap) => {
+        if (!snap.metadata.fromCache) clearTimeout(timer);
+        this.rows = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+        this.status = 'ok';
+        this.render();
+      }, () => { clearTimeout(timer); this.status = 'error'; this.render(); });
+      if (!this.readOnly && S.best > 0) this.submit(S.best);
+    },
+    mine() { return this.rows.find((r) => r.id === this.uid); },
+    submit(s) {
+      if (!this.db || this.readOnly || !this.uid) return Promise.resolve();
+      this.writing = this.writing.then(async () => {
+        try {
+          const ref = this.db.collection('scores').doc(this.uid);
+          const cur = this.mine() || (await ref.get()).data() || null;
+          if (cur && cur.best >= s) return;
+          await ref.set({ best: s, at: new Date().toISOString() });
+        } catch (e) {
+          if (e && e.code === 'invalid_argument') { this.readOnly = true; this.render(); }
+        }
+      });
+      return this.writing;
+    },
+    rivalFor(s) {
+      if (this.status !== 'ok' || !this.rows.length) return '';
+      const others = this.rows.filter((r) => r.id !== this.uid);
+      const ahead = others.filter((r) => r.best > s).sort((a, b) => a.best - b.best)[0];
+      const rank = others.filter((r) => r.best > s).length + 1;
+      if (!ahead) return others.length ? 'This run beats everyone on the leaderboard.' : '';
+      return 'This run ranks #' + rank + ' on the leaderboard. ' + (ahead.best - s + 1) + ' more points to pass #' + (rank - 1) + '.';
+    },
+    mount(host) { host.appendChild(ui.board); this.render(); },
+    async render() {
+      const rows = this.rows;
+      ui.boardCount.textContent = rows.length ? rows.length + (rows.length === 1 ? ' driver' : ' drivers') : '';
+      let note = '';
+      if (this.status === 'off') note = 'The shared leaderboard works when this game is opened on claude.ai while signed in. Your best is saved on this device.';
+      else if (this.status === 'loading') note = 'Loading scores…';
+      else if (this.status === 'slow') note = 'The leaderboard can’t be reached yet. Your runs still count on this device.';
+      else if (this.status === 'error') note = 'The leaderboard stopped updating. Reload the page to reconnect.';
+      else if (!rows.length) note = 'No scores yet. Park a car to set the first one.';
+      if (this.readOnly && this.status === 'ok') note = (note ? note + ' ' : '') + 'You can view the board, but your access can’t post scores. Ask the owner for Contributor access.';
+      ui.boardNote.textContent = note;
+      ui.boardNote.hidden = !note;
+      let ps = {};
+      if (rows.length && this.user) { try { ps = await this.user.profiles(rows.map((r) => r.id)); } catch (e) { ps = {}; } }
+      ui.rows.textContent = '';
+      const meIdx = rows.findIndex((r) => r.id === this.uid);
+      const add = (r, i) => {
+        const li = document.createElement('li');
+        if (r.id === this.uid) li.className = 'me';
+        const rank = document.createElement('span'); rank.className = 'rank'; rank.textContent = '#' + (i + 1);
+        const img = document.createElement('img'); img.alt = ''; if (ps[r.id] && ps[r.id].avatarUrl) img.src = ps[r.id].avatarUrl;
+        const name = document.createElement('span'); name.className = 'name';
+        name.textContent = r.id === this.uid ? 'You' : ((ps[r.id] && ps[r.id].name) || 'Driver ' + (i + 1));
+        const pts = document.createElement('span'); pts.className = 'pts'; pts.textContent = r.best;
+        li.append(rank, img, name, pts);
+        ui.rows.appendChild(li);
+      };
+      rows.slice(0, 5).forEach(add);
+      if (meIdx >= 5) {
+        const gap = document.createElement('li'); gap.className = 'gap'; gap.textContent = '…'; ui.rows.appendChild(gap);
+        add(rows[meIdx], meIdx);
+      }
+    },
+  };
+
   // ---------- loop ----------
   let last = performance.now();
   function frame(now) {
@@ -1348,6 +1459,8 @@ h2 { font-size: 30px; color: var(--danger); }
   sceneForTitle();
   renderGarage(ui.garageHome);
   ui.best.textContent = S.best;
+  LB.mount(ui.boardHome);
+  LB.init();
   requestAnimationFrame(frame);
 })();
 </script>
