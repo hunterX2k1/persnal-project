@@ -10,13 +10,14 @@ O=${BUILD_DIR:-build-manual}
 rm -rf "$O"; mkdir -p "$O"/{res,gen,classes,dex}
 
 "$BT/aapt2" compile --dir app/src/main/res -o "$O/res/"
-sed 's#<manifest #<manifest package="com.opensearch.app" android:versionCode="1" android:versionName="1.0" #' \
+sed 's#<manifest #<manifest package="com.opensearch.app" android:versionCode="2" android:versionName="2.0" #' \
     app/src/main/AndroidManifest.xml \
   | sed 's#<application#<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34"/>\n    <application#' \
   > "$O/AndroidManifest.xml"
 "$BT/aapt2" link -I "$JAR" --manifest "$O/AndroidManifest.xml" -o "$O/unsigned.apk" --java "$O/gen" "$O"/res/*.flat
-javac --release 8 -nowarn -cp "$JAR" -d "$O/classes" $(find app/src/main/java "$O/gen" -name '*.java')
-"$BT/d8" --min-api 21 --lib "$JAR" --output "$O/dex" $(find "$O/classes" -name '*.class')
+LIBS=$(ls libs/*.jar | tr '\n' ':')
+javac --release 8 -nowarn -cp "$JAR:$LIBS" -d "$O/classes" $(find app/src/main/java "$O/gen" -name '*.java')
+"$BT/d8" --min-api 21 --lib "$JAR" --output "$O/dex" $(find "$O/classes" -name '*.class') libs/*.jar
 (cd "$O/dex" && zip -q ../unsigned.apk classes.dex)
 "$BT/zipalign" -f 4 "$O/unsigned.apk" "$O/aligned.apk"
 

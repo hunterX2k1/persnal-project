@@ -6,6 +6,40 @@
             android:text="Settings" android:textSize="22sp" android:textStyle="bold" android:textColor="#1E3A5F" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="🧅 Hide my IP address" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="Tor: install the free Orbot app and tap Start. In Orbot's settings you can also pick which country your traffic exits from. If the proxy is down, nothing loads, so your real IP never leaks." />
+        <Spinner android:id="@+id/proxy_mode" android:layout_width="match_parent" android:layout_height="48dp" />
+        <EditText android:id="@+id/proxy_custom" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:hint="socks5://host:1080  or  http://host:8080" android:inputType="textUri" android:singleLine="true" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="📍 Location shown to websites" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="The app has no permission to read your real GPS. Pages asking for location get nothing, or this fake place." />
+        <Spinner android:id="@+id/location" android:layout_width="match_parent" android:layout_height="48dp" />
+        <LinearLayout android:id="@+id/custom_loc" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <EditText android:id="@+id/lat" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:hint="Latitude e.g. 48.85"
+                android:inputType="numberSigned|numberDecimal" />
+            <EditText android:id="@+id/lon" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:hint="Longitude e.g. 2.35"
+                android:inputType="numberSigned|numberDecimal" />
+        </LinearLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="🌐 Pretend to search from" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="Tells Google, Bing, DuckDuckGo, Startpage and SearXNG which country/language to use. Best matched with your fake location and Tor exit country." />
+        <Spinner android:id="@+id/region" android:layout_width="match_parent" android:layout_height="48dp" />
+
+        <CheckBox android:id="@+id/block_webrtc" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="Block WebRTC (stops pages finding your real IP behind Tor)" />
+        <CheckBox android:id="@+id/generic_ua" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Generic browser identity (hide phone model and Android version)" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="20dp" android:text="SearXNG instance URL" android:textStyle="bold" />
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
             android:text="Any public instance (see searx.space) or one you host yourself. SafeSearch is sent as 0 (none)." />

@@ -24,6 +24,10 @@
             android:layout_marginTop="6dp" android:background="@drawable/search_bg" android:paddingStart="12dp" />
     </LinearLayout>
 
+    <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="4dp" android:paddingBottom="4dp"
+        android:textColor="#FFFFFF" android:textSize="12sp" android:background="#14532D" />
+
     <ProgressBar android:id="@+id/progress" style="@android:style/Widget.Material.ProgressBar.Horizontal"
         android:layout_width="match_parent" android:layout_height="3dp" android:max="100" android:visibility="gone" />
 
@@ -32,6 +36,6 @@
             android:visibility="gone" />
         <TextView android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent"
             android:gravity="center" android:padding="32dp" android:textSize="15sp" android:textColor="#556"
-            android:text="OpenSearch\n\nSafeSearch / adult filters are switched OFF on every engine.\nPick an engine above, type, and press search.\n\nTip: set your own SearXNG instance or any custom search URL in Settings." />
+            android:text="OpenSearch\n\nSafeSearch / adult filters are OFF on every engine.\n\nYour IP is hidden through Tor (install the free Orbot app and tap Start). Your real location is never shared: pages get nothing, or a fake place you choose.\n\nChange it all in ⋮ → Privacy &amp; settings." />
     </FrameLayout>
 </LinearLayout>
