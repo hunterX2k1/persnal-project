@@ -1,0 +1,28 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="#F3F5F8">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="20dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Settings" android:textSize="22sp" android:textStyle="bold" android:textColor="#1E3A5F" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="SearXNG instance URL" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="Any public instance (see searx.space) or one you host yourself. SafeSearch is sent as 0 (none)." />
+        <EditText android:id="@+id/searxng" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="textUri" android:singleLine="true" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="Custom search URL" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp"
+            android:text="Use %s where the search words go, e.g. https://example.com/search?q=%s" />
+        <EditText android:id="@+id/custom" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="textUri" android:singleLine="true" />
+
+        <CheckBox android:id="@+id/auto_clear" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="Clear history and cookies when the app closes" />
+
+        <Button android:id="@+id/save" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="24dp" android:text="Save" />
+    </LinearLayout>
+</ScrollView>
