@@ -24,12 +24,19 @@ Open `index.html` in any modern browser. It's a single file with no build step.
 - Sharp crests at speed launch the car: airtime earns AIR points, and you can't steer in the air.
 - Grassy, rocky mountainside with pine trees falls away on both sides down to the valley.
 
+## Camera
+
+Tap **CAM** (or press **C**) to open the camera panel. The game pauses while it's open.
+
+- **Height**: from close to very high.
+- **Angle**: from a low chase view to straight overhead.
+- Presets: Low, Chase (default), High, Overhead. Your choice is remembered on this device.
+
 ## Obstacles
 
 | Obstacle | What happens |
 |---|---|
-| Fallen boulder | Bounces you off, cuts your speed and loses unbanked drift points |
-| Slow hay truck | Honks as you close in; overtake it or crash into it like a boulder |
+| Slow hay truck | Honks as you close in; overtake it, or hitting it bounces you off, cuts your speed and loses unbanked drift points |
 | Traffic cones | Knock them flying; slows you a little |
 | Oil slick | Almost no grip for a moment |
 | Gold coins | Lined along the inside of bends: +20, +40, +60… for collecting in a row |
