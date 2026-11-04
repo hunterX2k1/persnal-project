@@ -131,7 +131,7 @@ h2 { font-size: 30px; color: var(--danger); }
 <section class="card" id="titleCard" aria-labelledby="t1">
   <div class="col">
     <h1 id="t1">Ridgeline <span>Drift</span></h1>
-    <p>A mountain road over hills and crests, with a drop on both sides. <strong>Touch and hold anywhere: the further left or right of centre, the harder you drift.</strong> Let go and the car straightens itself.</p>
+    <p>A mountain road over hills and crests, with a drop on both sides. <strong>Hold the left or right half of the screen to drift</strong> through each bend. Run wide or over-rotate and you go over the edge.</p>
     <p>Dodge fallen boulders and the slow hay truck, knock cones, avoid oil, grab coins on the inside of bends, and catch air over sharp crests.</p>
     <div class="garage" id="garageHome"></div>
     <button class="btn" type="button" id="startBtn">Start engine</button>
@@ -228,7 +228,7 @@ h2 { font-size: 30px; color: var(--danger); }
     dpr = Math.min(2, window.devicePixelRatio || 1);
     cw = window.innerWidth; ch = window.innerHeight;
     cvs.width = Math.round(cw * dpr); cvs.height = Math.round(ch * dpr);
-    unit = Math.min(cw, ch * 1.2) / 680;
+    unit = Math.min(cw, ch * 1.2) / 520;
     const pr = ui.preview.getBoundingClientRect();
     ui.preview.width = Math.max(1, Math.round(pr.width * dpr)); ui.preview.height = Math.max(1, Math.round(pr.height * dpr));
   }
@@ -460,7 +460,7 @@ h2 { font-size: 30px; color: var(--danger); }
   // ---------- road ----------
   // The road is a chain of points with heading, width, curvature and height (z). Hills come from a
   // slope that eases toward random targets; now and then a crest turns over sharply enough to jump.
-  const START = 24;           // flat run-up points before the scored road begins
+  const START = 70;           // straight run-up points before the scored road begins (the car starts well inside them)
   const VALLEY = -300;        // valley floor height
   const GRAV = 620;
   const R = { pts: [], obs: [], a: 0, c: 0, left: 0, lastDir: 1, z: 0, slope: 0, slopeT: 0, slopeLeft: 0, slopeRate: 0.016, nextObs: 0, coinRun: null };
@@ -566,9 +566,9 @@ h2 { font-size: 30px; color: var(--danger); }
 
   function resetCar() {
     resetRoad();
-    const c = G.car, p = R.pts[4];
+    const c = G.car, p = R.pts[START - 6];
     c.x = p.x; c.y = p.y; c.h = 0; c.vx = 0; c.vy = -speedAt(0) * 0.6; c.steer = 0; c.slip = 0; c.z = 0; c.vz = 0; c.air = false;
-    G.idx = 4; G.lat = 0; G.dist = 0; G.bank = 0; G.drift = 0; G.driftT = 0; G.offT = 0; G.combo = 1; G.bestDrift = 0;
+    G.idx = START - 6; G.lat = 0; G.dist = 0; G.bank = 0; G.drift = 0; G.driftT = 0; G.offT = 0; G.combo = 1; G.bestDrift = 0;
     G.airT = 0; G.oil = 0; G.stun = 0; G.coinStreak = 0; G.coinT = 0;
     G.parts = []; G.skids = []; G.popups = []; G.fall = null; G.lastWheels = null; G.slowmo = 0;
     G.cam.x = c.x; G.cam.y = c.y - 90; G.cam.a = 0; G.cam.z = 0;
@@ -587,18 +587,14 @@ h2 { font-size: 30px; color: var(--danger); }
   const score = () => Math.floor(G.dist * M_PER_UNIT) + G.bank;
 
   // ---------- input ----------
-  // Analog touch anywhere: the further your finger is from the centre line, the harder you steer.
+  // Hold the left or right half of the screen (anywhere, top to bottom) to drift that way.
   const input = { ptr: new Map(), keyL: false, keyR: false, last: null };
-  function steerFromX(x) {
-    const s = (x - cw / 2) / (cw * 0.3), a = Math.abs(s);
-    if (a < 0.05) return 0;
-    return Math.sign(s) * (0.35 + 0.65 * Math.min(1, (a - 0.05) / 0.75));
-  }
   const steerInput = () => {
-    if (input.keyL || input.keyR) return (input.keyR ? 1 : 0) - (input.keyL ? 1 : 0);
-    if (input.last && input.ptr.has(input.last)) return steerFromX(input.ptr.get(input.last).x);
-    for (const v of input.ptr.values()) return steerFromX(v.x);
-    return 0;
+    let s = 0;
+    for (const v of input.ptr.values()) s += v.x < cw / 2 ? -1 : 1;
+    if (input.keyL) s -= 1;
+    if (input.keyR) s += 1;
+    return clamp(s, -1, 1);
   };
   window.addEventListener('pointerdown', (e) => {
     if (e.target.closest && e.target.closest('button, .card')) return;
@@ -900,31 +896,20 @@ h2 { font-size: 30px; color: var(--danger); }
       const playing = G.mode === 'play';
       G.stun = Math.max(0, G.stun - dt); G.oil = Math.max(0, G.oil - dt); G.coinT = Math.max(0, G.coinT - dt);
       const target = playing && G.stun <= 0 ? steerInput() : 0;
-      c.steer += (target - c.steer) * Math.min(1, dt * 9);
+      c.steer += (target - c.steer) * Math.min(1, dt * 11);
       const spd0 = Math.hypot(c.vx, c.vy);
-      const va = spd0 > 20 ? Math.atan2(c.vx, -c.vy) : c.h;
-      if (!c.air) {
-        const amt = Math.abs(c.steer);
-        const oil = G.oil > 0;
-        // yaw from steering, plus the car straightening itself when you ease off
-        const yaw = c.steer * S.turn * clamp(spd0 / 220, 0.3, 1) * (oil ? 0.65 : 1);
-        const align = (1 - Math.min(1, amt * 1.5)) * 2.4 * angDiff(va, c.h);
-        c.h += (yaw + align) * dt;
-      }
+      if (!c.air) c.h += c.steer * S.turn * dt * clamp(spd0 / 220, 0.3, 1) * (G.oil > 0 ? 0.7 : 1);
       const hx = Math.sin(c.h), hy = -Math.cos(c.h);
       let fwd = c.vx * hx + c.vy * hy;
       let lx = c.vx - fwd * hx, ly = c.vy - fwd * hy;
       if (!c.air) {
-        const amt = Math.abs(c.steer);
-        let grip = 6.5 + (S.slide - 6.5) * Math.min(1, amt * 1.4);
-        const slipDir = Math.sign(angDiff(c.h, va));
-        if (amt > 0.2 && Math.sign(c.steer) === -slipDir) grip *= 1.8;     // counter-steer catches the slide
+        let grip = Math.abs(c.steer) > 0.25 ? S.slide : 6.5;
         if (G.oil > 0) grip = Math.min(grip, 0.8);
         const decay = Math.exp(-grip * dt);
         lx *= decay; ly *= decay;
         const sl = roadSlope();
         const maxV = playing ? speedAt(G.dist) * S.top : speedAt(0) * 0.6;
-        fwd += (maxV - fwd) * Math.min(1, dt * 0.9) - (playing ? 420 * sl * dt : 0);
+        fwd += (maxV - fwd) * Math.min(1, dt * 0.9) - (playing ? 300 * sl * dt : 0);
         fwd = Math.max(fwd, 60);
       }
       c.vx = hx * fwd + lx; c.vy = hy * fwd + ly;
@@ -1178,16 +1163,16 @@ h2 { font-size: 30px; color: var(--danger); }
     let reason, tip;
     if (G.failCurve === 0) {
       reason = 'You slid off the ' + side + ' edge on a straight.';
-      tip = 'Ease your finger back toward the centre sooner. The car straightens itself when you do. The gravel strip is your last warning.';
+      tip = 'Let go a little sooner. The car keeps sliding the way it points after you release. The gravel strip is your last warning.';
     } else {
       const bendRight = G.failCurve > 0;
       const outside = (bendRight && side === 'left') || (!bendRight && side === 'right');
       if (outside) {
         reason = 'You ran wide on a ' + (bendRight ? 'right' : 'left') + '-hand bend and went off the outside edge.';
-        tip = 'Start the drift earlier and push further ' + (bendRight ? 'right' : 'left') + '. The tighter the bend, the earlier you commit.';
+        tip = 'Start the drift earlier and hold ' + (bendRight ? 'right' : 'left') + ' longer. The tighter the bend, the earlier you commit.';
       } else {
         reason = 'You over-rotated on a ' + (bendRight ? 'right' : 'left') + '-hand bend and cut off the inside edge.';
-        tip = 'Release sooner, or slide your finger the other way briefly to catch the slide before the apex.';
+        tip = 'Release sooner, or tap the other side briefly to catch the slide before the apex.';
       }
     }
     if (G.fall && G.fall.lost > 0) tip += ' You also lost ' + G.fall.lost + ' unbanked drift points.';
@@ -1632,9 +1617,7 @@ h2 { font-size: 30px; color: var(--danger); }
         ctx.fillStyle = gx; ctx.fillRect(side < 0 ? 0 : cw / 2, 0, cw / 2, ch);
       }
       ctx.globalAlpha = 0.85 * a; ctx.font = '700 20px "Saira Condensed", sans-serif'; ctx.fillStyle = '#f3efe6'; ctx.textAlign = 'center';
-      ctx.fillText('◀ HOLD LEFT', cw * 0.2, ch * 0.5); ctx.fillText('HOLD RIGHT ▶', cw * 0.8, ch * 0.5);
-      ctx.font = '600 15px "Saira Condensed", sans-serif';
-      ctx.fillText('further from centre = harder drift', cw * 0.2, ch * 0.5 + 22); ctx.fillText('further from centre = harder drift', cw * 0.8, ch * 0.5 + 22);
+      ctx.fillText('◀ HOLD TO DRIFT LEFT', cw * 0.25, ch * 0.5); ctx.fillText('HOLD TO DRIFT RIGHT ▶', cw * 0.75, ch * 0.5);
       ctx.globalAlpha = 1;
     }
     // touch feedback: a ring under the finger and a steering gauge

@@ -6,9 +6,9 @@ A 2.5D drift game on a winding mountain road with a cliff drop on both sides. Th
 
 Open `index.html` in any modern browser. It's a single file with no build step.
 
-- **Touch and hold anywhere**: the further left or right of centre your finger is, the harder you steer and drift. Slide your finger to adjust mid-corner. Let go and the car straightens itself.
-- **← / A and → / D**: full-lock steering on a keyboard
-- Counter-steering (pushing the other way mid-slide) catches the slide faster.
+- **Hold the left half of the screen / ← / A**: drift left
+- **Hold the right half / → / D**: drift right
+- The halves cover the full height of the screen. Let go and the car grips and keeps going the way it points.
 - **M**: mute or unmute
 
 ## Look
