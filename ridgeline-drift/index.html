@@ -63,6 +63,7 @@ body {
 .campanel label span { color: var(--ink); letter-spacing: 0; text-transform: none; }
 .campanel input[type="range"] { width: 100%; accent-color: var(--rim); height: 28px; margin: 0; }
 .presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.presets.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .preset {
   appearance: none; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer;
   background: rgba(255, 255, 255, 0.06); color: var(--ink); font-family: var(--body); font-size: 15px; font-weight: 600;
@@ -152,7 +153,7 @@ h2 { font-size: 30px; color: var(--danger); }
 </div>
 
 <section class="campanel" id="camPanel" aria-labelledby="camTitle" hidden>
-  <div class="cam-head"><h3 id="camTitle">Camera</h3><button class="arrow" type="button" id="camClose" aria-label="Close camera settings">✕</button></div>
+  <div class="cam-head"><h3 id="camTitle">Settings</h3><button class="arrow" type="button" id="camClose" aria-label="Close camera settings">✕</button></div>
   <label for="camHeight">Height <span id="camHeightVal"></span></label>
   <input type="range" id="camHeight" min="0" max="100" step="1">
   <label for="camAngle">Angle <span id="camAngleVal"></span></label>
@@ -163,17 +164,22 @@ h2 { font-size: 30px; color: var(--danger); }
     <button class="preset" type="button" data-h="62" data-a="58">High</button>
     <button class="preset" type="button" data-h="82" data-a="96">Overhead</button>
   </div>
-  <p>The game pauses while this is open. Press C to open or close it.</p>
+  <label>Steering <span id="ctrlVal"></span></label>
+  <div class="presets two" role="group" aria-label="Steering mode">
+    <button class="preset ctrl" type="button" data-mode="auto">Auto</button>
+    <button class="preset ctrl" type="button" data-mode="manual">Manual</button>
+  </div>
+  <p>Auto: the car follows the road and you only hold to drift. Manual: hold left or right to steer and drift yourself. The game pauses while this is open (C).</p>
 </section>
 
 <section class="card" id="titleCard" aria-labelledby="t1">
   <div class="col">
     <h1 id="t1">Ridgeline <span>Drift</span></h1>
-    <p>A mountain road over hills and crests, with a drop on both sides. <strong>Hold the left or right half of the screen to drift</strong> through each bend. Run wide or over-rotate and you go over the edge.</p>
-    <p>Overtake the slow hay truck, knock cones, avoid oil, grab coins on the inside of bends, and catch air over sharp crests. Tap CAM to set the camera height and angle.</p>
+    <p>A mountain road over hills and crests, with a drop on both sides. <strong>The car steers itself: hold anywhere to drift</strong>, let go to grip. Too little drift on a tight bend runs you wide; too much swings you off the inside.</p>
+    <p>Overtake the slow hay truck, knock cones, avoid oil, grab coins on the inside of bends, and catch air over sharp crests. Tap CAM for camera height, angle and manual steering.</p>
     <div class="garage" id="garageHome"></div>
     <button class="btn" type="button" id="startBtn">Start engine</button>
-    <p class="small">Space to start · ← → or A D to steer · M to mute</p>
+    <p class="small">Space to start · hold Space to drift · M to mute</p>
   </div>
   <div class="col" id="boardHome"></div>
 </section>
@@ -205,8 +211,8 @@ h2 { font-size: 30px; color: var(--danger); }
   <div class="car-name"><b id="carName">Rally 72</b><span id="carYear">1972 rally coupe</span></div>
   <div class="bars">
     <span>Top speed</span><div class="bar"><i id="barSpeed"></i></div>
-    <span>Steering</span><div class="bar"><i id="barTurn"></i></div>
-    <span>Slide</span><div class="bar"><i id="barSlide"></i></div>
+    <span>Grip</span><div class="bar"><i id="barTurn"></i></div>
+    <span>Drift</span><div class="bar"><i id="barSlide"></i></div>
   </div>
   <p id="lockMsg" hidden></p>
 </div>
@@ -268,6 +274,8 @@ h2 { font-size: 30px; color: var(--danger); }
     cw = window.innerWidth; ch = window.innerHeight;
     cvs.width = Math.round(cw * dpr); cvs.height = Math.round(ch * dpr);
     unit = Math.min(cw, ch * 1.2) / CAM_DIV;
+    const k = clamp(Math.round(unit * dpr * 1.12 * 1.5), 2, 9);
+    if (typeof spriteCache !== 'undefined' && k !== spriteK) { spriteK = k; spriteCache.clear(); }
     const pr = ui.preview.getBoundingClientRect();
     ui.preview.width = Math.max(1, Math.round(pr.width * dpr)); ui.preview.height = Math.max(1, Math.round(pr.height * dpr));
   }
@@ -346,98 +354,105 @@ h2 { font-size: 30px; color: var(--danger); }
   const ELL = (x, y, rx, ry) => ({ t: 'ell', x, y, rx, ry });
 
   const BUILD = {
-    // 1970s two-door rally saloon: boxy, flared arches, four spotlights, mud flaps, roof roundel
-    rally(m) {
-      const body = '#f1eee6', blue = '#1d4f9a';
-      m.wheels(14, 10.6);
-      m.slab(4, 11, R_(-11, -22, 22, 44, 4), body, 0.1);
-      for (const sx of [-1, 1]) for (const sy of [-1, 1]) m.slab(4, 8, R_(sx > 0 ? 10 : -12.6, sy * 14 - 7, 2.6, 14, 1.3), '#2a2a2a', 0.15);
-      m.slab(5, 6, R_(-10.5, -23.6, 21, 2.2, 1), CHROME, 0.25); m.slab(5, 6, R_(-10.5, 21.6, 21, 2, 1), CHROME, 0.25);
-      for (const x of [-7.5, -2.5, 2.5, 7.5]) { m.slab(6, 9, CIRC(x, -24.6, 2.1), '#262626', 0.1); m.at(9, CIRC(x, -24.6, 1.5), '#ffe58a'); }
-      m.slab(8, 10, R_(-4.5, -22.4, 9, 1.6, 0.6), '#1d1d1d', 0.1);
-      for (const sx of [-1, 1]) { m.slab(9, 11, CIRC(sx * 7, -20.4, 2.2), CHROME, 0.2); m.at(11, CIRC(sx * 7, -20.4, 1.5), LENS); }
-      for (const sx of [-1, 1]) m.slab(8, 9, R_(sx * 8 - 2, 21.2, 4, 1.4, 0.6), TAIL, 0.2);
-      for (const sx of [-1, 1]) m.slab(1, 4, RECT(sx * 10.6 - 1.5, 21, 3, 1), '#111');
-      m.at(11, RECT(-3.6, -22, 2.4, 44), blue); m.at(11, RECT(1.2, -22, 2.4, 44), blue); m.at(11, RECT(-0.9, -22, 1.8, 44), '#d33b2f');
-      m.at(11, RECT(-6.5, -19, 1.2, 2.6), '#111'); m.at(11, RECT(5.3, -19, 1.2, 2.6), '#111');
-      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 10.6 : -12.6, -7, 2, 2), body, 0.1);
-      m.loft(12, 17, R_(-9.6, -8, 19.2, 18, 3), R_(-7.6, -4, 15.2, 11, 3), GLASS, 0.3, 0.1);
-      m.slab(18, 19, R_(-7.6, -4, 15.2, 11, 3), body, 0.1);
-      m.at(19, RECT(-3.6, -4, 2.4, 11), blue); m.at(19, RECT(1.2, -4, 2.4, 11), blue);
-      m.at(19, CIRC(0, 1.5, 3.3), '#ffffff'); m.at(19, RECT(-0.9, 0, 1.8, 3), '#111');
+    // 1967 fastback pony car: long hood, short deck, sloping fastback, side scoops, tri-bar tail lights
+    stallion(m) {
+      const body = '#c3202b', stripe = '#f3f1ea';
+      m.wheels(16.5, 11);
+      m.slab(4, 7, R_(-12, -25, 24, 50, 4), body, 0.1);
+      m.loft(8, 11, R_(-12, -25, 24, 50, 4), R_(-11.2, -24.5, 22.4, 49, 4), body, 0.16);
+      for (const sx of [-1, 1]) m.loft(6, 11, ELL(sx * 10.6, 13, 3, 9), ELL(sx * 10.2, 13, 2.2, 7.6), body, 0.16);
+      m.slab(5, 6, R_(-11.5, -26.4, 23, 1.6, 0.8), CHROME, 0.25); m.slab(5, 6, R_(-11.5, 24.8, 23, 1.6, 0.8), CHROME, 0.25);
+      m.slab(6, 9, R_(-9, -25.8, 18, 2.2, 1), '#121212', 0.1);
+      for (const sx of [-1, 1]) { m.slab(7, 9, CIRC(sx * 9.3, -24.6, 1.9), CHROME, 0.2); m.at(9, CIRC(sx * 9.3, -24.6, 1.3), LENS); }
+      for (const sx of [-1, 1]) for (const k of [0, 1, 2]) m.slab(7, 9, R_(sx * (5 + k * 2.6) - 1.1, 24.6, 2.2, 1.1, 0.5), TAIL, 0.25);
+      for (const sx of [-1, 1]) m.slab(1, 3, CIRC(sx * 6, 25.8, 1), CHROME, 0.2);
+      for (const sx of [-1, 1]) m.slab(7, 9, RECT(sx > 0 ? 11.6 : -12.4, 6, 0.8, 3.5), '#111');
+      m.at(11, RECT(-4.2, -25, 2.6, 50), stripe); m.at(11, RECT(1.6, -25, 2.6, 50), stripe);
+      m.slab(12, 12, R_(-3, -18, 6, 5, 1.5), '#a81a24', 0);
+      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 11.2 : -12.8, -5, 1.6, 1.4), CHROME, 0.2);
+      m.loft(12, 15, R_(-10.5, -5, 21, 26, 3), R_(-8, -1, 16, 10, 3), GLASS, 0.3, 0.1);
+      m.slab(16, 16, R_(-8, -1, 16, 10, 3), body, 0.16);
+      m.at(16, RECT(-4.2, -1, 2.6, 10), stripe); m.at(16, RECT(1.6, -1, 2.6, 10), stripe);
     },
-    // 1960s British city mini: tiny, wheels at the corners, white roof, chrome grille, bonnet stripes
-    pocket(m) {
-      const body = '#1f6b46', roof = '#f4f2ea';
-      m.wheels(12.6, 9.9);
-      m.slab(4, 11, R_(-10.5, -18, 21, 36, 5), body, 0.12);
-      m.slab(5, 6, R_(-9.5, -19.3, 19, 2, 1), CHROME, 0.25); m.slab(5, 6, R_(-9.5, 17.3, 19, 2, 1), CHROME, 0.25);
-      m.slab(6, 9, R_(-5, -18.7, 10, 1.8, 0.8), CHROME, 0.2);
-      for (let i = -2; i <= 2; i++) m.at(9, RECT(i * 2 - 0.3, -18.7, 0.6, 1.8), '#444');
-      for (const sx of [-1, 1]) { m.slab(9, 11, CIRC(sx * 7.2, -15.6, 2.4), CHROME, 0.2); m.at(11, CIRC(sx * 7.2, -15.6, 1.6), LENS); }
-      for (const sx of [-1, 1]) m.slab(8, 10, R_(sx * 8.4 - 0.8, 16.4, 1.6, 1.8, 0.6), TAIL, 0.2);
-      m.at(11, RECT(-3.2, -18, 2.2, 11), roof); m.at(11, RECT(1, -18, 2.2, 11), roof);
-      for (const sx of [-1, 1]) m.at(11, CIRC(sx * 9.6, 8.5, 0.9), CHROME);
-      for (const sx of [-1, 1]) m.slab(11, 12, CIRC(sx * 11.2, -6.5, 1.1), CHROME, 0.2);
-      m.loft(12, 17, R_(-9.6, -7, 19.2, 19, 2.2), R_(-8.8, -6, 17.6, 17, 2.2), GLASS, 0.3, 0.1);
-      m.slab(18, 19, R_(-9.1, -6.5, 18.2, 18, 2.6), roof, 0.08, 0.15);
+    // 1969 full-size muscle coupe: long and wide, full-width hidden-headlight grille, vinyl roof, tail stripe
+    brawler(m) {
+      const body = '#17181b';
+      m.wheels(18, 11.6);
+      m.slab(4, 7, R_(-12.5, -27.5, 25, 55, 3), body, 0.1, 0.25);
+      m.loft(8, 11, R_(-12.5, -27.5, 25, 55, 3), R_(-11.8, -27, 23.6, 54, 3), body, 0.22, 0.25);
+      for (const sx of [-1, 1]) m.loft(6, 11, ELL(sx * 11.1, 14.5, 3, 10), ELL(sx * 10.6, 14.5, 2.2, 8.5), body, 0.22, 0.25);
+      m.slab(5, 6, R_(-12, -28.6, 24, 1.6, 0.8), CHROME, 0.25); m.slab(5, 6, R_(-12, 27.2, 24, 1.6, 0.8), CHROME, 0.25);
+      m.slab(6, 10, R_(-12, -28.2, 24, 2.4, 1), CHROME, 0.2);
+      m.at(10, RECT(-11, -28, 22, 1.6), '#0a0a0a');
+      m.slab(7, 9, R_(-11, 26.6, 22, 1.5, 0.6), TAIL, 0.25);
+      m.at(9, RECT(-0.4, 26.6, 0.8, 1.5), CHROME);
+      m.at(11, RECT(-11.8, 20.5, 23.6, 2.4), '#c3202b');
+      m.slab(12, 12, R_(-5, -24, 10, 14, 2), '#26272b', 0);
+      for (const sx of [-1, 1]) m.slab(1, 3, CIRC(sx * 7, 27.6, 1.1), CHROME, 0.2);
+      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 11.8 : -13.4, -6, 1.6, 1.4), CHROME, 0.2);
+      m.loft(12, 16, R_(-10.6, -6, 21.2, 20, 2.5), R_(-9.4, -4, 18.8, 15, 2.5), GLASS, 0.3, 0.1);
+      m.slab(17, 17, R_(-9.4, -4, 18.8, 15, 2.5), '#0e0e10', 0.12);
     },
-    // 1950s air-cooled round car: separate fenders, running boards, domed roof, louvred engine lid
-    bubble(m) {
-      const body = '#86c5d4';
-      m.wheels(13, 10.4);
-      m.slab(4, 5, R_(-11.6, -8, 23.2, 16, 1), '#2a2a2a', 0.1);
-      for (const sx of [-1, 1]) for (const sy of [-1, 1]) m.loft(4, 10, ELL(sx * 9.6, sy * 13, 4.8, 8.2), ELL(sx * 9.2, sy * 13, 3.4, 6.6), body, 0.14);
-      m.loft(5, 12, R_(-9, -21, 18, 42, 8.5), R_(-7.4, -19.2, 14.8, 37.5, 7), body, 0.12);
-      m.slab(5, 6, R_(-11, -22.6, 22, 1.6, 0.8), CHROME, 0.25); m.slab(5, 6, R_(-11, 21, 22, 1.6, 0.8), CHROME, 0.25);
-      for (const sx of [-1, 1]) { m.slab(5, 7, RECT(sx * 5 - 0.6, -23.4, 1.2, 2.6), CHROME, 0.2); m.slab(5, 7, RECT(sx * 5 - 0.6, 20.8, 1.2, 2.6), CHROME, 0.2); }
-      for (const sx of [-1, 1]) { m.slab(10, 11, CIRC(sx * 9.4, -17.4, 2.2), CHROME, 0.2); m.at(11, CIRC(sx * 9.4, -17.4, 1.5), LENS); }
-      for (const sx of [-1, 1]) m.at(10, ELL(sx * 9.4, 18.6, 1.2, 1.9), TAIL);
-      for (let i = 0; i < 4; i++) m.at(12, RECT(-3, 13.5 + i * 1.6, 6, 0.6), '#4e7d88');
-      m.at(12, RECT(-0.5, -18, 1, 2.2), CHROME);
-      for (const sx of [-1, 1]) m.slab(12, 13, CIRC(sx * 9.4, -6.4, 1), CHROME, 0.2);
-      m.loft(13, 18, R_(-8, -6.5, 16, 17.5, 6), R_(-5.6, -2.8, 11.2, 10.4, 5), GLASS, 0.3, 0.1);
-      m.loft(19, 21, R_(-5.6, -2.8, 11.2, 10.4, 5), R_(-4.4, -1.6, 8.8, 8, 4), body, 0.14);
+    // 1969 pony coupe: coke-bottle hips, cowl-induction hood, hood and deck stripes, ducktail spoiler
+    hornet(m) {
+      const body = '#e8702a', stripe = '#111111';
+      m.wheels(16, 11);
+      m.slab(4, 7, R_(-12.2, -25, 24.4, 50, 4), body, 0.1);
+      m.loft(8, 11, R_(-12.2, -25, 24.4, 50, 4), R_(-11.4, -24.4, 22.8, 49, 4), body, 0.16);
+      for (const sx of [-1, 1]) m.loft(6, 11, ELL(sx * 10.6, 12.5, 2.8, 8.5), ELL(sx * 10.2, 12.5, 2.1, 7.2), body, 0.16);
+      m.slab(5, 6, R_(-11.5, -26.3, 23, 1.6, 0.8), CHROME, 0.25); m.slab(5, 6, R_(-11.5, 24.7, 23, 1.6, 0.8), CHROME, 0.25);
+      m.slab(6, 9, R_(-10, -25.8, 20, 2, 1), '#111', 0.1);
+      for (const sx of [-1, 1]) { m.slab(8, 9, CIRC(sx * 8.2, -25, 1.8), CHROME, 0.2); m.at(9, CIRC(sx * 8.2, -25, 1.2), LENS); }
+      for (const sx of [-1, 1]) m.slab(7, 9, R_(sx * 6.8 - 2.6, 24.4, 5.2, 1.2, 0.5), TAIL, 0.25);
+      m.at(11, RECT(-3.8, -25, 2.4, 16), stripe); m.at(11, RECT(1.4, -25, 2.4, 16), stripe);
+      m.at(11, RECT(-3.8, 14, 2.4, 11), stripe); m.at(11, RECT(1.4, 14, 2.4, 11), stripe);
+      m.slab(12, 12, R_(-3.6, -21, 7.2, 10, 1), '#d4621f', 0);
+      m.at(12, RECT(-2.8, -11.6, 5.6, 0.8), '#111');
+      m.slab(12, 13, R_(-11.2, 22.4, 22.4, 1.8, 0.8), '#111', 0.15);
+      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 11.4 : -13, -5, 1.6, 1.4), CHROME, 0.2);
+      m.loft(12, 16, R_(-10, -6, 20, 19, 3), R_(-8.5, -3, 17, 13, 3), GLASS, 0.3, 0.1);
+      m.slab(17, 17, R_(-8.5, -3, 17, 13, 3), '#151515', 0.12);
     },
-    // late-1960s fastback muscle coupe: long hood with scoop, sloping rear glass, tri-bar tail lights, twin stripes
-    comet(m) {
-      const body = '#efb030', stripe = '#161616';
+    // late-1970s pony car: shaker hood scoop, gold pinstripes and hood chevron, T-top roof, wrap spoiler
+    outlaw(m) {
+      const body = '#141416', gold = '#c9a33b';
       m.wheels(17, 11.6);
-      m.slab(4, 10, R_(-12.5, -26, 25, 52, 4), body, 0.12);
-      m.slab(5, 6, R_(-12, -27.1, 24, 1.8, 0.9), CHROME, 0.25); m.slab(5, 6, R_(-12, 25.3, 24, 1.8, 0.9), CHROME, 0.25);
-      m.slab(6, 9, R_(-11, -26.7, 22, 2, 1), '#151515', 0.1);
-      for (const sx of [-1, 1]) { m.slab(7, 9, CIRC(sx * 8.6, -25.4, 1.9), CHROME, 0.2); m.at(9, CIRC(sx * 8.6, -25.4, 1.3), LENS); }
-      for (const sx of [-1, 1]) for (const k of [0, 1, 2]) m.slab(7, 9, R_(sx * (4.5 + k * 2.8) - 1.2, 25.4, 2.4, 1.2, 0.5), TAIL, 0.25);
-      for (const sx of [-1, 1]) m.slab(1, 3, CIRC(sx * 5, 26.9, 1), CHROME, 0.2);
-      for (const sx of [-1, 1]) m.slab(7, 9, RECT(sx > 0 ? 12.4 : -13.2, 4, 0.8, 4), '#111');
-      m.at(10, RECT(-4.2, -26, 2.8, 52), stripe); m.at(10, RECT(1.4, -26, 2.8, 52), stripe);
-      m.slab(11, 12, R_(-3.6, -19, 7.2, 8, 1.6), '#d99c22', 0.1);
-      m.at(12, RECT(-2.6, -19.2, 5.2, 1.1), '#111');
-      for (const sx of [-1, 1]) m.slab(10, 11, RECT(sx > 0 ? 12.5 : -14, -5, 1.5, 1.6), CHROME, 0.2);
-      m.loft(11, 14, R_(-11.2, -6, 22.4, 27, 3), R_(-8, -2, 16, 10, 3), GLASS, 0.3, 0.1);
-      m.slab(15, 16, R_(-8, -2, 16, 10, 3), body, 0.12);
-      m.at(16, RECT(-4.2, -2, 2.8, 10), stripe); m.at(16, RECT(1.4, -2, 2.8, 10), stripe);
+      m.slab(4, 7, R_(-12.5, -26, 25, 52, 5), body, 0.1, 0.25);
+      m.loft(8, 11, R_(-12.5, -26, 25, 52, 5), R_(-11.6, -25.4, 23.2, 51, 5), body, 0.22, 0.25);
+      m.slab(5, 6, R_(-11, -26.8, 22, 1.4, 0.7), '#2a2a2c', 0.2);
+      for (const sx of [-1, 1]) m.slab(7, 9, R_(sx * 4.5 - 2.5, -26.4, 5, 1.6, 0.6), '#050505', 0.1);
+      for (const sx of [-1, 1]) m.slab(8, 10, R_(sx * 9 - 1.6, -25.8, 3.2, 1.6, 0.6), LENS, 0.1);
+      m.slab(7, 9, R_(-11, 25.4, 22, 1.4, 0.6), '#4a0f0f', 0.2);
+      for (let k = -4; k <= 4; k++) m.at(9, RECT(k * 2.4 - 0.8, 25.4, 1.6, 1.4), TAIL);
+      m.at(11, { t: 'poly', pts: [[-7, -21], [0, -15], [7, -21], [5, -22], [0, -17.5], [-5, -22]] }, gold);
+      for (const sx of [-1, 1]) m.at(11, RECT(sx > 0 ? 9.6 : -10.2, -24, 0.6, 46), gold);
+      m.slab(12, 14, R_(-3, -16, 6, 6, 1.5), '#1d1d1f', 0.14);
+      m.at(14, RECT(-2, -16.2, 4, 0.8), gold);
+      m.slab(12, 13, R_(-12, 21.6, 24, 2.4, 1), '#0c0c0d', 0.2);
+      for (const sx of [-1, 1]) m.slab(1, 3, CIRC(sx * 6, 26.6, 1.1), CHROME, 0.2);
+      for (const sx of [-1, 1]) m.slab(11, 12, RECT(sx > 0 ? 11.8 : -13.4, -5, 1.6, 1.4), body, 0.2);
+      m.loft(12, 15, R_(-10.5, -6, 21, 20, 3), R_(-9, -3, 18, 14, 3), GLASS, 0.3, 0.1);
+      m.slab(16, 16, R_(-9, -3, 18, 14, 3), body, 0.22);
+      m.at(16, R_(-7.6, -2, 6, 8, 1.5), '#33505f'); m.at(16, R_(1.6, -2, 6, 8, 1.5), '#33505f');
     },
-    // 1960s split-window camper bus: two-tone, V-front panel, split windscreen, roof rack and surfboard
-    camper(m) {
-      const lower = '#d9573a', cream = '#f2ead8';
-      m.wheels(14, 10.6);
-      m.slab(4, 12, R_(-12, -23, 24, 46, 7), lower, 0.1);
-      m.at(12, { t: 'poly', pts: [[-11, -22.6], [11, -22.6], [0, -13.5]] }, cream);
-      m.slab(5, 6, R_(-11, -24.2, 22, 1.8, 0.9), CHROME, 0.25); m.slab(5, 6, R_(-11, 22.4, 22, 1.8, 0.9), CHROME, 0.25);
-      for (const sx of [-1, 1]) { m.slab(7, 9, CIRC(sx * 8, -23, 2.5), CHROME, 0.2); m.at(9, CIRC(sx * 8, -23, 1.7), LENS); }
-      for (const sx of [-1, 1]) m.slab(8, 10, R_(sx * 9.2 - 0.8, 22.4, 1.6, 1.4, 0.5), TAIL, 0.2);
-      m.at(12, CIRC(0, -20.5, 2.2), CHROME); m.at(12, CIRC(0, -20.5, 1.4), lower);
-      m.loft(13, 16, R_(-11.6, -22.6, 23.2, 45.2, 7), R_(-11.2, -21.8, 22.4, 43.6, 6.6), GLASS, 0.35, 0.05);
-      m.slab(13, 16, RECT(-0.6, -22.8, 1.2, 2.2), cream, 0.05, 0.1);
-      for (let y = -12; y <= 16; y += 7) for (const sx of [-1, 1]) m.slab(13, 16, RECT(sx > 0 ? 10.4 : -11.8, y, 1.4, 1.2), cream, 0.05, 0.1);
-      for (const sx of [-1, 1]) m.slab(13, 14, RECT(sx > 0 ? 12 : -14.6, -17, 2.6, 1.1), CHROME, 0.2);
-      m.loft(17, 20, R_(-11.2, -21.8, 22.4, 43.6, 6.6), R_(-10.6, -20.8, 21.2, 41.6, 6), cream, 0.08, 0.2);
-      for (let y = -15; y <= 15; y += 5) m.at(20, RECT(-8, y, 16, 0.7), '#dccfb4');
-      m.slab(21, 22, RECT(-9, -13, 1, 27), '#595959', 0.1); m.slab(21, 22, RECT(8, -13, 1, 27), '#595959', 0.1);
-      m.slab(21, 22, RECT(-9, -13, 18, 1), '#595959', 0.1); m.slab(21, 22, RECT(-9, 13, 18, 1), '#595959', 0.1);
-      m.slab(23, 24, ELL(0, 0, 4.4, 17), '#f4d688', 0.12);
-      m.at(24, RECT(-0.4, -15.5, 0.8, 31), '#e06a3b');
+    // mid-90s JDM drift coupe: wide body, pop-up lights, carbon hood, big wing, twin round tail lights
+    kaze(m) {
+      const body = '#f26a1b', dark = '#1b1b1d';
+      m.wheels(14.5, 11.6);
+      m.slab(3, 6, R_(-12.6, -23, 25.2, 46, 6), dark, 0.1);
+      m.loft(7, 10, R_(-12.4, -23, 24.8, 46, 7), R_(-11, -22, 22, 44, 7), body, 0.18);
+      for (const sx of [-1, 1]) m.loft(5, 10, ELL(sx * 10.8, 13, 2.8, 7.5), ELL(sx * 10.2, 13, 2, 6.4), body, 0.18);
+      m.slab(4, 6, R_(-8, -23.8, 16, 1.6, 0.7), dark, 0.1);
+      m.at(10, R_(-9, -22, 18, 11, 3), '#2a2a2c');
+      for (const sx of [-1, 1]) m.at(10, R_(sx * 7.5 - 2.5, -20.6, 5, 2.6, 1), shade(body, -0.12));
+      m.loft(11, 15, R_(-9.8, -8, 19.6, 19, 5), R_(-7.6, -4, 15.2, 11, 5), GLASS, 0.3, 0.1);
+      m.slab(16, 16, R_(-7.6, -4, 15.2, 11, 5), body, 0.18);
+      for (const sx of [-1, 1]) m.slab(11, 15, RECT(sx * 7.5 - 0.5, 17.6, 1, 2), dark, 0.1);
+      m.slab(16, 17, R_(-12.6, 16.6, 25.2, 4.6, 1), dark, 0.2);
+      for (const sx of [-1, 1]) m.slab(16, 17, RECT(sx > 0 ? 11.6 : -12.6, 16, 1, 5.6), body, 0.15);
+      for (const sx of [-1, 1]) for (const x of [5, 8.4]) m.slab(7, 9, CIRC(sx * x, 22.4, 1.4), TAIL, 0.25);
+      m.slab(2, 4, CIRC(5.5, 23.4, 1.6), CHROME, 0.2);
+      for (const sx of [-1, 1]) m.slab(10, 11, RECT(sx > 0 ? 11.4 : -13, -6, 1.6, 1.3), body, 0.2);
     },
     // old farm truck with a flatbed of hay bales: slow traffic to overtake
     truck(m) {
@@ -460,34 +475,73 @@ h2 { font-size: 30px; color: var(--danger); }
   };
 
   const CARS = [
-    { id: 'rally', name: 'Rally 72', year: '1972 rally saloon', unlock: 0, top: 1.0, turn: 2.5, slide: 1.7, mult: 1, L: 44, W: 22, r: 4,
-      snd: { base: 60, span: 120, h2: 0.45, sub: 0.15, am: 0.12, div: 2, lp: 2400, wave: 'sawtooth', pops: true, whine: 0, gears: [0, 90, 150, 210, 280, 350, 999] } },
-    { id: 'pocket', name: 'Pocket', year: '1964 city mini', unlock: 600, top: 0.95, turn: 2.85, slide: 1.95, mult: 1, L: 36, W: 21, r: 5,
-      snd: { base: 74, span: 135, h2: 0.6, sub: 0.04, am: 0.1, div: 2, lp: 2800, wave: 'square', pops: false, whine: 0.012, gears: [0, 100, 170, 250, 340, 999] } },
-    { id: 'bubble', name: 'Bubble', year: '1958 air-cooled runabout', unlock: 1400, top: 0.98, turn: 2.6, slide: 1.45, mult: 1.1, L: 42, W: 24, r: 9,
-      snd: { base: 42, span: 70, h2: 0.25, sub: 0.3, am: 0.6, div: 1, lp: 1300, wave: 'sawtooth', pops: false, whine: 0, gears: [0, 120, 200, 300, 999] } },
-    { id: 'comet', name: 'Comet GT', year: '1969 fastback muscle coupe', unlock: 2600, top: 1.09, turn: 2.3, slide: 1.4, mult: 1.2, L: 52, W: 25, r: 4,
-      snd: { base: 33, span: 78, h2: 0.3, sub: 0.65, am: 0.38, div: 0.5, lp: 1500, wave: 'sawtooth', pops: true, whine: 0, lumpy: true, gears: [0, 160, 290, 999] } },
-    { id: 'camper', name: 'Camper', year: '1966 split-window bus', unlock: 4000, top: 0.92, turn: 2.25, slide: 2.3, mult: 1.3, L: 46, W: 24, r: 7,
-      snd: { base: 39, span: 62, h2: 0.2, sub: 0.35, am: 0.48, div: 1, lp: 1100, wave: 'sawtooth', pops: false, whine: 0.03, gears: [0, 110, 190, 290, 999] } },
+    { id: 'stallion', name: 'Stallion 67', year: '1967 fastback pony car', unlock: 0, top: 1.0, grip: 1.0, drift: 1.0, angle: 0.72, mult: 1,
+      turn: 2.5, slide: 1.7, L: 50, W: 24, r: 4,
+      snd: { base: 31, span: 82, h2: 0.3, sub: 0.6, am: 0.42, div: 0.5, lp: 1500, wave: 'sawtooth', exh: 0.5, lumpy: true, pops: true, whine: 0, turbo: 0, bov: false, gears: [0, 150, 260, 370, 999] } },
+    { id: 'hornet', name: 'Hornet 69', year: '1969 cowl-hood pony coupe', unlock: 600, top: 1.02, grip: 1.06, drift: 1.04, angle: 0.72, mult: 1.1,
+      turn: 2.55, slide: 1.75, L: 50, W: 24.4, r: 4,
+      snd: { base: 35, span: 92, h2: 0.38, sub: 0.45, am: 0.36, div: 0.5, lp: 1800, wave: 'sawtooth', exh: 0.45, lumpy: true, pops: true, whine: 0, turbo: 0, bov: false, gears: [0, 140, 245, 350, 999] } },
+    { id: 'brawler', name: 'Brawler 69', year: '1969 big-block coupe', unlock: 1400, top: 1.06, grip: 0.92, drift: 0.94, angle: 0.78, mult: 1.15,
+      turn: 2.35, slide: 1.55, L: 55, W: 25, r: 3,
+      snd: { base: 27, span: 72, h2: 0.22, sub: 0.75, am: 0.48, div: 0.5, lp: 1250, wave: 'sawtooth', exh: 0.6, lumpy: true, pops: true, whine: 0, turbo: 0, bov: false, gears: [0, 165, 290, 999] } },
+    { id: 'outlaw', name: 'Outlaw 77', year: '1977 T-top pony car', unlock: 2600, top: 1.09, grip: 0.96, drift: 1.0, angle: 0.8, mult: 1.25,
+      turn: 2.4, slide: 1.5, L: 52, W: 25, r: 5,
+      snd: { base: 29, span: 78, h2: 0.26, sub: 0.68, am: 0.44, div: 0.5, lp: 1400, wave: 'sawtooth', exh: 0.55, lumpy: true, pops: true, whine: 0.008, turbo: 0, bov: false, gears: [0, 160, 280, 999] } },
+    { id: 'kaze', name: 'Kaze 95', year: '1995 turbo drift coupe', unlock: 4000, top: 1.04, grip: 1.14, drift: 1.2, angle: 0.86, mult: 1.35,
+      turn: 2.7, slide: 1.6, L: 46, W: 25.2, r: 6,
+      snd: { base: 56, span: 165, h2: 0.55, sub: 0.15, am: 0.1, div: 2, lp: 3000, wave: 'sawtooth', exh: 0.25, lumpy: false, pops: false, whine: 0.006, turbo: 0.03, bov: true, gears: [0, 95, 160, 230, 310, 390, 999] } },
   ];
   CARS.forEach((c) => { const m = modelKit(); BUILD[c.id](m); c.model = m.done(); });
 
+  function drawOp(g, op, steer) {
+    g.fillStyle = op.c;
+    if (op.t === 'wheel') {
+      g.save(); g.translate(op.x, op.y); if (op.front) g.rotate(steer * 0.45);
+      rr(g, -3.6, -6, 7.2, 12, 1.6); g.fill(); g.restore();
+    } else if (op.t === 'rect') g.fillRect(op.x, op.y, op.w, op.h);
+    else if (op.t === 'circ') { g.beginPath(); g.arc(op.x, op.y, op.r, 0, Math.PI * 2); g.fill(); }
+    else if (op.t === 'ell') { g.beginPath(); g.ellipse(op.x, op.y, op.rx, op.ry, 0, 0, Math.PI * 2); g.fill(); }
+    else if (op.t === 'poly') { g.beginPath(); op.pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); g.fill(); }
+    else { rr(g, op.x, op.y, op.w, op.h, op.r); g.fill(); }
+  }
+  // smooth version: fills the gap between whole-unit slices with quarter-unit copies, so sides read as solid surfaces
   function drawModel(g, model, setZ, steer) {
-    for (const lvl of model) {
-      setZ(lvl.z);
-      for (const op of lvl.ops) {
-        g.fillStyle = op.c;
-        if (op.t === 'wheel') {
-          g.save(); g.translate(op.x, op.y); if (op.front) g.rotate(steer * 0.45);
-          rr(g, -3.6, -6, 7.2, 12, 1.6); g.fill(); g.restore();
-        } else if (op.t === 'rect') g.fillRect(op.x, op.y, op.w, op.h);
-        else if (op.t === 'circ') { g.beginPath(); g.arc(op.x, op.y, op.r, 0, Math.PI * 2); g.fill(); }
-        else if (op.t === 'ell') { g.beginPath(); g.ellipse(op.x, op.y, op.rx, op.ry, 0, 0, Math.PI * 2); g.fill(); }
-        else if (op.t === 'poly') { g.beginPath(); op.pts.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); g.fill(); }
-        else { rr(g, op.x, op.y, op.w, op.h, op.r); g.fill(); }
+    for (let j = 0; j < model.length; j++) {
+      const lvl = model[j], next = model[j + 1];
+      const steps = next && next.z === lvl.z + 1 ? 4 : 1;
+      for (let s = 0; s < steps; s++) {
+        setZ(lvl.z + s / steps);
+        for (const op of lvl.ops) drawOp(g, op, steer);
       }
     }
+  }
+  // Cars are rendered once per view angle into a high-resolution sprite and then scaled down: sharp, smooth edges
+  // and far less work per frame. The cache is keyed by model, angle (2° steps), steering bucket and resolution.
+  const spriteCache = new Map();
+  let spriteK = 4;
+  function modelSprite(id, model, rel, steer) {
+    const k = spriteK;
+    const ri = ((Math.round(rel / (Math.PI * 2) * 180) % 180) + 180) % 180;
+    const sb = steer > 0.33 ? 1 : steer < -0.33 ? -1 : 0;
+    const key = id + '|' + ri + '|' + sb + '|' + k;
+    let e = spriteCache.get(key);
+    if (e) { spriteCache.delete(key); spriteCache.set(key, e); return e; }
+    const half = 32, up = 28;
+    const w = Math.ceil(half * 2 * k), h = Math.ceil((half * 2 * TILT + up * HK) * k);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const g = cv.getContext('2d');
+    const ox = w / 2, oy = (half * TILT + up * HK) * k, ang = (ri / 180) * Math.PI * 2;
+    drawModel(g, model, (z) => { g.setTransform(k, 0, 0, k * TILT, ox, oy - z * k * HK); g.rotate(ang); }, sb);
+    e = { cv, ox, oy, k };
+    spriteCache.set(key, e);
+    if (spriteCache.size > 300) spriteCache.delete(spriteCache.keys().next().value);
+    return e;
+  }
+  function drawSprite(e, sx, sy) {
+    const sc = Z / e.k;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(e.cv, sx - e.ox * sc, sy - e.oy * sc, e.cv.width * sc, e.cv.height * sc);
   }
   function rr(g, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
@@ -504,7 +558,7 @@ h2 { font-size: 30px; color: var(--danger); }
   const GRAV = 620;
   const R = { pts: [], obs: [], a: 0, c: 0, left: 0, lastDir: 1, z: 0, slope: 0, slopeT: 0, slopeLeft: 0, slopeRate: 0.016, nextObs: 0, coinRun: null };
   const speedAt = (d) => 250 + Math.min(210, d * M_PER_UNIT * 0.11);
-  const widthAt = (d) => Math.max(88, 156 - d * M_PER_UNIT * 0.03);
+  const widthAt = (d) => Math.max(80, 124 - d * M_PER_UNIT * 0.026);
   const idxForM = (m) => START + Math.round(m / M_PER_UNIT / SEG);
 
   function resetRoad() {
@@ -588,7 +642,7 @@ h2 { font-size: 30px; color: var(--danger); }
   }
 
   // ---------- state ----------
-  let carIdx = Math.max(0, CARS.findIndex((c) => c.id === store.get('car', 'rally')));
+  let carIdx = Math.max(0, CARS.findIndex((c) => c.id === store.get('car', 'stallion')));
   const G = {
     mode: 'title', car: { x: 0, y: 0, h: 0, vx: 0, vy: 0, steer: 0, slip: 0, z: 0, vz: 0, air: false }, idx: 0, lat: 0, fr: 0, dist: 0,
     bank: 0, drift: 0, driftT: 0, offT: 0, combo: 1, bestDrift: 0, edgeT: 0, airT: 0, oil: 0, stun: 0, coinStreak: 0, coinT: 0,
@@ -603,7 +657,7 @@ h2 { font-size: 30px; color: var(--danger); }
     const c = G.car, p = R.pts[START - 6];
     c.x = p.x; c.y = p.y; c.h = 0; c.vx = 0; c.vy = -speedAt(0) * 0.6; c.steer = 0; c.slip = 0; c.z = 0; c.vz = 0; c.air = false;
     G.idx = START - 6; G.lat = 0; G.dist = 0; G.bank = 0; G.drift = 0; G.driftT = 0; G.offT = 0; G.combo = 1; G.bestDrift = 0;
-    G.airT = 0; G.oil = 0; G.stun = 0; G.coinStreak = 0; G.coinT = 0;
+    G.airT = 0; G.oil = 0; G.stun = 0; G.coinStreak = 0; G.coinT = 0; G.d = 0; G.bendSign = 1;
     G.parts = []; G.skids = []; G.popups = []; G.fall = null; G.lastWheels = null; G.slowmo = 0;
     G.cam.x = c.x; G.cam.y = c.y - 90; G.cam.a = 0; G.cam.z = 0;
     G.clouds = Array.from({ length: 7 }, (_, i) => ({ x: rnd(-500, 500), y: c.y - i * 260 + rnd(-80, 80), s: rnd(1.6, 3), z: VALLEY + rnd(90, 190) }));
@@ -623,6 +677,9 @@ h2 { font-size: 30px; color: var(--danger); }
   // ---------- input ----------
   // Hold the left or right half of the screen (anywhere, top to bottom) to drift that way.
   const input = { ptr: new Map(), keyL: false, keyR: false, last: null };
+  const ctrl = { mode: store.get('ctrl', 'auto') };
+  // auto mode: any touch, or Space / ↑ / W / an arrow key, means "drift"
+  const holding = () => input.ptr.size > 0 || input.keyL || input.keyR || input.keyH;
   const steerInput = () => {
     let s = 0;
     for (const v of input.ptr.values()) s += v.x < cw / 2 ? -1 : 1;
@@ -640,7 +697,7 @@ h2 { font-size: 30px; color: var(--danger); }
   const up = (e) => { input.ptr.delete(e.pointerId); if (input.last === e.pointerId) input.last = input.ptr.size ? [...input.ptr.keys()].pop() : null; };
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', up);
-  window.addEventListener('blur', () => { input.ptr.clear(); input.last = null; input.keyL = input.keyR = false; });
+  window.addEventListener('blur', () => { input.ptr.clear(); input.last = null; input.keyL = input.keyR = input.keyH = false; });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
       if (G.mode === 'title' || G.mode === 'over') { cycleCar(-1); return; }
@@ -652,12 +709,14 @@ h2 { font-size: 30px; color: var(--danger); }
       if (e.code === 'Enter' && e.target.closest && e.target.closest('button')) return;
       e.preventDefault();
       if (performance.now() >= G.lockUntil) startRun();
-    } else if (e.code === 'KeyM') toggleMute();
+    } else if ((e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') && G.mode === 'play') { input.keyH = true; e.preventDefault(); }
+    else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'KeyC') toggleCam();
   });
   window.addEventListener('keyup', (e) => {
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') input.keyL = false;
     if (e.code === 'ArrowRight' || e.code === 'KeyD') input.keyR = false;
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') input.keyH = false;
   });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   ui.startBtn.addEventListener('click', () => startRun());
@@ -681,9 +740,9 @@ h2 { font-size: 30px; color: var(--danger); }
     const c = spec(), ok = unlocked(c);
     ui.carName.textContent = c.name;
     ui.carYear.textContent = c.year + (c.mult > 1 ? ' · drift x' + c.mult : '');
-    ui.barSpeed.style.width = Math.round(((c.top - 0.88) / 0.24) * 100) + '%';
-    ui.barTurn.style.width = Math.round(((c.turn - 2.1) / 0.85) * 100) + '%';
-    ui.barSlide.style.width = Math.round(((2.5 - c.slide) / 1.2) * 100) + '%';
+    ui.barSpeed.style.width = Math.round(((c.top - 0.94) / 0.17) * 100) + '%';
+    ui.barTurn.style.width = Math.round(((c.grip - 0.84) / 0.34) * 100) + '%';
+    ui.barSlide.style.width = Math.round(((c.drift - 0.86) / 0.38) * 100) + '%';
     ui.lockMsg.hidden = ok;
     ui.lockMsg.textContent = ok ? '' : 'Locked. Reach a best score of ' + c.unlock + ' to unlock (yours: ' + G.best + ').';
     for (const b of [ui.startBtn, ui.againBtn]) { b.disabled = !ok; }
@@ -708,6 +767,9 @@ h2 { font-size: 30px; color: var(--danger); }
   }
 
   // ---------- audio ----------
+  // Synthesized, nothing sampled. The engine is a pulse train (one pulse per firing) through soft clipping,
+  // with exhaust noise gated by the same pulses; V8s get an uneven "lumpy" beat, the turbo car a whistle and
+  // blow-off valve. Tyres use three detuned screech tones plus rubber noise, pitch rising with slip angle.
   let AC = null, master = null, noise = null, muted = store.get('muted', false);
   const N = {};
   const rp = (f, a = 0.05) => f * (1 + rnd(-a, a));
@@ -722,36 +784,49 @@ h2 { font-size: 30px; color: var(--danger); }
     master = AC.createGain(); master.gain.value = muted ? 0 : 0.7; master.connect(comp);
     noise = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
     const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+
+    // engine voice
     N.e1 = AC.createOscillator(); N.e1.type = 'sawtooth';
-    N.e2 = AC.createOscillator(); N.e2.type = 'square';
-    const e2g = AC.createGain(); e2g.gain.value = 0.35;
+    N.e2 = AC.createOscillator(); N.e2.type = 'square'; N.e2g = AC.createGain();
+    N.sub = AC.createOscillator(); N.sub.type = 'sine'; N.subG = AC.createGain();
     const shaper = AC.createWaveShaper();
     const curve = new Float32Array(1024);
-    for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 2.4); }
+    for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 2.8); }
     shaper.curve = curve;
     N.eF = AC.createBiquadFilter(); N.eF.type = 'lowpass'; N.eF.Q.value = 3;
-    N.eG = AC.createGain(); N.eG.gain.value = 0;
-    N.e2g = e2g;
-    N.sub = AC.createOscillator(); N.sub.type = 'sine'; N.subG = AC.createGain(); N.subG.gain.value = 0;
-    N.amp = AC.createGain(); N.amp.gain.value = 1;
-    N.puls = AC.createOscillator(); N.puls.type = 'sine'; N.pulsG = AC.createGain(); N.pulsG.gain.value = 0;
+    N.amp = AC.createGain();
+    N.puls = AC.createOscillator(); N.puls.type = 'square'; N.pulsG = AC.createGain();
     N.puls.connect(N.pulsG); N.pulsG.connect(N.amp.gain);
-    N.e1.connect(shaper); N.e2.connect(e2g); e2g.connect(shaper); N.sub.connect(N.subG); N.subG.connect(shaper);
+    N.eG = AC.createGain(); N.eG.gain.value = 0;
+    N.e1.connect(shaper); N.e2.connect(N.e2g); N.e2g.connect(shaper); N.sub.connect(N.subG); N.subG.connect(shaper);
     shaper.connect(N.eF); N.eF.connect(N.amp); N.amp.connect(N.eG); N.eG.connect(master);
+    // exhaust rumble: band of noise gated by the firing pulses
+    N.exh = loopNoise('bandpass', 180, 1.2); N.exhG = AC.createGain(); N.exh.g.gain.value = 1;
+    N.exh.g.connect(N.exhG); N.exhG.connect(N.amp);
+    // turbo whistle and gear whine
+    N.tb = AC.createOscillator(); N.tb.type = 'sine'; N.tbG = AC.createGain(); N.tbG.gain.value = 0; N.tb.connect(N.tbG); N.tbG.connect(master);
     N.wh = AC.createOscillator(); N.wh.type = 'sine'; N.whG = AC.createGain(); N.whG.gain.value = 0; N.wh.connect(N.whG); N.whG.connect(master);
-    N.e1.start(); N.e2.start(); N.sub.start(); N.puls.start(); N.wh.start();
-    setEngine();
-    N.sq = AC.createOscillator(); N.sq.type = 'sawtooth';
-    const lfo = AC.createOscillator(); lfo.frequency.value = rnd(7, 11); const lg = AC.createGain(); lg.gain.value = 55;
-    lfo.connect(lg); lg.connect(N.sq.frequency); lfo.start();
-    N.sqF = AC.createBiquadFilter(); N.sqF.type = 'bandpass'; N.sqF.frequency.value = 1600; N.sqF.Q.value = 2.2;
+    for (const o of [N.e1, N.e2, N.sub, N.puls, N.tb, N.wh]) o.start();
+
+    // tyre screech: three detuned tones, each wobbling at its own rate, sharpened by a highpass
+    const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 850; hp.Q.value = 0.7;
+    const pk = AC.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 2400; pk.gain.value = 6; pk.Q.value = 1.2;
     N.sqG = AC.createGain(); N.sqG.gain.value = 0;
-    N.sq.connect(N.sqF); N.sqF.connect(N.sqG); N.sqG.connect(master); N.sq.start();
+    hp.connect(pk); pk.connect(N.sqG); N.sqG.connect(master);
+    N.sqs = [1, 1.26, 1.53].map((r, i) => {
+      const o = AC.createOscillator(); o.type = 'sawtooth';
+      const l = AC.createOscillator(); l.frequency.value = rnd(5, 13) + i * 2; const lg = AC.createGain(); lg.gain.value = 40 + i * 20;
+      l.connect(lg); lg.connect(o.frequency); l.start();
+      const g = AC.createGain(); g.gain.value = [0.5, 0.35, 0.22][i];
+      o.connect(g); g.connect(hp); o.start();
+      return { o, r };
+    });
     N.rub = loopNoise('bandpass', 1900, 1.4); N.rub.g.connect(master);
     N.grav = loopNoise('bandpass', 3200, 0.9); N.grav.g.connect(master);
     N.wind = loopNoise('lowpass', 700, 0.6); N.wind.g.connect(master);
     N.gust = rnd(3, 7);
-    N.gear = 0;
+    N.gear = 0; N.wasDrift = false;
+    setEngine();
   }
   function loopNoise(type, freq, q) {
     const s = AC.createBufferSource(); s.buffer = noise; s.loop = true;
@@ -778,7 +853,7 @@ h2 { font-size: 30px; color: var(--danger); }
     const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.05, dur / 4)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     s.connect(f); f.connect(g); g.connect(out(pan)); s.start(t, rnd(0, 1.2), dur + 0.05);
   }
-  // each car's engine character: pitch range, harmonics, firing chug, gearing, exhaust pops
+  // each car's engine character
   function setEngine() {
     if (!AC) return;
     const e = spec().snd;
@@ -787,28 +862,30 @@ h2 { font-size: 30px; color: var(--danger); }
     N.subG.gain.value = e.sub;
     N.amp.gain.value = 1 - e.am / 2;
     N.pulsG.gain.value = e.am / 2;
+    N.exhG.gain.value = e.exh;
     N.eF.Q.value = e.lumpy ? 5 : 3;
     N.gear = 0;
   }
   const sfx = {
     startup() {
-      // starter motor cranks, then the engine catches and blips
       const e = spec().snd;
       const n = 2 + Math.floor(Math.random() * 3);
       for (let i = 0; i < n; i++) { tone(rp(95, 0.08), 0.13, 'square', 0.05, i * rnd(0.14, 0.18), rp(70)); burst(0.1, 0.03, 'bandpass', rp(1200), 2, i * 0.16); }
       const t0 = n * 0.16 + 0.05;
-      tone(e.base * 0.9, 0.55, e.wave, 0.09, t0, e.base * 2.2);
-      tone(e.base * 0.45, 0.6, 'sine', 0.12 * (0.4 + e.sub), t0, e.base * 0.9);
-      burst(0.25, 0.08, 'lowpass', 900, 1, t0);
-      if (e.pops) sfx.pops(t0 + 0.5);
+      tone(e.base * 0.9, 0.6, e.wave, 0.1, t0, e.base * 2.6);
+      tone(e.base * 0.45, 0.7, 'sine', 0.14 * (0.4 + e.sub), t0, e.base);
+      burst(0.35, 0.12, 'lowpass', 500, 1, t0, 1400);
+      if (e.pops) sfx.pops(t0 + 0.55);
+      if (e.bov) sfx.bov(t0 + 0.6);
     },
     pops(delay = 0) {
-      // exhaust crackle on lift-off
       const n = 2 + Math.floor(Math.random() * 4);
-      for (let i = 0; i < n; i++) { const d = delay + rnd(0, 0.35); burst(rnd(0.02, 0.05), rnd(0.08, 0.16), 'highpass', rp(1500, 0.4), 0.7, d); tone(rp(90, 0.3), 0.05, 'sine', 0.12, d); }
+      for (let i = 0; i < n; i++) { const d = delay + rnd(0, 0.35); burst(rnd(0.02, 0.05), rnd(0.1, 0.18), 'highpass', rp(1500, 0.4), 0.7, d); tone(rp(90, 0.3), 0.05, 'sine', 0.14, d); }
     },
+    bov(delay = 0) { burst(rnd(0.22, 0.32), 0.16, 'bandpass', rp(3200), 1.6, delay, rp(1100)); burst(0.12, 0.06, 'highpass', 5000, 1, delay); },
+    chirp(side) { tone(rp(1700), 0.16, 'sawtooth', 0.05, 0, rp(1000), side * 0.3); burst(0.12, 0.08, 'bandpass', rp(2600), 3, 0, null, side * 0.3); },
     countdown() { tone(rp(660, 0.01), 0.14, 'square', 0.08, 0.05); tone(rp(660, 0.01), 0.14, 'square', 0.08, 0.6); tone(990, 0.35, 'square', 0.09, 1.15); },
-    shift() { tone(rp(70), 0.08, 'sine', 0.15); burst(0.05, 0.05, 'highpass', rp(2500)); },
+    shift() { tone(rp(70), 0.08, 'sine', 0.18); burst(0.05, 0.05, 'highpass', rp(2500)); },
     bank(combo) {
       const root = 440 * Math.pow(2, (combo * 2 + Math.floor(rnd(0, 3))) / 12);
       const scale = [0, 4, 7, 12, 16, 19];
@@ -838,36 +915,45 @@ h2 { font-size: 30px; color: var(--danger); }
   };
   function audioFrame(dt) {
     if (!AC) return;
-    const t = AC.currentTime, c = G.car;
+    const t = AC.currentTime, c = G.car, E = spec().snd;
     const spd = Math.hypot(c.vx, c.vy);
     const live = (G.mode === 'play' || G.mode === 'count') && !G.paused;
-    const E = spec().snd, GEARS = E.gears;
+    const GEARS = E.gears;
     let gear = 0; while (gear < GEARS.length - 2 && spd > GEARS[gear + 1]) gear++;
-    if (G.mode === 'play' && gear > N.gear) { sfx.shift(); if (E.pops && Math.random() < 0.6) sfx.pops(0.05); }
+    if (G.mode === 'play' && gear > N.gear) { sfx.shift(); if (E.pops && Math.random() < 0.6) sfx.pops(0.05); if (E.bov) sfx.bov(0.02); }
     N.gear = gear;
-    const lo = GEARS[gear], hi = GEARS[gear + 1] === 999 ? 520 : GEARS[gear + 1];
+    const lo = GEARS[gear], hi = GEARS[gear + 1] === 999 ? 540 : GEARS[gear + 1];
     let rpm = clamp((spd - lo) / (hi - lo), 0, 1);
-    if (G.mode === 'count') rpm = 0.35 + 0.3 * Math.abs(Math.sin(t * 5));
+    if (G.mode === 'count') rpm = 0.3 + 0.35 * Math.abs(Math.sin(t * 5));
+    const drifting = G.mode === 'play' && !G.paused && !c.air && Math.abs(c.slip) > 0.25 && spd > 120;
     if (c.air) rpm = Math.min(1, rpm + 0.35);
-    const f = E.base + gear * 3 + rpm * E.span + Math.abs(c.slip) * 10;
-    N.e1.frequency.setTargetAtTime(f, t, 0.04);
-    N.e2.frequency.setTargetAtTime(f * 2.01, t, 0.04);
-    N.sub.frequency.setTargetAtTime(f * 0.5, t, 0.04);
-    const pulse = (f / E.div) * (E.lumpy ? 1 + 0.18 * Math.sin(t * 6.3) * Math.sin(t * 2.1) : 1);
-    N.puls.frequency.setTargetAtTime(Math.min(pulse, 120), t, 0.05);
-    N.eF.frequency.setTargetAtTime(E.lp * (0.35 + rpm * 0.75), t, 0.05);
+    if (drifting) rpm = Math.min(1, rpm + 0.2);              // wheelspin holds the revs up mid-drift
+    const lim = rpm > 0.97 && G.mode === 'play' ? (Math.sin(t * 110) > 0 ? 1 : 0.5) : 1;   // rev limiter bounce
+    const f = E.base + gear * 2 + rpm * E.span;
+    N.e1.frequency.setTargetAtTime(f, t, 0.03);
+    N.e2.frequency.setTargetAtTime(f * 2.01, t, 0.03);
+    N.sub.frequency.setTargetAtTime(f * 0.5, t, 0.03);
+    const pulse = (f / E.div) * (E.lumpy ? 1 + 0.2 * Math.sin(t * 6.3) * Math.sin(t * 2.1) : 1);
+    N.puls.frequency.setTargetAtTime(Math.min(pulse, 140), t, 0.03);
+    N.exh.f.frequency.setTargetAtTime(f * 2.2 + 80, t, 0.05);
+    N.eF.frequency.setTargetAtTime(E.lp * (0.35 + rpm * 0.75), t, 0.04);
+    N.eG.gain.setTargetAtTime(live ? (0.055 + rpm * 0.035) * lim : (G.mode === 'title' ? 0.012 : 0), t, 0.05);
+    N.tb.frequency.setTargetAtTime(1800 + rpm * 2600 + gear * 150, t, 0.08);
+    N.tbG.gain.setTargetAtTime(live && E.turbo ? E.turbo * clamp(rpm * 1.3 - 0.25, 0, 1) : 0, t, 0.1);
     N.wh.frequency.setTargetAtTime(spd * 4.2 + 200, t, 0.05);
     N.whG.gain.setTargetAtTime(live ? E.whine * clamp(spd / 300, 0, 1) : 0, t, 0.1);
-    N.eG.gain.setTargetAtTime(live ? 0.06 + rpm * 0.03 : 0, t, 0.08);
-    const slip = G.mode === 'play' && !c.air && !G.paused ? clamp(Math.abs(c.slip) - 0.12, 0, 0.9) : 0;
-    const k = slip * clamp(spd / 300, 0, 1.3);
-    N.sq.frequency.setTargetAtTime(700 + spd * 1.2 + slip * 300, t, 0.04);
-    N.sqG.gain.setTargetAtTime(k * 0.08, t, 0.03);
-    N.rub.g.gain.setTargetAtTime(k * 0.16, t, 0.03);
-    N.rub.f.frequency.setTargetAtTime(1400 + spd * 1.5, t, 0.05);
-    const onGravel = G.mode === 'play' && Math.abs(G.lat) > R.pts[G.idx].w / 2;
+
+    const slip = drifting ? clamp(Math.abs(c.slip) - 0.12, 0, 0.9) : 0;
+    const k = slip * clamp(spd / 280, 0, 1.3);
+    for (const s of N.sqs) s.o.frequency.setTargetAtTime((980 + slip * 520 + spd * 0.35) * s.r, t, 0.03);
+    N.sqG.gain.setTargetAtTime(k * 0.11, t, 0.02);
+    N.rub.g.gain.setTargetAtTime(k * 0.17, t, 0.03);
+    N.rub.f.frequency.setTargetAtTime(1500 + spd * 1.6, t, 0.05);
+    const onGravel = G.mode === 'play' && !G.paused && Math.abs(G.lat) > R.pts[G.idx].w / 2;
     N.grav.g.gain.setTargetAtTime(onGravel ? 0.14 : 0, t, 0.03);
     N.wind.g.gain.setTargetAtTime(live || G.mode === 'fall' ? clamp(spd / 450, 0, 1) * 0.06 : 0.01, t, 0.2);
+    if (drifting && !N.wasDrift) { sfx.chirp(Math.sign(c.slip)); if (E.bov) sfx.bov(0); else if (E.pops && Math.random() < 0.4) sfx.pops(0.05); }
+    N.wasDrift = drifting;
     N.gust -= dt;
     if (N.gust <= 0) { sfx.ambient(); N.gust = rnd(4, 9); }
   }
@@ -935,9 +1021,11 @@ h2 { font-size: 30px; color: var(--danger); }
     if (G.mode === 'play' || G.mode === 'count') {
       const playing = G.mode === 'play';
       G.stun = Math.max(0, G.stun - dt); G.oil = Math.max(0, G.oil - dt); G.coinT = Math.max(0, G.coinT - dt);
+      const spd0 = Math.hypot(c.vx, c.vy);
+      if (ctrl.mode === 'auto') autoDrive(c, S, dt, playing, spd0);
+      else {
       const target = playing && G.stun <= 0 ? steerInput() : 0;
       c.steer += (target - c.steer) * Math.min(1, dt * 11);
-      const spd0 = Math.hypot(c.vx, c.vy);
       if (!c.air) c.h += c.steer * S.turn * dt * clamp(spd0 / 220, 0.3, 1) * (G.oil > 0 ? 0.7 : 1);
       const hx = Math.sin(c.h), hy = -Math.cos(c.h);
       let fwd = c.vx * hx + c.vy * hy;
@@ -955,6 +1043,7 @@ h2 { font-size: 30px; color: var(--danger); }
       c.vx = hx * fwd + lx; c.vy = hy * fwd + ly;
       c.slip = Math.atan2(Math.hypot(lx, ly), Math.max(1, fwd)) * Math.sign(c.steer || 1);
       if (!c.air) { const loss = 1 - Math.min(0.6, Math.abs(c.slip)) * 0.42 * dt; c.vx *= loss; c.vy *= loss; }
+      }
       if (playing) { c.x += c.vx * dt; c.y += c.vy * dt; }
       nearest();
       const spd = Math.hypot(c.vx, c.vy);
@@ -1058,6 +1147,39 @@ h2 { font-size: 30px; color: var(--danger); }
     G.popups = G.popups.filter((p) => p.t < p.life);
     G.shake = Math.max(0, G.shake - dtReal * 30);
     G.flash = Math.max(0, G.flash - dtReal);
+  }
+
+  // Auto steering: the car follows the road on its own (it reads the bend ahead and turns into it).
+  // Grip alone can only turn so tightly, and less so the faster you go; holding adds drift, which turns the car
+  // harder into the bend. Too little drift on a tight bend runs you wide; too much, or holding on a straight,
+  // swings you into the inside edge. The only control is how much you drift and when.
+  const AGRIP = 300, ADRIFT = 560;
+  function autoDrive(c, S, dt, playing, v) {
+    const hold = playing && G.stun <= 0 && holding();
+    G.d = clamp(G.d + (hold ? 2.6 : -3.4) * dt, 0, 1);
+    let th = v > 1 ? Math.atan2(c.vx, -c.vy) : c.h;
+    if (!c.air) {
+      let sum = 0;
+      for (let k = 1; k <= 18; k++) sum += R.pts[Math.min(R.pts.length - 1, G.idx + k)].c * (k < 8 ? 1.5 : 1);
+      if (Math.abs(sum) > 0.004) G.bendSign = Math.sign(sum);
+      // aim at the centre line a little way ahead
+      const tp = R.pts[Math.min(R.pts.length - 1, G.idx + 2 + Math.round(v * 0.28 / SEG))];
+      const want = Math.atan2(tp.x - c.x, -(tp.y - c.y));
+      const gripW = (AGRIP * S.grip / Math.max(v, 60)) * (G.oil > 0 ? 0.45 : 1);
+      let auto = angDiff(want, th) * 3.2;
+      const against = Math.sign(auto) !== G.bendSign;
+      const lim = gripW * (against ? 1 - 0.75 * G.d : 1);
+      auto = clamp(auto, -lim, lim);
+      const driftW = G.d * (ADRIFT * S.drift / Math.max(v, 60)) * G.bendSign;
+      th += (auto + driftW) * dt;
+      const maxV = playing ? speedAt(G.dist) * S.top : speedAt(0) * 0.6;
+      v += (maxV - v) * Math.min(1, dt * 0.9) - (playing ? 300 * roadSlope() * dt : 0) - G.d * v * 0.16 * dt;
+      v = Math.max(v, 60);
+      c.h += angDiff(th + G.bendSign * G.d * S.angle, c.h) * Math.min(1, dt * 9);
+    }
+    c.steer = G.d * G.bendSign;
+    c.vx = Math.sin(th) * v; c.vy = -Math.cos(th) * v;
+    c.slip = angDiff(c.h, th);
   }
 
   function land(zr) {
@@ -1206,16 +1328,16 @@ h2 { font-size: 30px; color: var(--danger); }
     let reason, tip;
     if (G.failCurve === 0) {
       reason = 'You slid off the ' + side + ' edge on a straight.';
-      tip = 'Let go a little sooner. The car keeps sliding the way it points after you release. The gravel strip is your last warning.';
+      tip = ctrl.mode === 'auto' ? 'Let go as the road straightens. A held drift keeps turning the car, so it slides off a straight.' : 'Let go a little sooner. The car keeps sliding the way it points after you release. The gravel strip is your last warning.';
     } else {
       const bendRight = G.failCurve > 0;
       const outside = (bendRight && side === 'left') || (!bendRight && side === 'right');
       if (outside) {
         reason = 'You ran wide on a ' + (bendRight ? 'right' : 'left') + '-hand bend and went off the outside edge.';
-        tip = 'Start the drift earlier and hold ' + (bendRight ? 'right' : 'left') + ' longer. The tighter the bend, the earlier you commit.';
+        tip = ctrl.mode === 'auto' ? 'Hold earlier and longer on tight bends. At this speed grip alone can\'t make the turn, so the drift has to.' : 'Start the drift earlier and hold ' + (bendRight ? 'right' : 'left') + ' longer. The tighter the bend, the earlier you commit.';
       } else {
         reason = 'You over-rotated on a ' + (bendRight ? 'right' : 'left') + '-hand bend and cut off the inside edge.';
-        tip = 'Release sooner, or tap the other side briefly to catch the slide before the apex.';
+        tip = ctrl.mode === 'auto' ? 'Let go sooner. Too much drift swings the car into the inside of the bend.' : 'Release sooner, or tap the other side briefly to catch the slide before the apex.';
       }
     }
     if (G.fall && G.fall.lost > 0) tip += ' You also lost ' + G.fall.lost + ' unbanked drift points.';
@@ -1374,9 +1496,9 @@ h2 { font-size: 30px; color: var(--danger); }
     }
   }
 
-  function segPoly(p, q, extra) {
+  function segPoly(p, q, extra, pad = 0.8) {
     // overlap neighbours by a hair along the road so no seams show between segments
-    const tx = (q.x - p.x) / SEG * 0.8, ty = (q.y - p.y) / SEG * 0.8;
+    const tx = (q.x - p.x) / SEG * pad, ty = (q.y - p.y) / SEG * pad;
     const a = edgePt(p, -1, extra), b = edgePt(q, -1, extra), c = edgePt(q, 1, extra), d = edgePt(p, 1, extra);
     ctx.beginPath(); ctx.moveTo(a[0] - tx, a[1] - ty); ctx.lineTo(b[0] + tx, b[1] + ty); ctx.lineTo(c[0] + tx, c[1] + ty); ctx.lineTo(d[0] - tx, d[1] - ty); ctx.closePath();
   }
@@ -1392,7 +1514,7 @@ h2 { font-size: 30px; color: var(--danger); }
     ctx.fillStyle = asphalt; segPoly(p, q, 0.6); ctx.fill();
     // light and shade by gradient: climbs face the camera and read lighter, descents darker
     const g = (q.z - p.z) / SEG;
-    if (Math.abs(g) > 0.02) { ctx.fillStyle = g > 0 ? 'rgba(255,248,230,' + Math.min(0.16, g * 0.55) + ')' : 'rgba(0,0,0,' + Math.min(0.24, -g * 0.8) + ')'; segPoly(p, q, SHOULDER + 4.5); ctx.fill(); }
+    if (Math.abs(g) > 0.02) { ctx.fillStyle = g > 0 ? 'rgba(255,248,230,' + Math.min(0.16, g * 0.55) + ')' : 'rgba(0,0,0,' + Math.min(0.24, -g * 0.8) + ')'; segPoly(p, q, SHOULDER + 4.5, 0); ctx.fill(); }
     if (p.t > 0.92) { ctx.strokeStyle = 'rgba(20,20,22,0.35)'; ctx.lineWidth = 1.2; const o = (p.t - 0.96) * 12 * p.w; const e = edgePt(p, 1, o - p.w / 2); ctx.beginPath(); ctx.moveTo(e[0], e[1]); ctx.lineTo(e[0] + 10, e[1] - 6); ctx.lineTo(e[0] + 18, e[1] + 3); ctx.stroke(); }
     if (p.t < 0.05) { ctx.fillStyle = 'rgba(25,25,28,0.3)'; const e = edgePt(p, 1, p.t * 400 - p.w / 2 - 10); ctx.beginPath(); ctx.ellipse(e[0], e[1], 14, 9, p.a, 0, Math.PI * 2); ctx.fill(); }
     ctx.lineCap = 'butt';
@@ -1534,8 +1656,8 @@ h2 { font-size: 30px; color: var(--danger); }
     } else if (o.type === 'truck') {
       W(o.z); ctx.translate(o.x + 5, o.y + 4); ctx.rotate(o.a);
       ctx.fillStyle = 'rgba(10,12,10,0.4)'; rr(ctx, -12.5, -26, 25, 52, 4); ctx.fill();
-      drawModel(ctx, truckModel, (z) => { W(o.z + z); ctx.translate(o.x, o.y); ctx.rotate(o.a); }, 0);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const tp = P(o.x, o.y, o.z);
+      drawSprite(modelSprite('truck', truckModel, o.a - G.cam.a, 0), tp[0], tp[1]);
     }
   }
 
@@ -1552,7 +1674,8 @@ h2 { font-size: 30px; color: var(--danger); }
       gr.addColorStop(0, 'rgba(255,244,200,0.14)'); gr.addColorStop(1, 'rgba(255,244,200,0)');
       ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(-10, -S.L / 2); ctx.lineTo(10, -S.L / 2); ctx.lineTo(36, -S.L / 2 - 110); ctx.lineTo(-36, -S.L / 2 - 110); ctx.closePath(); ctx.fill();
     }
-    drawModel(ctx, S.model, (z) => { W(c.z + z); ctx.translate(c.x, c.y); ctx.rotate(c.h); }, c.steer);
+    const cp = P(c.x, c.y, c.z);
+    drawSprite(modelSprite(S.id, S.model, c.h - G.cam.a, c.steer), cp[0], cp[1]);
     if (G.mode === 'play' && Math.abs(c.steer) > 0.25 && !c.air) {
       for (const sx of [-S.W / 2 + 4, S.W / 2 - 4]) {
         const hx = Math.sin(c.h), hy = -Math.cos(c.h);
@@ -1660,7 +1783,11 @@ h2 { font-size: 30px; color: var(--danger); }
         ctx.fillStyle = gx; ctx.fillRect(side < 0 ? 0 : cw / 2, 0, cw / 2, ch);
       }
       ctx.globalAlpha = 0.85 * a; ctx.font = '700 20px "Saira Condensed", sans-serif'; ctx.fillStyle = '#f3efe6'; ctx.textAlign = 'center';
-      ctx.fillText('◀ HOLD TO DRIFT LEFT', cw * 0.25, ch * 0.5); ctx.fillText('HOLD TO DRIFT RIGHT ▶', cw * 0.75, ch * 0.5);
+      if (ctrl.mode === 'auto') {
+        ctx.fillText('HOLD ANYWHERE TO DRIFT', cw / 2, ch * 0.5);
+        ctx.font = '600 16px "Saira Condensed", sans-serif';
+        ctx.fillText('The car steers itself. Hold for more slide, let go to grip.', cw / 2, ch * 0.5 + 24);
+      } else { ctx.fillText('◀ HOLD TO DRIFT LEFT', cw * 0.25, ch * 0.5); ctx.fillText('HOLD TO DRIFT RIGHT ▶', cw * 0.75, ch * 0.5); }
       ctx.globalAlpha = 1;
     }
     // touch feedback: a ring under the finger and a steering gauge
@@ -1819,7 +1946,13 @@ h2 { font-size: 30px; color: var(--danger); }
   // ---------- camera settings ----------
   // Height moves the camera closer or further away; angle goes from a low chase view to straight overhead.
   const cam = Object.assign({ h: 30, a: 38 }, store.get('cam', {}));
-  const camUI = { panel: $('camPanel'), btn: $('camBtn'), h: $('camHeight'), a: $('camAngle'), hv: $('camHeightVal'), av: $('camAngleVal'), presets: [...document.querySelectorAll('.preset')] };
+  const camUI = { panel: $('camPanel'), btn: $('camBtn'), h: $('camHeight'), a: $('camAngle'), hv: $('camHeightVal'), av: $('camAngleVal'), presets: [...document.querySelectorAll('.preset:not(.ctrl)')], ctrls: [...document.querySelectorAll('.preset.ctrl')] };
+  function applyCtrl() {
+    for (const b of camUI.ctrls) b.setAttribute('aria-pressed', String(b.dataset.mode === ctrl.mode));
+    $('ctrlVal').textContent = ctrl.mode === 'auto' ? 'Auto' : 'Manual';
+  }
+  for (const b of camUI.ctrls) b.addEventListener('click', () => { ctrl.mode = b.dataset.mode; store.set('ctrl', ctrl.mode); applyCtrl(); sfx.click(); });
+  applyCtrl();
   function applyCam(save) {
     CAM_DIV = 400 + cam.h * 4;
     TILT = 0.42 + cam.a * 0.0048;
@@ -1828,6 +1961,7 @@ h2 { font-size: 30px; color: var(--danger); }
     camUI.hv.textContent = cam.h < 25 ? 'Close' : cam.h < 55 ? 'Medium' : cam.h < 80 ? 'High' : 'Very high';
     camUI.av.textContent = cam.a < 25 ? 'Low' : cam.a < 55 ? 'Chase' : cam.a < 85 ? 'Steep' : 'Overhead';
     for (const b of camUI.presets) b.setAttribute('aria-pressed', String(+b.dataset.h === cam.h && +b.dataset.a === cam.a));
+    spriteCache.clear();
     resize();
     if (save) store.set('cam', { h: cam.h, a: cam.a });
   }

@@ -6,17 +6,15 @@ A 2.5D drift game on a winding mountain road with a cliff drop on both sides. Th
 
 Open `index.html` in any modern browser. It's a single file with no build step.
 
-- **Hold the left half of the screen / ← / A**: drift left
-- **Hold the right half / → / D**: drift right
-- The halves cover the full height of the screen. Let go and the car grips and keeps going the way it points.
-- **M**: mute or unmute
+**Auto steering (default):** the car follows the road by itself and reads the bend ahead. You only control the drift:
 
-## Look
+- **Hold anywhere / Space / ↑ / W**: drift. The longer you hold, the more it slides and the harder it turns into the bend.
+- **Let go**: grip.
+- Grip alone can only turn so tightly, and less so the faster you go, so tight bends need a drift. Too little and you run wide; too much, or holding on a straight, swings you off the inside.
 
-- 2.5D camera that follows behind the car and turns with it. Cliff walls drop about 28 m to a forest valley with a river.
-- Miniature retro cars built from stacked slices, so they have real height and shading.
-- Textured asphalt with patches and cracks, double yellow centre line, gravel shoulder, reflector posts, and red/white kerbs on tight bends.
-- Effects: tyre smoke (gold during big combos), dust on the gravel, sparks, drifting clouds and their shadows, distance haze, vignette, wind streaks at speed, brake-light glow, and slow motion plus a dust cloud when you go over.
+**Manual steering** (Settings → Steering): hold the left or right half of the screen, or ← → / A D, to steer and drift yourself.
+
+**M** mutes, **C** opens Settings.
 
 ## The road
 
@@ -43,17 +41,17 @@ Tap **CAM** (or press **C**) to open the camera panel. The game pauses while it'
 
 ## Garage
 
-Miniature models inspired by classic car shapes (no real names or badges):
+Classic muscle cars plus one JDM drift coupe, inspired by real shapes (no real names or badges). Each car is rendered once per view angle into a high-resolution sprite, so edges stay smooth and sharp.
 
 | Car | Inspired by | Details | Engine sound | Unlock |
 |---|---|---|---|---|
-| Rally 72 | 1970s rally saloon | Four spotlights, flared arches, mud flaps, roof roundel, stripes | Rev-happy four with exhaust pops | free |
-| Pocket | 1960s British mini | Wheels at the corners, white roof, chrome grille, bonnet stripes, twin fuel caps | Buzzy small four with gear whine | 600 |
-| Bubble | 1950s air-cooled bug | Separate round fenders, running boards, domed roof, louvred engine lid | Chugging flat-four | 1400 |
-| Comet GT | Late-60s fastback muscle coupe | Long hood with scoop, sloping rear glass, tri-bar tail lights, twin stripes, dual exhausts | Lumpy V8 burble with crackle | 2600 |
-| Camper | 1960s split-window bus | Two-tone with V-front, split windscreen, roof rack and surfboard | Wheezy flat-four with gear whine | 4000 |
+| Stallion 67 | 1967 fastback pony car | Long hood, fastback roof, side scoops, tri-bar tail lights, twin stripes | Lumpy small-block V8 with crackle | free |
+| Hornet 69 | 1969 pony coupe | Coke-bottle hips, cowl hood, hood and deck stripes, ducktail spoiler | Higher-revving V8 | 600 |
+| Brawler 69 | 1969 big-block coupe | Long and wide, full-width hidden-headlight grille, vinyl roof, tail stripe | Deep, slow big-block V8, 3 long gears | 1400 |
+| Outlaw 77 | Late-70s T-top pony car | Shaker scoop, gold pinstripes and hood chevron, T-tops, wrap spoiler | Heavy V8 with gear whine | 2600 |
+| Kaze 95 | Mid-90s turbo drift coupe | Wide body, pop-up lights, carbon hood, big wing, twin round tail lights | High-revving turbo four with whistle and blow-off valve, 6 gears | 4000 |
 
-Each car cranks and starts before the countdown, has its own gearing, and handles differently.
+Engines are synthesized: a firing-pulse engine voice with gated exhaust noise, rev limiter bounce, wheelspin revs while drifting, shift blips, crackle, and a three-tone tyre screech with a chirp when a drift starts.
 
 ## Scoring
 
