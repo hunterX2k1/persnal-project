@@ -309,6 +309,12 @@ public class MainActivity extends BaseActivity {
         return r != null && (!r.ok() || r.avg() > maxAvg || r.jitter() > maxJitter || r.lossPct() > maxLoss);
     }
 
+    static boolean adBlockDns(String dns) {
+        String d = dns == null ? "" : dns.toLowerCase(java.util.Locale.ROOT);
+        return d.contains("adguard") || d.contains("nextdns") || d.contains("ads") || d.contains("block")
+                || d.contains("controld") || d.contains("mullvad") || d.contains("rethink") || d.contains("family");
+    }
+
     private String verdict(NetTester.Result router, NetTester.Result udp) {
         boolean good = !bad(router, 15, 10, 1) && !bad(udp, 120, 25, 2);
         return good ? "✅ Result: connection looks good for online games."
@@ -319,6 +325,10 @@ public class MainActivity extends BaseActivity {
         List<String> tips = new ArrayList<>();
         int n = 1;
 
+        if (adBlockDns(i.privateDns))
+            tips.add("⚠ AD-BLOCKING DNS DETECTED (" + i.privateDns + "). It blocks ad/tracking servers that many games need for login, "
+                    + "matchmaking and anti-cheat, while YouTube keeps working. This is a top suspect for 'unstable connection'. "
+                    + "Fix: Settings → Network & internet → Private DNS → Off (or Automatic), then play a match.");
         if (i.vpn) tips.add("A VPN is active. VPNs add delay and often break game UDP traffic. Turn it OFF before playing.");
 
         if (i.wifi && i.rssi < -70)
@@ -351,7 +361,7 @@ public class MainActivity extends BaseActivity {
 
         if (i.powerSave) tips.add("Battery saver is ON. It throttles network and CPU for games. Turn it OFF while playing.");
         if (i.dataSaver) tips.add("Data saver is ON. It can restrict the game's connection. Turn it OFF or allow Shadow Fight Arena unrestricted data.");
-        if (i.privateDns.startsWith("custom"))
+        if (i.privateDns.startsWith("custom") && !adBlockDns(i.privateDns))
             tips.add("You use a custom Private DNS (" + i.privateDns + "). If the game fails to connect, set Private DNS to Automatic and test again.");
 
         tips.add("Open SFA app settings (shortcut below) → Battery → Unrestricted, and allow background data. Then clear the game's cache (not data).");
