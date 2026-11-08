@@ -160,6 +160,7 @@ public class RouterActivity extends BaseActivity {
 
     private static String brandOf(String raw) {
         String s = raw.toLowerCase(Locale.ROOT);
+        if (s.contains("netlink") || s.contains("hg323")) return "Netlink ONT";
         if (s.contains("jio")) return "JioFiber";
         if (s.contains("airtel")) return "Airtel Xstream";
         if (s.contains("tp-link") || s.contains("tplink") || s.contains("archer") || s.contains("deco")) return "TP-Link";
@@ -209,6 +210,12 @@ public class RouterActivity extends BaseActivity {
         } else if (b.startsWith("Xiaomi")) {
             brandAppQuery = "Mi WiFi";
             where = "Xiaomi / Mi: in the Mi WiFi app → Tools → QoS (Smart speed limit) → choose \"Game priority\" mode or set your phone to high priority.";
+        } else if (b.startsWith("Netlink")) {
+            brandAppQuery = "TP-Link Archer";
+            where = "Netlink GPON ONT (e.g. HG323RGW): the login is usually printed on the sticker. Many Netlink ONTs are 2.4 GHz-only and have "
+                    + "no device-priority (QoS) option. In the WLAN / Wireless settings you can: set the channel to 1 or 11 instead of Auto, "
+                    + "try 20 MHz channel width for stability, and change a weak Wi-Fi password. For 5 GHz and real device priority, connect a "
+                    + "dual-band QoS router (e.g. TP-Link Archer) to a LAN port of the ONT, or ask your ISP for a dual-band ONT.";
         } else if (b.startsWith("JioFiber")) {
             brandAppQuery = "MyJio";
             where = "JioFiber: many Jio routers have no QoS/priority setting. You can still log in (Network → Wi-Fi / LAN) to: see connected devices, "
