@@ -147,6 +147,10 @@ class Settings(ctx: Context) {
     var torEngine: String
         get() = p.getString("tor_engine", "builtin")!!
         set(v) = p.edit().putString("tor_engine", v).apply()
+    /** Kill switch: pause internet while the VPN is connecting or down (no real-IP leaks). */
+    var killSwitch: Boolean
+        get() = p.getBoolean("kill_switch", true)
+        set(v) = p.edit().putBoolean("kill_switch", v).apply()
     var wantRunning: Boolean
         get() = p.getBoolean("want_running", false)
         set(v) = p.edit().putBoolean("want_running", v).apply()
@@ -209,6 +213,30 @@ class Settings(ctx: Context) {
 object Upstream {
     @Volatile var servers: List<InetAddress> = defaults()
     @Volatile var port: Int = 53
+    /** DNS servers the current Wi-Fi / mobile network hands out (fallback when public DNS is blocked). */
+    @Volatile var networkDns: List<InetAddress> = emptyList()
+    @Volatile private var preferred: InetAddress? = null
+    @Volatile var lastOk: String = "—"
+        private set
+
+    /** Servers to try, best first: the one that last worked, your DNS, then the network's. */
+    fun candidates(): List<InetAddress> = (listOfNotNull(preferred) + servers + networkDns).distinct()
+
+    fun worked(a: InetAddress) {
+        if (preferred != a) {
+            preferred = a
+            DiagLog.add("dns", "using ${a.hostAddress}${if (a in networkDns && a !in servers) " (this network's own DNS — public DNS is blocked here)" else ""}")
+        }
+        lastOk = a.hostAddress ?: "?"
+    }
+
+    fun failed(a: InetAddress) { if (preferred == a) preferred = null }
+
+    /** New network: forget what worked on the old one. */
+    fun networkChanged(dns: List<InetAddress>) {
+        networkDns = dns
+        preferred = null
+    }
 
     private fun defaults() = listOf(InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)))
     private val NUMERIC = Regex("^[0-9a-fA-F:.]+$")

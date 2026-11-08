@@ -125,7 +125,7 @@ class ShieldVpnService : VpnService() {
         VpnClient.stop()
         setDnsVia(null)
         // Kill switch: while a VPN is wanted but not connected, nothing leaves directly.
-        DnsHandler.requireVia = on
+        DnsHandler.requireVia = on && settings.killSwitch
         server.resetConnections()
         backoffMs = 10_000
         if (!on) { VpnClient.error = null; return }
@@ -171,7 +171,8 @@ class ShieldVpnService : VpnService() {
         val app = c.app
         if (app != null && app.pkg in RouteConfig.bypassApps) return@Router Route.Direct
         val t = LoadBalancer.pick(c.host ?: c.dst.address.hostAddress, VpnClient.tunnels)
-        val up = t?.upstream ?: return@Router Route.Reject("VPN not connected (kill switch)")
+        val up = t?.upstream ?: return@Router if (RouteConfig.killSwitch) Route.Reject("VPN not connected (kill switch)")
+            else Route.Direct
         t.active.incrementAndGet()
         c.onFinish = { t.active.decrementAndGet() }
         Route.Via(up, t.display)
@@ -247,19 +248,27 @@ class ShieldVpnService : VpnService() {
     private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
     @Volatile private var lastNetwork: android.net.Network? = null
 
-    private fun watchNetwork(v6AtStart: Boolean) {
+    private fun watchNetwork(v6AtStart: Boolean?) {
         val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return
         val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onLinkPropertiesChanged(network: android.net.Network, lp: android.net.LinkProperties) {
+                val dns = lp.dnsServers.filter { !it.isLoopbackAddress && it.hostAddress !in setOf(DNS4, "fd00:b10c:b10c:0:0:0:0:2") }
+                if (dns != Upstream.networkDns) {
+                    Upstream.networkDns = dns
+                    DiagLog.add("network", "network DNS: ${dns.joinToString { it.hostAddress ?: "?" }.ifEmpty { "none" }}")
+                }
+            }
             override fun onAvailable(network: android.net.Network) {
                 val prev = lastNetwork
                 lastNetwork = network
                 runCatching { setUnderlyingNetworks(arrayOf(network)) }
                 if (prev == null || prev == network) return
+                Upstream.networkChanged(Upstream.networkDns)
                 DiagLog.add("network", "switched network — dropping stale connections")
                 DnsCache.clear()
                 socks?.resetConnections()
                 // IPv6 appeared or vanished: rebuild routes so apps don't wait on dead IPv6.
-                if (fullTunnel && hasIpv6() != v6AtStart) {
+                if (fullTunnel && hasIpv6() != v6AtStart && v6AtStart != null) {
                     startService(Intent(this@ShieldVpnService, ShieldVpnService::class.java).setAction(ACTION_RESTART))
                 }
             }
@@ -331,7 +340,7 @@ class ShieldVpnService : VpnService() {
             RouteConfig.reload(this)
             socks = server
             val conf = java.io.File(filesDir, "tunnel.yml").apply { writeText(HevTunnel.config(server, v6)) }
-            if (settings.vpnEnabled) DnsHandler.requireVia = true
+            if (settings.vpnEnabled && settings.killSwitch) DnsHandler.requireVia = true
             CrashGuard.markStarting(this, true)
             DiagLog.add("tunnel", "starting hev on fd ${iface.fd}")
             if (HevTunnel.start(conf.path, iface.fd)) {
@@ -355,6 +364,7 @@ class ShieldVpnService : VpnService() {
 
         fullTunnel = false
         DiagLog.add("tunnel", "DNS-only mode up")
+        watchNetwork(null) // network DNS fallback works in DNS-only mode too
         pool = Executors.newFixedThreadPool(24)
         loop = thread(name = "blockbridge-dns") {
             try {

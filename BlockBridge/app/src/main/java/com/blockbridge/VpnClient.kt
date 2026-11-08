@@ -435,8 +435,9 @@ object VpnStatus {
             return State(Link.CONNECTED, "Connected · ${up.name}$extra", Flags.of(up.name))
         }
         val failed = ts.isNotEmpty() && ts.all { it.dead || it.upstream == null && it.error != null } || (ts.isEmpty() && VpnClient.error != null)
-        if (failed) return State(Link.FAILED, "Not connected: ${VpnClient.error ?: ts.firstNotNullOfOrNull { it.error } ?: "server unreachable"} — retrying; internet paused (kill switch)")
+        val paused = if (s.killSwitch) " — internet paused until it connects" else " — browsing without VPN meanwhile"
+        if (failed) return State(Link.FAILED, "Not connected: ${VpnClient.error ?: ts.firstNotNullOfOrNull { it.error } ?: "server unreachable"} — retrying$paused")
         val t = ts.firstOrNull()
-        return State(Link.CONNECTING, if (t != null) "${t.state} · ${t.name}" else "Connecting…")
+        return State(Link.CONNECTING, (if (t != null) "${t.state} · ${t.name}" else "Connecting…") + paused)
     }
 }

@@ -82,6 +82,7 @@ class MainActivity : Activity() {
     private lateinit var lifetimeText: TextView
     private lateinit var recentBlocked: LinearLayout
     private lateinit var warnText: TextView
+    private lateinit var pausedBanner: TextView
     private var lastTotal = -1L
     private var lastBlocked = -1L
     private var syncing = false
@@ -264,6 +265,22 @@ class MainActivity : Activity() {
         hero.addView(heroSub)
         page.addView(hero, cardParams())
 
+        pausedBanner = body("").apply {
+            setTextColor(Palette.WARN)
+            background = ripple(roundRect(0x22FBBF24, dp(16).toFloat(), 0x99FBBF24.toInt(), dp(1)), dp(16).toFloat())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener {
+                settings.vpnEnabled = false
+                RouteConfig.reload(this@MainActivity)
+                applyVpn()
+                StateBus.changed()
+                toast("VPN off — browsing normally (ads still blocked)")
+            }
+        }
+        page.addView(pausedBanner, cardParams())
+
         // switches
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val (adCard, aSw, aSub) = toggleCard(R.drawable.ic_shield, "Ad block", Palette.GOOD) { on ->
@@ -412,6 +429,10 @@ class MainActivity : Activity() {
             else -> "Protected"
         }
         heroTitle.setTextColor(if (on) Palette.TEXT else Palette.MUTED)
+        val paused = on && settings.killSwitch && vs.link in setOf(VpnStatus.Link.CONNECTING, VpnStatus.Link.FAILED)
+        pausedBanner.visibility = if (paused) View.VISIBLE else View.GONE
+        if (paused) pausedBanner.text = "⏸ Internet is paused until the VPN connects (kill switch), so your real " +
+            "location can't leak.\nTap here to browse without the VPN — ads stay blocked."
         heroSub.text = ShieldVpnService.lastError ?: when {
             !on -> "Tap the button to turn BlockBridge on"
             else -> listOfNotNull(
@@ -1065,6 +1086,18 @@ class MainActivity : Activity() {
                 "falling back to your real location (kill switch)."
         ))
 
+        page.addView(CheckBox(this).apply {
+            text = "Kill switch: pause internet until the VPN connects"
+            isChecked = settings.killSwitch
+            setOnCheckedChangeListener { _, on ->
+                settings.killSwitch = on
+                RouteConfig.reload(this@MainActivity)
+                StateBus.changed()
+            }
+        })
+        page.addView(small("On: nothing leaves your phone outside the VPN (safest, but you're offline while it " +
+            "connects — Tor can take minutes). Off: you browse normally until the VPN is up."))
+
         page.addView(header("Load balancer"))
         page.addView(small("Use several servers at once. Failover: next server takes over if one dies. " +
             "Balanced: spreads connections (each website sticks to one server). Fastest: lowest latency."))
@@ -1596,7 +1629,8 @@ class MainActivity : Activity() {
         ShieldVpnService.lastError?.let { appendLine("Last error: $it") }
         appendLine("Engines: tunnel ${if (HevTunnel.available) "ok" else "missing"} · WireGuard ${if (VpnClient.available(this@MainActivity)) "ok" else "missing"}")
         appendLine("Filters: ${Filter.blockCount} hostnames · ad block ${if (Filter.enabled) "on" else "off"} · DoH guard ${if (DohGuard.enabled) "on" else "off"}")
-        appendLine("DNS: ${Upstream.servers.joinToString { it.hostAddress ?: "?" }}${if (DnsHandler.via != null) " (through VPN)" else ""}")
+        appendLine("DNS: ${Upstream.servers.joinToString { it.hostAddress ?: "?" }} · network's own: ${Upstream.networkDns.joinToString { it.hostAddress ?: "?" }.ifEmpty { "—" }} · answering: ${Upstream.lastOk}${if (DnsHandler.via != null) " (through VPN)" else ""}")
+        appendLine("Kill switch: ${if (settings.killSwitch) "on" else "off"}")
         appendLine("VPN: ${if (settings.vpnEnabled) VpnClient.state else "off"} · balancer ${settings.lbMode.label}")
         for (t in VpnClient.tunnels) {
             val hs = if (t.lastHandshake > 0) "${(System.currentTimeMillis() - t.lastHandshake) / 1000}s ago" else "none"

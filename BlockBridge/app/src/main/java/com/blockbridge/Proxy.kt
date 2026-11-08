@@ -40,10 +40,13 @@ object DnsCache {
 object RouteConfig {
     @Volatile var vpnOn = false
     @Volatile var bypassApps: Set<String> = emptySet()
+    @Volatile var killSwitch = true
 
     fun reload(ctx: android.content.Context) {
         val s = Settings(ctx)
         vpnOn = s.vpnEnabled
+        killSwitch = s.killSwitch
+        DnsHandler.requireVia = s.vpnEnabled && s.killSwitch && DnsHandler.via == null
         bypassApps = s.vpnBypassApps
         LoadBalancer.mode = s.lbMode
     }
@@ -95,19 +98,27 @@ object DnsHandler {
         }
     } catch (_: IOException) { null }
 
+    /**
+     * Plain DNS to your chosen servers, falling back to the network's own DNS (many Wi-Fi
+     * networks block 1.1.1.1 / 8.8.8.8). Whatever answers is tried first next time.
+     */
     private fun forwardUdp(query: ByteArray): ByteArray? {
-        for (server in Upstream.servers) {
+        for (server in Upstream.candidates()) {
             try {
                 DatagramSocket().use { sock ->
-                    sock.soTimeout = 4000
+                    sock.soTimeout = 2500
                     sock.send(DatagramPacket(query, query.size, server, Upstream.port))
                     val buf = ByteArray(4096)
                     val p = DatagramPacket(buf, buf.size)
                     sock.receive(p)
+                    Upstream.worked(server)
                     return buf.copyOf(p.length)
                 }
-            } catch (_: IOException) { /* try the next server */ }
+            } catch (_: IOException) {
+                Upstream.failed(server) // try the next server
+            }
         }
+        DiagLog.add("dns", "no DNS server answered (tried ${Upstream.candidates().joinToString { it.hostAddress ?: "?" }})")
         return null
     }
 
@@ -133,7 +144,7 @@ object DnsHandler {
     }
 
     private fun forwardTcp(query: ByteArray): ByteArray? {
-        for (server in Upstream.servers) {
+        for (server in Upstream.candidates()) {
             try {
                 Socket().use { s ->
                     s.connect(InetSocketAddress(server, Upstream.port), 4000)
