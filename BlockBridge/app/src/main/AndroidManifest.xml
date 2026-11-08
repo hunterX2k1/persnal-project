@@ -37,6 +37,28 @@
             </intent-filter>
         </activity>
 
+        <!-- YouTube mode: YouTube in Firefox's engine with uBlock Origin. Can open YouTube links. -->
+        <activity
+            android:name=".YouTubeActivity"
+            android:exported="true"
+            android:label="YouTube (no ads)"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="youtube.com" />
+                <data android:host="www.youtube.com" />
+                <data android:host="m.youtube.com" />
+                <data android:host="music.youtube.com" />
+                <data android:host="youtu.be" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".ShieldVpnService"
             android:exported="true"

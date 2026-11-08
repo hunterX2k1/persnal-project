@@ -122,6 +122,14 @@ into the same gVisor netstack and SOCKS5 server as WireGuard, so ad blocking, th
 load balancer and the server tester work the same. VPN Gate servers are run by volunteers: don't
 use them for banking or passwords.
 
+## YouTube mode (8.0)
+
+**Home › YouTube — no ads** opens YouTube's mobile site in Firefox's engine (GeckoView, MPL-2.0)
+with the real **uBlock Origin** (GPL-3.0), installed from addons.mozilla.org (Mozilla-signed) and
+updated daily. Log in once and stay logged in; YouTube links from other apps can open there. The
+YouTube *app* can't be fixed this way — it only accepts Google's own encrypted connection. Firefox's
+engine makes the APK about 100 MB, so releases are per-ABI (arm64 for most phones).
+
 ## Signing
 
 The release key is **not** in the repo. Builds read it from `BlockBridge/keystore.properties`

@@ -24,20 +24,19 @@ val hasReleaseKey = storePath != null && file(storePath).exists()
 
 android {
     namespace = "com.blockbridge"
-    // tor-android 0.4.9.6+ requires compiling against Android 37.1
+    // tor-android 0.4.9.6+ needs Android 37.1, GeckoView 159 needs 37.2
     compileSdk {
-        version = release(37) { minorApiLevel = 1 }
+        version = release(37) { minorApiLevel = 2 }
     }
 
     defaultConfig {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "7.8"
+        versionCode = 17
+        versionName = "8.0"
 
         if (hasHev) {
-            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
             externalNativeBuild {
                 ndkBuild {
                     targets("hev-socks5-tunnel")
@@ -82,7 +81,8 @@ android {
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
+            // Firefox's engine (YouTube mode) makes a universal APK over 200 MB; ship per-ABI only.
+            isUniversalApk = false
         }
     }
 
@@ -109,6 +109,8 @@ dependencies {
     implementation("info.guardianproject:tor-android:0.4.9.14")
     // Tor bridges (Snowflake, obfs4/lyrebird) for networks that block Tor — Guardian Project, MIT/BSD
     implementation("com.netzarchitekten:IPtProxy:5.7.0")
+    // Firefox's engine for YouTube mode, running the real uBlock Origin (MPL-2.0)
+    implementation("org.mozilla.geckoview:geckoview:159.0.20261102144711")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // real org.json for JVM tests
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)

@@ -281,6 +281,24 @@ class MainActivity : Activity() {
         }
         page.addView(pausedBanner, cardParams())
 
+        // YouTube mode
+        val yt = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = ripple(gradientRect(dp(20).toFloat(), 0xFFE11D48.toInt(), 0xFF8B5CF6.toInt()), dp(20).toFloat())
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            isClickable = true
+            setOnClickListener { startActivity(Intent(this@MainActivity, YouTubeActivity::class.java)) }
+        }
+        yt.addView(TextView(this).apply { text = "▶"; textSize = 26f; setTextColor(Palette.TEXT); setPadding(0, 0, dp(14), 0) })
+        val ytText = vbox()
+        ytText.addView(TextView(this).apply { text = "YouTube — no ads"; textSize = 17f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT) })
+        ytText.addView(TextView(this).apply {
+            text = "Firefox engine + uBlock Origin · log in once, stay logged in"; textSize = 12f; setTextColor(0xDDFFFFFF.toInt())
+        })
+        yt.addView(ytText)
+        page.addView(yt, cardParams())
+
         // switches
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val (adCard, aSw, aSub) = toggleCard(R.drawable.ic_shield, "Ad block", Palette.GOOD) { on ->
