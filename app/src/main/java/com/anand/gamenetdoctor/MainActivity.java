@@ -120,6 +120,15 @@ public class MainActivity extends BaseActivity {
         router.setOnClickListener(v -> startActivity(new Intent(this, RouterActivity.class)));
         c6.addView(router);
 
+        LinearLayout c7 = card(root, "6 · Problems? Send a report");
+        c7.addView(text("Creates a text report (network details, last test, last device scan, any crash) that you can copy or share and paste to Claude for analysis.", 13, MUTED, false));
+        Button export = button("EXPORT REPORT", ACCENT);
+        export.setOnClickListener(v -> startActivity(new Intent(this, ReportActivity.class)));
+        c7.addView(export);
+        if (Report.load(this, Report.CRASH_FILE) != null) {
+            c7.addView(text("⚠ The app crashed last time. The crash details are included in the report.", 13, WARN, false));
+        }
+
         setContentView(scroll);
         refreshGameModeButton();
     }
@@ -274,6 +283,10 @@ public class MainActivity extends BaseActivity {
 
             NetTester.Result udp = udp1.lossPct() <= udp2.lossPct() ? udp1 : udp2;
             String advice = diagnose(info, router, tcp, udp);
+            StringBuilder log = new StringBuilder("Test time: " + Report.now() + "\n");
+            for (NetTester.Result r : lines) log.append(r.summary()).append('\n');
+            log.append("Verdict: ").append(verdict(router, udp)).append("\nAdvice:\n").append(advice);
+            Report.save(this, Report.TEST_FILE, log.toString());
             NetTester.Result fRouter = router;
             ui.post(() -> {
                 adviceText.setText(advice);

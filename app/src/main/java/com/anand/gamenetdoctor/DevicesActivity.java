@@ -34,6 +34,10 @@ public class DevicesActivity extends BaseActivity {
         status = text("Takes about 30 seconds.", 13, MUTED, false);
         c.addView(status);
 
+        Button export = button("EXPORT REPORT (send for analysis)", SECONDARY);
+        export.setOnClickListener(v -> startActivity(new Intent(this, ReportActivity.class)));
+        c.addView(export);
+
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         root.addView(list);
@@ -65,24 +69,30 @@ public class DevicesActivity extends BaseActivity {
         int prefix = self.getPrefixLength();
 
         new Thread(() -> {
-            List<LanScanner.Device> devices = LanScanner.scan(selfIp, prefix, gw,
+            LanScanner.ScanResult result = LanScanner.scan(selfIp, prefix, gw,
                     (done, total, found) -> {
                         if (done % 8 == 0 || done == total) {
                             ui.post(() -> status.setText("Scanning " + done + "/" + total + " addresses… " + found + " found"));
                         }
                     });
-            ui.post(() -> show(devices));
+            Report.save(this, Report.SCAN_FILE, result.log);
+            ui.post(() -> show(result));
         }).start();
     }
 
-    private void show(List<LanScanner.Device> devices) {
+    private void show(LanScanner.ScanResult result) {
+        List<LanScanner.Device> devices = result.devices;
         scanning = false;
         scanBtn.setEnabled(true);
         scanBtn.setText("SCAN AGAIN");
         int others = 0;
         for (LanScanner.Device d : devices) if (!d.isMe && !d.isRouter) others++;
         status.setText(devices.size() + " devices found · " + others + " besides your phone and router.\n"
-                + "Some phones sleep and hide from scans. Scan again to catch them.");
+                + "Some phones sleep and hide from scans. Scan again to catch them."
+                + (result.suspicious ? "\n\n⚠ This result looks wrong: most 'devices' only answered with a TCP reset, "
+                + "which usually means a VPN / ad-blocker / firewall is answering for every address. "
+                + "Turn off any VPN or ad-blocker app and scan again, or tap EXPORT REPORT and send it for analysis." : ""));
+        if (result.suspicious) status.setTextColor(WARN); else status.setTextColor(MUTED);
 
         for (LanScanner.Device d : devices) {
             LinearLayout row = card(list, null);
@@ -95,6 +105,7 @@ public class DevicesActivity extends BaseActivity {
             s.append("IP: ").append(d.ip);
             if (d.name != null) s.append("\nName: ").append(d.name);
             if (d.mac != null) s.append("\nMAC: ").append(d.mac);
+            if (!d.evidence.isEmpty()) s.append("\nDetected by: ").append(String.join(", ", d.evidence));
             if (d.isMe) s.append("\nThis is the device to give HIGH priority in the router.");
             row.addView(text(s.toString(), 13, MUTED, false));
         }

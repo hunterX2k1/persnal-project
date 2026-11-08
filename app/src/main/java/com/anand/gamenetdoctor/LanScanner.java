@@ -2,7 +2,6 @@ package com.anand.gamenetdoctor;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.net.ConnectException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -33,8 +32,16 @@ public final class LanScanner {
         public String type = "Unknown device";
         public boolean isRouter, isMe;
         public final List<Integer> openPorts = new ArrayList<>();
+        /** Why this address was counted as a device (for the exported report). */
+        public final List<String> evidence = new ArrayList<>();
 
         int lastOctet() { return Integer.parseInt(ip.substring(ip.lastIndexOf('.') + 1)); }
+    }
+
+    public static final class ScanResult {
+        public List<Device> devices;
+        public String log;
+        public boolean suspicious;
     }
 
     public interface Listener {
@@ -43,7 +50,9 @@ public final class LanScanner {
 
     private static final int[] PORTS = {80, 443, 53, 62078, 8008, 8009, 445, 139, 554, 7000, 5000, 9100, 22, 8080};
 
-    public static List<Device> scan(String selfIp, int prefix, String gatewayIp, Listener listener) {
+    public static ScanResult scan(String selfIp, int prefix, String gatewayIp, Listener listener) {
+        long t0 = System.currentTimeMillis();
+        Map<String, AtomicInteger> errors = new java.util.concurrent.ConcurrentHashMap<>();
         int self = toInt(selfIp);
         int bits = Math.max(prefix, 24); // never scan more than 254 hosts
         int mask = bits == 0 ? 0 : (int) (0xFFFFFFFFL << (32 - bits));
@@ -58,7 +67,7 @@ public final class LanScanner {
         for (int h = 1; h <= hosts; h++) {
             final String ip = fromInt(net + h);
             pool.execute(() -> {
-                Device d = probe(ip, arp.containsKey(ip));
+                Device d = probe(ip, arp.containsKey(ip), errors);
                 if (d != null) {
                     d.isMe = ip.equals(selfIp);
                     d.isRouter = ip.equals(gatewayIp);
@@ -83,29 +92,111 @@ public final class LanScanner {
             if (a.isMe != b.isMe) return a.isMe ? -1 : 1;
             return Integer.compare(a.lastOctet(), b.lastOctet());
         });
-        return out;
+
+        // Statistics so a fake "every address answers" network can be spotted.
+        int onlyRefused = 0, withIcmp = 0, withOpen = 0, withArp = 0;
+        for (Device d : out) {
+            boolean icmp = false, open = false, arpHit = false;
+            for (String e : d.evidence) {
+                if (e.startsWith("icmp")) icmp = true;
+                if (e.startsWith("open")) open = true;
+                if (e.startsWith("arp")) arpHit = true;
+            }
+            if (icmp) withIcmp++;
+            if (open) withOpen++;
+            if (arpHit) withArp++;
+            if (!icmp && !open && !arpHit) onlyRefused++;
+        }
+        ScanResult r = new ScanResult();
+        r.devices = out;
+        r.suspicious = out.size() > 40 && onlyRefused > out.size() * 0.6;
+
+        StringBuilder log = new StringBuilder();
+        log.append("Scan time: ").append(Report.now()).append(" · took ")
+                .append((System.currentTimeMillis() - t0) / 1000).append(" s\n");
+        log.append("Self ").append(selfIp).append('/').append(prefix).append(" · gateway ").append(gatewayIp)
+                .append(" · scanned ").append(fromInt(net + 1)).append(" – ").append(fromInt(net + hosts))
+                .append(" (").append(hosts).append(" addresses)\n");
+        log.append("ARP table readable: ").append(!arp.isEmpty()).append(" (").append(arp.size()).append(" entries)\n");
+        log.append("Found ").append(out.size()).append(" · with ICMP reply ").append(withIcmp)
+                .append(" · with open port ").append(withOpen).append(" · in ARP ").append(withArp)
+                .append(" · ONLY tcp-refused ").append(onlyRefused).append('\n');
+        if (r.suspicious) log.append("WARNING: most devices were detected only by TCP 'refused' replies. Something (VPN/firewall/router) is probably answering for every address.\n");
+        log.append("Probe error counts (all addresses):\n");
+        List<String> keys = new ArrayList<>(errors.keySet());
+        Collections.sort(keys);
+        for (String k : keys) log.append("  ").append(k).append(" = ").append(errors.get(k).get()).append('\n');
+        log.append("Devices:\n");
+        for (Device d : out) {
+            log.append("  ").append(d.ip).append(d.isMe ? " [ME]" : "").append(d.isRouter ? " [ROUTER]" : "")
+                    .append(" | ").append(d.type)
+                    .append(d.name != null ? " | name=" + d.name : "")
+                    .append(d.mac != null ? " | mac=" + d.mac : "")
+                    .append(" | ").append(String.join(", ", d.evidence)).append('\n');
+        }
+        r.log = log.toString();
+        return r;
     }
 
-    private static Device probe(String ip, boolean inArp) {
+    private static void count(Map<String, AtomicInteger> errors, String key) {
+        AtomicInteger a = errors.get(key);
+        if (a == null) {
+            errors.putIfAbsent(key, new AtomicInteger());
+            a = errors.get(key);
+        }
+        a.incrementAndGet();
+    }
+
+    /** Short tag for an exception, e.g. "ConnectException:ECONNREFUSED". */
+    private static String tag(Exception e) {
+        String m = e.getMessage() == null ? "" : e.getMessage();
+        java.util.regex.Matcher em = ERRNO.matcher(m);
+        return e.getClass().getSimpleName() + (em.find() ? ":" + em.group() : "");
+    }
+
+    private static final java.util.regex.Pattern ERRNO = java.util.regex.Pattern.compile("E[A-Z]{3,}");
+
+    /**
+     * A host counts as a device only on strong evidence: in the ARP table, answered ICMP ping,
+     * an open TCP port, or a genuine ECONNREFUSED (TCP reset) from that address.
+     */
+    private static Device probe(String ip, boolean inArp, Map<String, AtomicInteger> errors) {
         Device d = new Device();
         d.ip = ip;
-        boolean alive = inArp;
+        if (inArp) d.evidence.add("arp");
+        long t = System.nanoTime();
         try {
-            if (InetAddress.getByName(ip).isReachable(400)) alive = true;
-        } catch (Exception ignored) { }
-        for (int port : PORTS) {
+            if (InetAddress.getByName(ip).isReachable(400)) {
+                d.evidence.add("icmp " + ms(t) + "ms");
+            } else {
+                count(errors, "icmp:no-reply");
+            }
+        } catch (Exception e) {
+            count(errors, "icmp:" + tag(e));
+        }
+        int refused = 0;
+        for (int i = 0; i < PORTS.length; i++) {
+            int port = PORTS[i];
             long start = System.nanoTime();
             try (Socket s = new Socket()) {
                 s.connect(new InetSocketAddress(ip, port), 250);
                 d.openPorts.add(port);
-                alive = true;
-            } catch (ConnectException refused) {
-                if ((System.nanoTime() - start) / 1e6 < 250) alive = true; // host answered with RST
-            } catch (Exception ignored) { }
-            if (alive && d.openPorts.isEmpty() && port == PORTS[3]) break; // alive, enough probing for a quiet host
+                d.evidence.add("open:" + port + " " + ms(start) + "ms");
+            } catch (Exception e) {
+                String tg = tag(e);
+                count(errors, "tcp:" + tg);
+                if (tg.contains("ECONNREFUSED")) {
+                    refused++;
+                    if (refused == 1) d.evidence.add("refused:" + port + " " + ms(start) + "ms");
+                }
+            }
+            // Quiet host already proven alive: no need to try every port.
+            if (!d.evidence.isEmpty() && d.openPorts.isEmpty() && i >= 3) break;
         }
-        return alive ? d : null;
+        return d.evidence.isEmpty() ? null : d;
     }
+
+    private static long ms(long startNanos) { return (System.nanoTime() - startNanos) / 1_000_000; }
 
     private static void nameAndClassify(Device d) {
         String n = mdnsReverse(d.ip);

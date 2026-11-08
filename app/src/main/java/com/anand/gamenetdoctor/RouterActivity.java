@@ -99,6 +99,13 @@ public class RouterActivity extends BaseActivity {
                     ? "UPnP: OFF or not found ⚠ (turn it on in the router, it helps online games connect)"
                     : "UPnP: ON ✅";
             String steps = steps(brand, myIp, upnp != null);
+            String title = "";
+            java.util.regex.Matcher tm = Pattern.compile("<title>\\s*([^<]{1,80})</title>", Pattern.CASE_INSENSITIVE).matcher(page);
+            if (tm.find()) title = tm.group(1).trim();
+            Report.save(this, Report.ROUTER_FILE, "Checked: " + Report.now() + "\nGateway: " + gw
+                    + "\nBrand guess: " + brand + "\nPage title: " + title
+                    + "\nPage bytes read: " + page.length()
+                    + "\nUPnP gateway: " + (upnp == null ? "none answered" : upnp));
             ui.post(() -> {
                 infoText.setText("Router IP: " + (gw == null ? "not found" : gw)
                         + "\nYour phone IP: " + myIp

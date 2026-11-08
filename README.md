@@ -33,7 +33,10 @@ and almost 0% packet loss**. One second of bad Wi-Fi is enough for the game to s
    enable UPnP and block unknown devices.
    Routers have no standard way for an app to change these settings, so you make the change yourself
    in the router page; the app tells you exactly where to go.
-7. **One-tap shortcuts** to Wi-Fi, SFA app settings (battery: Unrestricted), battery saver, data saver,
+7. **Export report / crash report:** one tap builds a text report (phone & network details, VPN status,
+   last speed test, last router check, last device scan with the *reason* each device was detected,
+   probe error statistics, and the last crash stack trace if the app crashed). Copy or share it for analysis.
+8. **One-tap shortcuts** to Wi-Fi, SFA app settings (battery: Unrestricted), battery saver, data saver,
    Private DNS and VPN settings.
 
 > No app can make your internet line faster or fix a bad route between your ISP and the game server.

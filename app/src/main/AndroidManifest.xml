@@ -14,6 +14,7 @@
     </queries>
 
     <application
+        android:name=".App"
         android:label="Game Net Doctor"
         android:icon="@android:drawable/ic_menu_compass"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
@@ -29,6 +30,7 @@
 
         <activity android:name=".DevicesActivity" android:exported="false" android:label="Devices on my Wi-Fi" />
         <activity android:name=".RouterActivity" android:exported="false" android:label="Router control" />
+        <activity android:name=".ReportActivity" android:exported="false" android:label="Export report" />
         <activity android:name=".WebActivity" android:exported="false" android:label="Router settings"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
