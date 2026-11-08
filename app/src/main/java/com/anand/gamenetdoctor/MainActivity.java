@@ -33,17 +33,9 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MainActivity extends Activity {
+public class MainActivity extends BaseActivity {
 
     static final String SFA_PACKAGE = "com.nekki.shadowfightarena";
-
-    private static final int BG = Color.parseColor("#12141A");
-    private static final int CARD = Color.parseColor("#1E222B");
-    private static final int ACCENT = Color.parseColor("#E5484D");
-    private static final int GOOD = Color.parseColor("#3DD68C");
-    private static final int WARN = Color.parseColor("#FFB224");
-    private static final int TEXT = Color.parseColor("#ECEDEE");
-    private static final int MUTED = Color.parseColor("#9BA1A6");
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView infoText, resultText, adviceText, statusText;
@@ -67,8 +59,6 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- UI
-
-    private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
@@ -121,50 +111,17 @@ public class MainActivity extends Activity {
         }
         addShortcut(c5, "VPN settings (disconnect any VPN)", new Intent("android.net.vpn.SETTINGS"));
 
+        LinearLayout c6 = card(root, "5 · My Wi-Fi & router priority");
+        c6.addView(text("See who else is using your Wi-Fi, and set your router to serve your phone first (QoS / device priority / bandwidth limits).", 13, MUTED, false));
+        Button devices = button("DEVICES ON MY WI-FI", ACCENT);
+        devices.setOnClickListener(v -> startActivity(new Intent(this, DevicesActivity.class)));
+        c6.addView(devices);
+        Button router = button("PRIORITISE MY PHONE ON THE ROUTER", GOOD);
+        router.setOnClickListener(v -> startActivity(new Intent(this, RouterActivity.class)));
+        c6.addView(router);
+
         setContentView(scroll);
         refreshGameModeButton();
-    }
-
-    private TextView text(String s, int sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        t.setLineSpacing(0, 1.2f);
-        if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setPadding(0, dp(4), 0, dp(4));
-        return t;
-    }
-
-    private LinearLayout card(LinearLayout parent, String heading) {
-        LinearLayout c = new LinearLayout(this);
-        c.setOrientation(LinearLayout.VERTICAL);
-        c.setPadding(dp(14), dp(12), dp(14), dp(14));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(CARD);
-        bg.setCornerRadius(dp(14));
-        c.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.topMargin = dp(14);
-        parent.addView(c, lp);
-        c.addView(text(heading, 16, TEXT, true));
-        return c;
-    }
-
-    private Button button(String label, int color) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextColor(Color.WHITE);
-        b.setAllCaps(false);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(color);
-        bg.setCornerRadius(dp(10));
-        b.setBackground(bg);
-        b.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(48));
-        lp.topMargin = dp(8);
-        b.setLayoutParams(lp);
-        return b;
     }
 
     private void addShortcut(LinearLayout card, String label, Intent intent) {

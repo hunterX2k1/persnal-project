@@ -24,7 +24,16 @@ and almost 0% packet loss**. One second of bad Wi-Fi is enough for the game to s
 4. **Game Mode:** a foreground service that holds Android's high-performance and low-latency Wi-Fi locks
    so the Wi-Fi radio doesn't drop into power-save between packets. This removes the random lag spikes
    caused by power saving. It works best on Android 13 and older. Newer Android versions limit this lock.
-5. **One-tap shortcuts** to Wi-Fi, SFA app settings (battery: Unrestricted), battery saver, data saver,
+5. **Devices on my Wi-Fi:** scans the network and lists every connected device with IP, name and type
+   (iPhone, Android, Windows PC, TV/Chromecast, camera, printer…). Names come from mDNS, NetBIOS and the router's DNS.
+   Android 10+ hides other devices' MAC addresses from apps, so MACs only show on Android 9 and older.
+6. **Router control (prioritise my phone):** detects the router brand (TP-Link, JioFiber, Airtel, Netgear, ASUS,
+   D-Link, Tenda, Xiaomi…), checks whether UPnP is on, opens the router admin page inside the app, and shows
+   brand-specific steps to give your phone High priority (QoS), limit other devices' bandwidth, reserve your IP,
+   enable UPnP and block unknown devices.
+   Routers have no standard way for an app to change these settings, so you make the change yourself
+   in the router page; the app tells you exactly where to go.
+7. **One-tap shortcuts** to Wi-Fi, SFA app settings (battery: Unrestricted), battery saver, data saver,
    Private DNS and VPN settings.
 
 > No app can make your internet line faster or fix a bad route between your ISP and the game server.
