@@ -1,0 +1,10 @@
+/* Picture-in-picture: show only the video, filling the small window. */
+html.bb-pip, html.bb-pip body { overflow: hidden !important; background: #000 !important; }
+html.bb-pip body * { visibility: hidden !important; }
+html.bb-pip video {
+  visibility: visible !important;
+  position: fixed !important; inset: 0 !important; left: 0 !important; top: 0 !important;
+  width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important;
+  object-fit: contain !important; z-index: 2147483647 !important; background: #000 !important;
+  transform: none !important;
+}
