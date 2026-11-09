@@ -56,17 +56,22 @@ object Gecko {
         private set
     @Volatile var plus: WebExtension? = null
         private set
-    @Volatile var status = "Starting…"
+    @Volatile var status = "not opened yet"
         private set
     /** Called (on any thread) when an add-on finishes installing, so open pages can hook it. */
     @Volatile var onReady: (() -> Unit)? = null
 
     fun runtime(ctx: Context): GeckoRuntime = runtime ?: synchronized(this) {
         runtime ?: GeckoRuntime.create(ctx.applicationContext, GeckoRuntimeSettings.Builder()
-            .consoleOutput(false)
+            // "Detailed engine log": web page console messages go to the system log too.
+            .consoleOutput(YtPrefs.debug(ctx))
             .aboutConfigEnabled(false)
+            .crashHandler(GeckoCrashService::class.java)
             .build()).also { rt ->
             runtime = rt
+            status = "Starting…"
+            DiagLog.add("youtube", "Firefox engine started${if (YtPrefs.debug(ctx)) " (detailed log on)" else ""}")
+            rt.setDelegate { DiagLog.add("youtube", "ERROR Firefox engine shut down") }
             // uBlock Origin asks for broad permissions; we installed it on purpose, so allow.
             // The default prompt answers "no", so approve explicitly (permissions yes, private
             // browsing no, no technical/interaction data sharing).
@@ -80,7 +85,7 @@ object Gecko {
                 ): GeckoResult<AllowOrDeny> = GeckoResult.fromValue(AllowOrDeny.ALLOW)
             }
             rt.webExtensionController.ensureBuiltIn(PLUS_URL, PLUS_ID).accept(
-                { e -> plus = e; onReady?.invoke() },
+                { e -> plus = e; DiagLog.add("youtube", "YouTube Plus helper ${e?.metaData?.version} loaded"); onReady?.invoke() },
                 { e -> DiagLog.add("youtube", "YouTube Plus helper failed: ${e?.message}") })
             ensureAddons(ctx.applicationContext, rt)
         }
@@ -126,7 +131,10 @@ object Gecko {
         if (ext.metaData.enabled == want) return
         val c = rt.webExtensionController
         (if (want) c.enable(ext, WebExtensionController.EnableSource.USER)
-            else c.disable(ext, WebExtensionController.EnableSource.USER)).accept({ e -> if (e != null) sponsor = e }, { })
+            else c.disable(ext, WebExtensionController.EnableSource.USER)).accept({ e ->
+                if (e != null) sponsor = e
+                DiagLog.add("youtube", "SponsorBlock ${if (want) "on" else "off"}")
+            }, { e -> DiagLog.add("youtube", "ERROR SponsorBlock on/off failed: ${e?.message}") })
     }
 }
 
@@ -153,7 +161,16 @@ class YouTubeActivity : Activity() {
             navigationDelegate = object : GeckoSession.NavigationDelegate {
                 override fun onCanGoBack(s: GeckoSession, value: Boolean) { canGoBack = value }
                 override fun onLocationChange(s: GeckoSession, url: String?, perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
-                    if (url != null) lastUrl = url
+                    if (url != null) {
+                        lastUrl = url
+                        // host and page type only (no video IDs or searches) — enough to follow what happened
+                        runCatching { Uri.parse(url) }.getOrNull()?.let { u -> DiagLog.add("youtube", "page ${u.host}${u.path?.take(40) ?: ""}") }
+                    }
+                }
+                override fun onLoadError(s: GeckoSession, uri: String?, error: org.mozilla.geckoview.WebRequestError): GeckoResult<String>? {
+                    DiagLog.add("youtube", "ERROR loading ${uri?.let { runCatching { Uri.parse(it).host }.getOrNull() }}: " +
+                        "category ${error.category}, code 0x${Integer.toHexString(error.code)}")
+                    return null
                 }
                 override fun onNewSession(s: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
                     s.loadUri(uri) // open "new window" links in place
@@ -178,6 +195,8 @@ class YouTubeActivity : Activity() {
             contentDelegate = object : GeckoSession.ContentDelegate {
                 override fun onTitleChange(s: GeckoSession, t: String?) { title.text = t?.removeSuffix(" - YouTube") ?: "YouTube" }
                 override fun onFullScreen(s: GeckoSession, full: Boolean) = setFullScreen(full)
+                override fun onCrash(s: GeckoSession) = recover("crashed")
+                override fun onKill(s: GeckoSession) = recover("was stopped by Android (low memory)")
             }
             promptDelegate = YouTubePrompts(this@YouTubeActivity)
             mediaSessionDelegate = mediaDelegate()
@@ -205,6 +224,42 @@ class YouTubeActivity : Activity() {
         Gecko.onReady = { runOnUiThread { if (!isDestroyed) { attachUBlock(); attachPlus() } } }
         YtMedia.onChange = { runOnUiThread { if (!isDestroyed) updatePip() } }
         if (Gecko.ublock == null) Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
+        DiagLog.add("youtube", "YouTube mode opened")
+        CrashGuard.takeReport(this)?.let { r ->
+            AlertDialog.Builder(this)
+                .setTitle("BlockBridge stopped unexpectedly last time")
+                .setMessage("Please share this report so it can be fixed.\n\n" + r.text.take(1500))
+                .setPositiveButton("Share report") { _, _ -> CrashGuard.share(this, "BlockBridge crash report", r.text) }
+                .setNeutralButton("Copy") { _, _ -> CrashGuard.copy(this, r.text); Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show() }
+                .setNegativeButton("Close", null).show()
+        }
+    }
+
+    /** The page's engine process died: log it, reopen the session and reload where we were. */
+    private fun recover(what: String) {
+        DiagLog.add("youtube", "ERROR page $what — reloading")
+        YtMedia.clear(applicationContext)
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            runCatching {
+                if (!session.isOpen) session.open(Gecko.runtime(this))
+                geckoView.setSession(session)
+            }.onFailure { DiagLog.error("youtube", "couldn't reopen the page", it) }
+            session.loadUri(lastUrl)
+            Toast.makeText(this, "YouTube page $what — reloaded", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** What YouTube mode is doing, for problem reports. */
+    private fun summary() = buildString {
+        appendLine("YouTube mode: ${Gecko.status}")
+        appendLine("SponsorBlock: ${Gecko.sponsor?.metaData?.let { "${it.version} ${if (it.enabled) "on" else "off"}" } ?: "not installed"}")
+        appendLine("Helper: ${if (Gecko.plus != null) "loaded" else "not loaded"} · connected to page: ${plusPort != null}")
+        appendLine("Settings: background ${YtPrefs.background(this@YouTubeActivity)} · PiP ${YtPrefs.pip(this@YouTubeActivity)} · " +
+            "SponsorBlock ${YtPrefs.sponsorBlock(this@YouTubeActivity)} · detailed log ${YtPrefs.debug(this@YouTubeActivity)}")
+        appendLine("Media: ${if (YtMedia.session == null) "none" else if (YtMedia.playing) "playing" else "paused"} · notification ${YtMediaService.instance != null}")
+        appendLine("PiP supported: ${packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)} · in PiP: $isInPictureInPictureMode")
+        append("Protection: ${if (ShieldVpnService.isRunning) "on" else "off"}")
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -258,8 +313,11 @@ class YouTubeActivity : Activity() {
     /** Follows what YouTube is playing (title, artwork, play/pause) for the notification and PiP. */
     private fun mediaDelegate() = object : MediaSession.Delegate {
         val app = applicationContext
-        override fun onActivated(s: GeckoSession, m: MediaSession) { YtMedia.session = m; YtMedia.changed(app) }
+        override fun onActivated(s: GeckoSession, m: MediaSession) {
+            DiagLog.add("youtube", "media started"); YtMedia.session = m; YtMedia.changed(app)
+        }
         override fun onDeactivated(s: GeckoSession, m: MediaSession) {
+            DiagLog.add("youtube", "media ended")
             if (YtMedia.session === m) YtMedia.clear(app)
         }
         override fun onMetadata(s: GeckoSession, m: MediaSession, meta: MediaSession.Metadata) {
@@ -269,8 +327,14 @@ class YouTubeActivity : Activity() {
             YtMedia.changed(app)
             meta.artwork?.getBitmap(512)?.accept({ b -> if (b != null && YtMedia.session === m) { YtMedia.artwork = b; YtMedia.changed(app) } }, { })
         }
-        override fun onPlay(s: GeckoSession, m: MediaSession) { YtMedia.session = m; YtMedia.playing = true; YtMedia.changed(app) }
-        override fun onPause(s: GeckoSession, m: MediaSession) { YtMedia.playing = false; YtMedia.changed(app) }
+        override fun onPlay(s: GeckoSession, m: MediaSession) {
+            DiagLog.add("youtube", "play${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
+            YtMedia.session = m; YtMedia.playing = true; YtMedia.changed(app)
+        }
+        override fun onPause(s: GeckoSession, m: MediaSession) {
+            DiagLog.add("youtube", "pause${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
+            YtMedia.playing = false; YtMedia.changed(app)
+        }
         override fun onStop(s: GeckoSession, m: MediaSession) { YtMedia.playing = false; YtMedia.changed(app) }
         override fun onPositionState(s: GeckoSession, m: MediaSession, st: MediaSession.PositionState) {
             YtMedia.durationMs = (st.duration * 1000).toLong().coerceAtLeast(0)
@@ -282,6 +346,8 @@ class YouTubeActivity : Activity() {
     }
 
     private var plusPort: WebExtension.Port? = null
+    private var pageLogs = 0
+    private var stopped = false
 
     /** Connects to BlockBridge's built-in helper on the page (it keeps playback going in the background). */
     private fun attachPlus() {
@@ -290,6 +356,11 @@ class YouTubeActivity : Activity() {
             override fun onConnect(port: WebExtension.Port) {
                 plusPort = port
                 port.setDelegate(object : WebExtension.PortDelegate {
+                    override fun onPortMessage(msg: Any, p: WebExtension.Port) {
+                        (msg as? org.json.JSONObject)?.optString("log")?.takeIf { it.isNotEmpty() }?.let {
+                            if (pageLogs++ < 300) DiagLog.add("yt-page", it.take(300))
+                        }
+                    }
                     override fun onDisconnect(p: WebExtension.Port) { if (plusPort === p) plusPort = null }
                 })
                 tellPlus()
@@ -325,6 +396,7 @@ class YouTubeActivity : Activity() {
     private fun updatePip() {
         if (packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE))
             runCatching { setPictureInPictureParams(pipParams()) }
+                .onFailure { DiagLog.error("youtube", "picture-in-picture settings refused", it) }
     }
 
     /** Leaving the app while a video plays: shrink it into a floating window (Android 8–11). */
@@ -333,6 +405,7 @@ class YouTubeActivity : Activity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && YtPrefs.pip(this) && YtMedia.playing &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE))
             runCatching { enterPictureInPictureMode(pipParams()) }
+                .onFailure { DiagLog.error("youtube", "couldn't start picture-in-picture", it) }
     }
 
     private var leftPip = false
@@ -342,19 +415,25 @@ class YouTubeActivity : Activity() {
         bar.visibility = if (inPip || fullScreen) View.GONE else View.VISIBLE
         progress.visibility = View.GONE
         leftPip = !inPip
+        DiagLog.add("youtube", if (inPip) "picture-in-picture on" else "picture-in-picture off")
         tellPlus()
     }
 
     override fun onResume() {
         super.onResume()
+        stopped = false
         leftPip = false
         updatePip()
     }
 
     override fun onStop() {
         super.onStop()
+        stopped = true
         // Closing the floating window (×) or turning background play off stops the video.
-        if (leftPip || !YtPrefs.background(this)) YtMedia.session?.pause()
+        if (leftPip || !YtPrefs.background(this)) {
+            if (YtMedia.playing) DiagLog.add("youtube", if (leftPip) "floating window closed — pausing" else "left the app, background play off — pausing")
+            YtMedia.session?.pause()
+        } else if (YtMedia.playing) DiagLog.add("youtube", "left the app — background play")
         leftPip = false
     }
 
@@ -395,7 +474,7 @@ class YouTubeActivity : Activity() {
 
     private fun menu() {
         val items = arrayOf("YouTube home", "YouTube Music", "YouTube Plus settings…", "Open uBlock Origin dashboard",
-            "SponsorBlock settings", "Open in another app", "Clear YouTube login & data")
+            "SponsorBlock settings", "Open in another app", "Clear YouTube login & data", "Report a problem (share logs)")
         AlertDialog.Builder(this).setItems(items) { _, which ->
             when (which) {
                 0 -> session.loadUri("https://m.youtube.com/")
@@ -408,6 +487,7 @@ class YouTubeActivity : Activity() {
                 5 -> runCatching {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl())), "Open with"))
                 }
+                7 -> CrashGuard.shareFullReport(this, "BlockBridge YouTube mode report", summary())
                 6 -> AlertDialog.Builder(this)
                     .setMessage("Sign out of YouTube and delete its cookies and site data in BlockBridge?")
                     .setPositiveButton("Clear") { _, _ ->
@@ -425,13 +505,15 @@ class YouTubeActivity : Activity() {
         val labels = arrayOf(
             "Background play — keeps playing with the screen off or in other apps",
             "Picture-in-picture — floating video when you leave the app",
-            "SponsorBlock — skip sponsor segments, intros and reminders")
-        val keys = arrayOf("yt_background", "yt_pip", "yt_sponsor")
-        val on = booleanArrayOf(YtPrefs.background(this), YtPrefs.pip(this), YtPrefs.sponsorBlock(this))
+            "SponsorBlock — skip sponsor segments, intros and reminders",
+            "Detailed engine log — adds web page messages to reports (after restarting BlockBridge)")
+        val keys = arrayOf("yt_background", "yt_pip", "yt_sponsor", "yt_debug")
+        val on = booleanArrayOf(YtPrefs.background(this), YtPrefs.pip(this), YtPrefs.sponsorBlock(this), YtPrefs.debug(this))
         AlertDialog.Builder(this).setTitle("YouTube Plus")
             .setMultiChoiceItems(labels, on) { _, i, checked -> on[i] = checked }
             .setPositiveButton("Save") { _, _ ->
                 keys.indices.forEach { YtPrefs.set(this, keys[it], on[it]) }
+                DiagLog.add("youtube", "settings: " + keys.indices.joinToString { "${keys[it]}=${on[it]}" })
                 tellPlus(); updatePip(); Gecko.applySponsor(this)
             }
             .setNegativeButton("Cancel", null).show()

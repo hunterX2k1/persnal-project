@@ -975,13 +975,12 @@ class MainActivity : Activity() {
             toast("Debug log copied")
         }, LinearLayout.LayoutParams(0, -2, 1f))
         dRow.addView(button("Share log") {
-            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "BlockBridge debug log")
-                putExtra(Intent.EXTRA_TEXT, diagnostics() + "\n\n" + runCatching { CrashGuard.logFile.readText().takeLast(60_000) }.getOrDefault(DiagLog.text()))
-            }, "Share debug log"))
+            CrashGuard.shareFullReport(this, "BlockBridge debug log", diagnostics())
         }, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(dRow)
+        page.addView(button("Crash history") { showCrashHistory() })
+        page.addView(small("\"Share log\" sends everything needed to find a problem: this summary, BlockBridge's " +
+            "debug log, recent crashes and Android's log for BlockBridge. Send it to whoever helps you fix it."))
         page.addView(button("Keep BlockBridge running (battery)") { askBatteryExemption(force = true) })
         page.addView(small("Phones from Samsung, Xiaomi, Oppo and others stop background apps. Allowing " +
             "\"unrestricted\" battery keeps protection and the VPN alive."))
@@ -1622,6 +1621,18 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun showCrashHistory() {
+        val h = CrashGuard.history()
+        if (h == null) { toast("No crashes recorded"); return }
+        AlertDialog.Builder(this)
+            .setTitle("Recent crashes")
+            .setMessage(h.take(4000))
+            .setPositiveButton("Share") { _, _ -> CrashGuard.share(this, "BlockBridge crash history", CrashGuard.header(this) + "\n\n" + h) }
+            .setNeutralButton("Clear") { _, _ -> CrashGuard.clearHistory(); toast("Cleared") }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     // ---------------- updates ----------------
 
     private fun offerUpdate(u: Updates.Available) {
@@ -1656,6 +1667,8 @@ class MainActivity : Activity() {
         }
         appendLine("Connections: ${ConnTracker.liveCount()} open · ${TrafficStats.connections.get()} total · ${TrafficStats.blockedConnections.get()} refused")
         appendLine("App exceptions: ${settings.exceptedApps.size} skip · ${settings.vpnBypassApps.size} no-VPN")
+        appendLine("YouTube mode: ${Gecko.status} · SponsorBlock ${Gecko.sponsor?.metaData?.version ?: "not installed"} · " +
+            "helper ${if (Gecko.plus != null) "ok" else "not loaded"} · playing ${if (YtMedia.session != null) (if (YtMedia.playing) "yes" else "paused") else "no"}")
         append("Battery optimization: ${if (ignoringBattery()) "off (good)" else "on — Android may stop BlockBridge"}")
         TorClient.tailLog(this@MainActivity, 25)?.let { append("\n\nTor log (last lines):\n$it") }
     }

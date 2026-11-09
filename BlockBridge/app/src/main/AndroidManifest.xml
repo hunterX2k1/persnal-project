@@ -143,5 +143,14 @@
             android:name=".YtMediaService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+        <service
+            android:name=".GeckoCrashService"
+            android:exported="false"
+            android:process=":crash"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Saves a crash report after the built-in browser engine crashes" />
+        </service>
     </application>
 </manifest>

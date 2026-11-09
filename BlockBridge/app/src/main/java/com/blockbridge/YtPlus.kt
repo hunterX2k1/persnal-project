@@ -21,6 +21,7 @@ object YtPrefs {
     fun background(ctx: Context) = p(ctx).getBoolean("yt_background", true)
     fun pip(ctx: Context) = p(ctx).getBoolean("yt_pip", true)
     fun sponsorBlock(ctx: Context) = p(ctx).getBoolean("yt_sponsor", true)
+    fun debug(ctx: Context) = p(ctx).getBoolean("yt_debug", false)
     fun set(ctx: Context, key: String, on: Boolean) = p(ctx).edit().putBoolean(key, on).apply()
 }
 
@@ -44,6 +45,7 @@ object YtMedia {
         if (session == null) return
         // Starting a foreground service from the background can be refused (Android 12+); the
         // notification is then shown the next time you open YouTube mode.
+        DiagLog.add("youtube", "showing playback notification")
         runCatching { ctx.startForegroundService(Intent(ctx, YtMediaService::class.java)) }
             .onFailure { DiagLog.add("youtube", "media notification not started: ${it.message}") }
     }
