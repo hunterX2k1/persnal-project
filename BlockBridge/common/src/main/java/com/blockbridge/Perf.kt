@@ -81,6 +81,38 @@ object Perf {
         if (Build.VERSION.SDK_INT >= 29) c.isHardwareAccelerated
         else !c.name.startsWith("OMX.google.") && !c.name.startsWith("c2.android.") // Android's software codecs
 
+    /**
+     * Asks Android to run this screen at the display's highest refresh rate (e.g. 120 Hz) at the
+     * current resolution. Phones with adaptive refresh otherwise often keep apps at 60 Hz.
+     * Android still lowers it in Battery Saver or when the phone gets hot.
+     */
+    fun preferHighRefreshRate(a: android.app.Activity) {
+        runCatching {
+            val d = (if (Build.VERSION.SDK_INT >= 30) a.display else null)
+                ?: @Suppress("DEPRECATION") a.windowManager.defaultDisplay ?: return
+            fun m(x: android.view.Display.Mode) = DisplayMode(x.modeId, x.physicalWidth, x.physicalHeight, x.refreshRate)
+            val best = bestMode(m(d.mode), d.supportedModes.map(::m)) ?: return
+            val lp = a.window.attributes
+            if (lp.preferredDisplayModeId != best.id) {
+                lp.preferredDisplayModeId = best.id
+                a.window.attributes = lp
+            }
+        }
+    }
+
+    internal data class DisplayMode(val id: Int, val width: Int, val height: Int, val hz: Float)
+
+    /** The highest-refresh mode with the same resolution as [current]. */
+    internal fun bestMode(current: DisplayMode, modes: List<DisplayMode>): DisplayMode? =
+        modes.filter { it.width == current.width && it.height == current.height }.maxByOrNull { it.hz }
+
+    /** "120 Hz screen (max 120 Hz)" — for logs and reports. */
+    fun refreshInfo(a: android.app.Activity): String = runCatching {
+        val d = (if (Build.VERSION.SDK_INT >= 30) a.display else null) ?: @Suppress("DEPRECATION") a.windowManager.defaultDisplay
+        val max = d.supportedModes.maxOf { it.refreshRate }
+        "screen ${d.refreshRate.toInt()} Hz now (max ${max.toInt()} Hz)"
+    }.getOrDefault("screen refresh unknown")
+
     fun describe(ctx: Context): String = profile(ctx).let { p ->
         "%.1f GB RAM · %d cores · %s · video chip: %s · %s".format(
             p.ramBytes / 1e9, p.cores, if (p.is64Bit) "64-bit" else "32-bit",

@@ -130,6 +130,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = Settings(this)
+        Perf.preferHighRefreshRate(this)
         Emergency.activity = WeakReference(this)
         Filter.enabled = settings.adBlockEnabled
 

@@ -54,6 +54,9 @@ object YtMedia {
             .onFailure { DiagLog.add("youtube", "media notification not started: ${it.message}") }
     }
 
+    /** Playback position moved (frequent): only the lock-screen progress bar is updated. */
+    fun positionChanged() { YtMediaService.instance?.updateState() }
+
     fun clear(ctx: Context) {
         session = null; playing = false; title = ""; artist = ""; artwork = null
         durationMs = 0; positionMs = 0
@@ -147,6 +150,23 @@ class YtMediaService : Service() {
         return START_NOT_STICKY
     }
 
+    /** Updates only the play state and position (cheap; no notification rebuild). */
+    fun updateState() {
+        if (YtMedia.session == null) return
+        runCatching { media.setPlaybackState(playbackState()) }
+    }
+
+    private fun playbackState(): PlaybackState {
+        val m = YtMedia
+        return PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_STOP)
+            .setState(if (m.playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                m.positionMs, if (m.playing) m.rate else 0f, m.positionAt)
+            .build()
+    }
+
     /** Redraws the notification, or goes away when nothing is playing any more. */
     fun refresh() {
         if (YtMedia.session == null) {
@@ -163,13 +183,7 @@ class YtMediaService : Service() {
             .putLong(MediaMetadata.METADATA_KEY_DURATION, m.durationMs)
             .apply { m.artwork?.let { putBitmap(MediaMetadata.METADATA_KEY_ART, it) } }
             .build())
-        media.setPlaybackState(PlaybackState.Builder()
-            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-                PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                PlaybackState.ACTION_SEEK_TO or PlaybackState.ACTION_STOP)
-            .setState(if (m.playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                m.positionMs, if (m.playing) m.rate else 0f, m.positionAt)
-            .build())
+        media.setPlaybackState(playbackState())
 
         fun act(icon: Int, label: String, action: String, req: Int) =
             Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, icon), label,

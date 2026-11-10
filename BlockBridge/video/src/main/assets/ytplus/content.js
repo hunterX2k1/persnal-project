@@ -141,6 +141,7 @@ new MutationObserver(() => {
     try { autoContinue(document); } catch (e) { log("ERROR auto-continue: " + e); }
     try { hideAppPromos(document); } catch (e) { log("ERROR open-app filter: " + e); }
     try { addMenuButton(); } catch (e) { log("ERROR menu button: " + e); }
+    if (role === "player") scheduleRect();
   }, 400);
 }).observe(document, { childList: true, subtree: true });
 
@@ -185,8 +186,47 @@ for (const t of ["loadedmetadata", "resize"]) {
   document.addEventListener(t, (e) => { if (e.target && e.target.tagName === "VIDEO") sendSize(e.target); }, true);
 }
 
+// The app runs two pages: "browse" (home, search, channels…) and "player" (the watch page in
+// the player layer, which can shrink to the mini bar).
+let role = "browse";
+
+// On the browsing page, a tapped video opens in the player layer (like the YouTube app),
+// instead of loading the watch page here.
+window.addEventListener("click", (e) => {
+  if (role !== "browse" || !port || e.defaultPrevented) return;
+  const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+  if (!a) return;
+  let u;
+  try { u = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
+  if (!/(^|\.)youtube\.com$/.test(u.hostname) || u.hostname === "music.youtube.com") return;
+  if (u.pathname !== "/watch" && !u.pathname.startsWith("/live/")) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  try { port.postMessage({ open: u.href }); } catch (err) {}
+}, true);
+
+// On the player page: where the video is (in screen pixels), for swipe-down and the shrink.
+let rectTimer = 0;
+function sendRect() {
+  if (role !== "player" || !port) return;
+  const box = document.querySelector("#player-container-id, .player-container, ytm-player") || document.querySelector("video");
+  if (!box) return;
+  const r = box.getBoundingClientRect();
+  if (r.height < 20) return;
+  const d = window.devicePixelRatio || 1;
+  try { port.postMessage({ vrect: [Math.round(r.top * d), Math.round(r.height * d)] }); } catch (err) {}
+}
+function scheduleRect() {
+  if (rectTimer) return;
+  rectTimer = setTimeout(() => { rectTimer = 0; try { sendRect(); } catch (e) {} }, 150);
+}
+window.addEventListener("scroll", scheduleRect, { passive: true });
+window.addEventListener("resize", scheduleRect);
+document.addEventListener("loadedmetadata", scheduleRect, true);
+
 function onAppMessage(m) {
   if (!m) return;
+  if ("role" in m) { role = m.role; if (role === "player") scheduleRect(); }
   if ("background" in m) bg.on = !!m.background;
   if ("smooth" in m) {
     const was = smooth;

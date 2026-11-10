@@ -46,8 +46,15 @@ object DiagLog {
         write(l)
     }
 
+    /** File writes happen on one background thread, in order (never on the screen thread). */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "diag-log").apply { isDaemon = true }
+    }
+
     private fun write(l: Line) {
-        file?.let { f -> runCatching { f.appendText("${fmt.format(Date(l.time))} [${l.tag}] ${l.msg}\n") } }
+        val f = file ?: return
+        val text = "${fmt.format(Date(l.time))} [${l.tag}] ${l.msg}\n"
+        runCatching { writer.execute { runCatching { f.appendText(text) } } }
     }
 
     fun error(tag: String, msg: String, e: Throwable? = null) =
