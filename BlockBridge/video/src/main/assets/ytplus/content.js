@@ -224,8 +224,37 @@ window.addEventListener("scroll", scheduleRect, { passive: true });
 window.addEventListener("resize", scheduleRect);
 document.addEventListener("loadedmetadata", scheduleRect, true);
 
+// Autoplay a video opened in the player layer (no tap happened on this page, so YouTube's
+// mobile site would otherwise wait for one). Tries for up to 12 s while the player loads.
+let autoplayUntil = 0;
+function tryAutoplay() {
+  if (Date.now() > autoplayUntil) return;
+  const v = document.querySelector("video");
+  if (v && !v.paused && v.currentTime > 0) {
+    autoplayUntil = 0;
+    try { port && port.postMessage({ autoplayed: true }); } catch (e) {}
+    return;
+  }
+  if (v && v.readyState >= 1) {
+    v.play().catch(() => {
+      // YouTube's own big play button, if the element refused
+      const b = document.querySelector(".ytp-large-play-button, .player-controls-middle button, button[aria-label='Play']");
+      if (b) b.click();
+    });
+  }
+  setTimeout(tryAutoplay, 400);
+}
+document.addEventListener("loadedmetadata", () => { if (autoplayUntil) tryAutoplay(); }, true);
+
 function onAppMessage(m) {
   if (!m) return;
+  if (m.autoplay && role === "player" && !autoplayUntil) {
+    // only the page of that video (not the previous one, still unloading)
+    const id = String(m.autoplay);
+    const here = new URL(location.href);
+    const mine = id === "true" || here.searchParams.get("v") === id || here.pathname.endsWith("/" + id);
+    if (mine) { autoplayUntil = Date.now() + 12000; tryAutoplay(); }
+  }
   if ("role" in m) { role = m.role; if (role === "player") scheduleRect(); }
   if ("background" in m) bg.on = !!m.background;
   if ("smooth" in m) {

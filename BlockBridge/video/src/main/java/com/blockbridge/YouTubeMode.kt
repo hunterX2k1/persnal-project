@@ -215,10 +215,13 @@ class YouTubeActivity : Activity() {
     private lateinit var browseView: GeckoView
     private lateinit var playerView: GeckoView
     private lateinit var playerBox: PlayerBox
-    private lateinit var miniBar: LinearLayout
-    private lateinit var miniSpacer: View
+    private lateinit var miniCard: LinearLayout
+    private lateinit var miniVideoSpace: View
+    /** Dims the browsing page behind the player; fades away as the player shrinks. */
+    private lateinit var scrim: View
+    /** Covers the rest of the watch page (below the video) as it fades out while shrinking. */
+    private lateinit var belowFade: View
     private lateinit var miniTitle: TextView
-    private lateinit var miniSub: TextView
     private lateinit var miniPlay: TextView
     private lateinit var progress: ProgressBar
     private var backPressedAt = 0L
@@ -254,20 +257,24 @@ class YouTubeActivity : Activity() {
         // The player draws into a TextureView so it can shrink and move smoothly (GPU transform,
         // no surface rebuilt) when it turns into the mini bar.
         playerView = GeckoView(this).apply { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
+        belowFade = View(this).apply { setBackgroundColor(pageColor); alpha = 0f }
         playerBox = PlayerBox().apply {
             visibility = View.GONE
             setBackgroundColor(pageColor)
             addView(playerView, FrameLayout.LayoutParams(-1, -1))
+            addView(belowFade, FrameLayout.LayoutParams(-1, -1))
         }
+        scrim = View(this).apply { setBackgroundColor(0xFF000000.toInt()); alpha = 0f; visibility = View.GONE }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progressTintList = ColorStateList.valueOf(Palette.CYAN)
             visibility = View.GONE
         }
-        miniBar = miniBar()
+        miniCard = miniCard()
         root = Root().apply {
             addView(browseView, FrameLayout.LayoutParams(-1, -1))
-            addView(miniBar, FrameLayout.LayoutParams(-1, dp(MINI_H), Gravity.BOTTOM).apply { bottomMargin = dp(NAV_H) })
+            addView(scrim, FrameLayout.LayoutParams(-1, -1))
+            addView(miniCard, FrameLayout.LayoutParams(dp(200), dp(160), Gravity.TOP or Gravity.START))
             addView(playerBox, FrameLayout.LayoutParams(-1, -1))
             addView(progress, FrameLayout.LayoutParams(-1, dp(2), Gravity.TOP))
         }
@@ -499,6 +506,12 @@ class YouTubeActivity : Activity() {
         p.setActive(true)
         p.loadUri(url)
         vTop = 0f; vHeight = 0f
+        // A video loaded into the player wasn't tapped on its own page, so YouTube's mobile site
+        // would wait for another tap: the helper starts it as soon as it's ready.
+        autoplayId = runCatching { Uri.parse(url).getQueryParameter("v") }.getOrNull()
+            ?: runCatching { Uri.parse(url).lastPathSegment }.getOrNull() ?: ""
+        autoplayPending = true
+        sendAutoplay()
         DiagLog.add("youtube", "video opened in the player ($how)")
         when (state) {
             Player.FULL -> {}
@@ -509,10 +522,13 @@ class YouTubeActivity : Activity() {
                 playerBox.visibility = View.VISIBLE
                 playerBox.alpha = 1f
                 applyPos(0f)
-                // slide up from the bottom
-                playerBox.translationY = root.height.toFloat().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels.toFloat()
-                playerBox.animate().translationY(0f).setDuration(if (lowEnd) 220 else 280)
-                    .setInterpolator(EASE).withEndAction { settle() }.start()
+                // slide up from the bottom, over a dim that fades in (like the YouTube app)
+                val hgt = root.height.toFloat().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels.toFloat()
+                playerBox.translationY = hgt
+                scrim.visibility = View.VISIBLE; scrim.alpha = 0f
+                scrim.animate().alpha(0.55f).setDuration(if (lowEnd) 220 else 300).start()
+                playerBox.animate().translationY(0f).setDuration(if (lowEnd) 260 else 340)
+                    .setInterpolator(EASE).withEndAction { scrim.visibility = View.GONE; settle() }.start()
             }
         }
         tellPlus()
@@ -526,7 +542,9 @@ class YouTubeActivity : Activity() {
         state = Player.NONE
         playerBox.visibility = View.GONE
         playerBox.animate().cancel()
-        miniBar.visibility = View.GONE
+        miniCard.visibility = View.GONE
+        scrim.visibility = View.GONE
+        belowFade.alpha = 0f
         if (mediaOwner === p) { YtMedia.clear(applicationContext); mediaOwner = null }
         if (lowEnd) {
             // free the memory on low-end phones
@@ -540,8 +558,10 @@ class YouTubeActivity : Activity() {
     }
 
     /**
-     * Positions the player for [p] (0 = full size, 1 = mini bar) with GPU transforms only: the
-     * page keeps its size (no relayout, no reload), it's scaled, moved and cropped to the video.
+     * Positions the player for [p] (0 = full size, 1 = floating mini player) with GPU transforms
+     * only: the page keeps its size (no relayout, no reload); it's scaled, moved and cropped to
+     * the video with rounded corners. Like the YouTube app, the rest of the watch page fades out
+     * as it shrinks and the page behind comes up from a dim.
      */
     private fun applyPos(p: Float) {
         pos = p
@@ -549,35 +569,75 @@ class YouTubeActivity : Activity() {
         if (w <= 0f || h <= 0f) return
         val vh = (if (vHeight > 0f) vHeight else w * 9f / 16f).coerceIn(1f, h)
         val vt = vTop.coerceIn(0f, h - vh)
-        val barH = dp(MINI_H).toFloat()
-        val target = barH / vh                       // scale at the mini bar
-        val barTop = root.height - dp(NAV_H) - barH  // the mini bar sits above YouTube's tabs
+        val cw = cardWidth().toFloat()
+        val target = cw / w                           // scale of the floating video
+        val (cx, cy) = cardXY()
         val s = 1f + (target - 1f) * p
-        val videoTop = vt + (barTop - vt) * p
+        val left = cx * p
+        val top = vt + (cy - vt) * p
         playerBox.pivotX = 0f; playerBox.pivotY = 0f
         playerBox.scaleX = s; playerBox.scaleY = s
-        playerBox.translationX = 0f
-        playerBox.translationY = videoTop - vt * s
-        // crop away the rest of the watch page as it shrinks
-        playerBox.clipBounds = if (p <= 0f) null else android.graphics.Rect(
-            0, (vt * p).toInt(), w.toInt(), (h + (vt + vh - h) * p).toInt())
-        val barAlpha = ((p - 0.55f) / 0.45f).coerceIn(0f, 1f)
-        miniBar.alpha = barAlpha
-        miniBar.visibility = if (p > 0.01f) View.VISIBLE else View.GONE
-        val spacer = (w * target).toInt()
-        if (miniSpacer.layoutParams.width != spacer) miniSpacer.layoutParams = miniSpacer.layoutParams.apply { width = spacer }
+        playerBox.translationX = left
+        playerBox.translationY = top - vt * s
+        // Crop toward the video (bottom goes first, a bit faster), rounded corners growing in.
+        val cropP = (p * 1.35f).coerceAtMost(1f)
+        cropTop = vt * p
+        cropBottom = h + (vt + vh - h) * cropP
+        cornerPx = dp(12) * p / s
+        playerBox.invalidateOutline()
+        // The rest of the watch page fades into the page colour; the browsing page un-dims.
+        belowFade.alpha = (p * 2.2f).coerceAtMost(1f)
+        scrim.alpha = (1f - p) * 0.55f
+        scrim.visibility = if (p in 0.001f..0.999f) View.VISIBLE else View.GONE
+        // The card (title, buttons) appears under the video near the end.
+        miniCard.translationX = cx
+        miniCard.translationY = cy
+        val cardAlpha = ((p - 0.7f) / 0.3f).coerceIn(0f, 1f)
+        miniCard.alpha = cardAlpha
+        miniCard.visibility = if (p > 0.69f) View.VISIBLE else View.GONE
+        playerBox.elevation = dp(10) * p
     }
 
-    /** Animates to full (0) or mini (1), in step with the screen's refresh rate (Choreographer). */
+    private var cropTop = 0f
+    private var cropBottom = 0f
+    private var cornerPx = 0f
+    /** Where the floating player sits (top-left, in px), remembered between minimizes. */
+    private var cardCorner = 3 // 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right
+
+    private fun cardWidth() = (root.width * (if (lowEnd) 0.5f else 0.56f)).toInt().coerceAtLeast(dp(180))
+    private fun cardVideoHeight(): Int {
+        val w = playerBox.width.toFloat().coerceAtLeast(1f)
+        val vh = if (vHeight > 0f) vHeight else w * 9f / 16f
+        return (cardWidth() * vh / w).toInt()
+    }
+    private fun cardHeight() = cardVideoHeight() + dp(CARD_BAR_H)
+
+    /** Top-left of the floating player for its corner (above YouTube's tabs, below its top bar). */
+    private fun cardXY(): Pair<Float, Float> {
+        val m = dp(12).toFloat()
+        val right = cardCorner % 2 == 1
+        val bottom = cardCorner >= 2
+        val x = if (right) root.width - cardWidth() - m else m
+        val y = if (bottom) root.height - dp(NAV_H) - cardHeight() - m else dp(56) + m
+        return (x + dragX) to (y + dragY)
+    }
+    /** While you drag the floating player, how far it's moved from its corner. */
+    private var dragX = 0f
+    private var dragY = 0f
+
+    /**
+     * Animates to full (0) or mini (1) with the screen's refresh rate (Choreographer), on an
+     * emphasized-decelerate curve like Android/YouTube motion.
+     */
     private fun animateTo(target: Float, how: String, velocity: Float = 0f) {
         if (state == Player.NONE) return
         anim?.cancel()
         browse.setActive(true) // shown behind the shrinking player
         val from = pos
         val dist = kotlin.math.abs(target - from)
-        val base = if (lowEnd) 220L else 280L
+        val base = if (lowEnd) 260L else 340L
         // a fast fling finishes faster
-        val dur = (base * dist * (if (kotlin.math.abs(velocity) > dp(1500)) 0.7f else 1f)).toLong().coerceIn(90L, base)
+        val dur = (base * dist * (if (kotlin.math.abs(velocity) > dp(1500)) 0.7f else 1f)).toLong().coerceIn(120L, base)
         anim = android.animation.ValueAnimator.ofFloat(from, target).apply {
             duration = dur
             interpolator = EASE
@@ -601,122 +661,132 @@ class YouTubeActivity : Activity() {
         updateMini(); tellPlus(); updatePip()
     }
 
-    private fun miniBar(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
+    /** The floating player's card: the video goes on top (drawn by the player layer), then title and buttons. */
+    private fun miniCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
         visibility = View.GONE
-        setBackgroundColor(pageColor)
-        elevation = dp(8).toFloat()
-        // left: room for the shrunken video (drawn by the player layer on top)
-        miniSpacer = View(context)
-        addView(miniSpacer, LinearLayout.LayoutParams(dp(MINI_H) * 16 / 9, -1))
+        background = roundRect(pageColor, dp(12).toFloat())
+        elevation = dp(10).toFloat()
+        clipToOutline = true
+        miniVideoSpace = View(context)
+        addView(miniVideoSpace, LinearLayout.LayoutParams(-1, dp(90)))
         addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, dp(4), 0)
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(2), 0)
             miniTitle = TextView(context).apply {
-                textSize = 14f; setTextColor(textColor); maxLines = 1
+                textSize = 12f; setTextColor(textColor); maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
-            miniSub = TextView(context).apply {
-                textSize = 12f; setTextColor(subColor); maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
+            addView(miniTitle, LinearLayout.LayoutParams(0, -2, 1f))
+            fun btn(t: String, desc: String, on: () -> Unit) = TextView(context).apply {
+                text = t; textSize = 17f; setTextColor(textColor); gravity = Gravity.CENTER
+                contentDescription = desc
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+                val ripple = android.util.TypedValue().also { tv -> context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true) }
+                setBackgroundResource(ripple.resourceId)
+                setOnClickListener { on() }
             }
-            addView(miniTitle); addView(miniSub)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        fun btn(t: String, desc: String, on: () -> Unit) = TextView(context).apply {
-            text = t; textSize = 20f; setTextColor(textColor); gravity = Gravity.CENTER
-            contentDescription = desc
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            val ripple = android.util.TypedValue().also { tv -> context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true) }
-            setBackgroundResource(ripple.resourceId)
-            setOnClickListener { on() }
-        }
-        miniPlay = btn("❚❚", "Play/pause") { YtMedia.request(!YtMedia.playing) }
-        addView(miniPlay)
-        addView(btn("✕", "Close") { dismissMini() })
+            miniPlay = btn("❚❚", "Play/pause") { YtMedia.request(!YtMedia.playing) }
+            addView(miniPlay)
+            addView(btn("✕", "Close") { dismissMini(0f, dp(80).toFloat()) })
+        }, LinearLayout.LayoutParams(-1, dp(CARD_BAR_H)))
         setOnTouchListener(MiniGesture())
     }
 
-    /** Swipe the mini bar away: it slides down and fades, then the player closes. */
-    private fun dismissMini(dx: Float = 0f) {
-        val dur = if (lowEnd) 150L else 200L
-        val endX = if (dx == 0f) 0f else kotlin.math.sign(dx) * root.width
-        val endY = if (dx == 0f) dp(MINI_H).toFloat() else 0f
-        for (v in listOf(miniBar, playerBox)) {
-            v.animate().translationXBy(endX - (if (v === miniBar) miniBar.translationX else 0f)).alpha(0f).setDuration(dur).setInterpolator(EASE).start()
-        }
-        miniBar.animate().translationY(endY).withEndAction {
-            miniBar.translationX = 0f; miniBar.translationY = 0f; miniBar.alpha = 1f
-            playerBox.alpha = 1f
-            closePlayer("swiped away")
-        }.start()
-        playerBox.animate().translationYBy(endY).start()
+    /** Sizes the card to the video (called when the video's shape is known or the screen turns). */
+    private fun sizeCard() {
+        val lp = miniCard.layoutParams ?: return
+        val w = cardWidth(); val h = cardHeight()
+        if (lp.width != w || lp.height != h) { lp.width = w; lp.height = h; miniCard.layoutParams = lp }
+        val vlp = miniVideoSpace.layoutParams
+        if (vlp.height != cardVideoHeight()) { vlp.height = cardVideoHeight(); miniVideoSpace.layoutParams = vlp }
     }
 
-    /** Mini bar: tap or swipe up to expand; swipe down or sideways to close. */
+    /** Fling the floating player away: it slides off and fades, then the player closes. */
+    private fun dismissMini(dx: Float, dy: Float) {
+        val dur = if (lowEnd) 160L else 220L
+        val ex = if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) kotlin.math.sign(dx) * root.width * 0.6f else 0f
+        val ey = if (ex == 0f) dp(120).toFloat() else 0f
+        for (v in listOf(miniCard, playerBox)) {
+            v.animate().translationXBy(ex).translationYBy(ey).alpha(0f).setDuration(dur).setInterpolator(EASE).start()
+        }
+        root.postDelayed({
+            listOf(miniCard, playerBox).forEach { it.animate().cancel(); it.alpha = 1f }
+            dragX = 0f; dragY = 0f
+            closePlayer("swiped away")
+        }, dur + 10)
+    }
+
+    /** Floating player: tap to expand; drag it anywhere (snaps to a corner); fling it off the side or down to close. */
     private inner class MiniGesture : View.OnTouchListener {
         private var x0 = 0f; private var y0 = 0f
-        private var mode = 0 // 0 undecided, 1 expanding, 2 dismissing
+        private var moved = false
         private var vt: android.view.VelocityTracker? = null
         override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
-            if (state != Player.MINI && mode == 0 && e.actionMasked == android.view.MotionEvent.ACTION_DOWN) return false
-            vt = vt ?: android.view.VelocityTracker.obtain()
+            if (state != Player.MINI || anim != null) return false
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) { vt?.recycle(); vt = android.view.VelocityTracker.obtain() }
             vt?.addMovement(e)
             val slop = android.view.ViewConfiguration.get(this@YouTubeActivity).scaledTouchSlop
             when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; mode = 0 }
+                android.view.MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; moved = false }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - x0; val dy = e.rawY - y0
-                    if (mode == 0) {
-                        if (dy < -slop && kotlin.math.abs(dy) > kotlin.math.abs(dx)) { mode = 1; anim?.cancel(); browse.setActive(true) }
-                        else if (kotlin.math.hypot(dx, dy) > slop) mode = 2
-                    }
-                    if (mode == 1) applyPos((1f + dy / (root.height * DRAG_SPAN)).coerceIn(0f, 1f))
-                    if (mode == 2) {
-                        miniBar.translationX = dx.coerceAtLeast(-root.width.toFloat())
-                        miniBar.translationY = dy.coerceAtLeast(0f)
-                        playerBox.translationX = miniBar.translationX
-                        val fade = 1f - (kotlin.math.abs(dx) / root.width + dy.coerceAtLeast(0f) / dp(MINI_H)).coerceIn(0f, 0.8f)
-                        miniBar.alpha = fade; playerBox.alpha = fade
-                        applyPosKeepX()
-                    }
+                    if (!moved && kotlin.math.hypot(dx, dy) > slop) moved = true
+                    if (moved) { dragX = dx; dragY = dy; applyPos(1f) }
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     vt?.computeCurrentVelocity(1000)
                     val vx = vt?.xVelocity ?: 0f; val vy = vt?.yVelocity ?: 0f
                     vt?.recycle(); vt = null
-                    val dx = e.rawX - x0; val dy = e.rawY - y0
-                    when (mode) {
-                        0 -> if (e.actionMasked == android.view.MotionEvent.ACTION_UP) animateTo(0f, "tap")
-                        1 -> animateTo(if (pos < 0.7f || vy < -dp(800)) 0f else 1f, "swipe up", vy)
-                        2 -> {
-                            val away = kotlin.math.abs(dx) > root.width * 0.35f || kotlin.math.abs(vx) > dp(1000) ||
-                                dy > dp(MINI_H) * 0.5f || vy > dp(800)
-                            if (away) dismissMini(if (kotlin.math.abs(dx) > dy) dx else 0f)
-                            else {
-                                for (view in listOf(miniBar, playerBox)) view.animate().translationX(0f).alpha(1f).setDuration(150).start()
-                                miniBar.animate().translationY(0f).start()
-                                playerBox.post { applyPos(1f) }
-                            }
-                        }
-                    }
-                    mode = 0
+                    if (!moved) { if (e.actionMasked == android.view.MotionEvent.ACTION_UP) animateTo(0f, "tap"); return true }
+                    val (cx, _) = cardXY()
+                    val offSide = cx < -cardWidth() * 0.35f || cx + cardWidth() > root.width + cardWidth() * 0.35f
+                    val flung = kotlin.math.abs(vx) > dp(1800) && kotlin.math.abs(vx) > kotlin.math.abs(vy)
+                    if (offSide || flung) { dismissMini(if (vx != 0f) vx else dragX, 0f); return true }
+                    snapToCorner(vx, vy)
                 }
             }
             return true
         }
+    }
 
-        /** While dragging the bar away, keep the video glued to the bar. */
-        private fun applyPosKeepX() {
-            val tx = playerBox.translationX
-            applyPos(1f)
-            playerBox.translationX = tx
-            playerBox.translationY += miniBar.translationY
+    /** Lets go of a dragged floating player: it glides to the nearest corner (fling direction counts). */
+    private fun snapToCorner(vx: Float, vy: Float) {
+        val (cx, cy) = cardXY()
+        // where it's heading, a little ahead along the fling
+        val px = cx + cardWidth() / 2f + vx * 0.12f
+        val py = cy + cardHeight() / 2f + vy * 0.12f
+        val newCorner = (if (py > root.height / 2f) 2 else 0) + (if (px > root.width / 2f) 1 else 0)
+        // keep the on-screen position while switching the base corner, then animate the offset to 0
+        cardCorner = newCorner
+        dragX = 0f; dragY = 0f
+        val (tx, ty) = cardXY()
+        val startX = cx - tx; val startY = cy - ty
+        anim?.cancel()
+        anim = android.animation.ValueAnimator.ofFloat(1f, 0f).apply {
+            duration = if (lowEnd) 200L else 260L
+            interpolator = EASE
+            addUpdateListener { a -> val f = a.animatedValue as Float; dragX = startX * f; dragY = startY * f; applyPos(1f) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) { if (anim === a) { anim = null; dragX = 0f; dragY = 0f; applyPos(1f) } }
+            })
+            start()
         }
     }
 
-    /** The full-size player: hands touches to the page, except while shrunk (the mini bar takes them). */
+    /** The full-size player: hands touches to the page, except while it's floating (the card takes them). */
     private inner class PlayerBox : FrameLayout(this@YouTubeActivity) {
+        init {
+            // crop to the video with rounded corners while shrinking/floating
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    if (pos <= 0f) outline.setRect(0, 0, view.width, view.height)
+                    else outline.setRoundRect(0, cropTop.toInt(), view.width, cropBottom.toInt(), cornerPx)
+                }
+            }
+            clipToOutline = true
+        }
         override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean =
             if (state == Player.FULL && anim == null) super.dispatchTouchEvent(e) else false
     }
@@ -730,6 +800,11 @@ class YouTubeActivity : Activity() {
         private var onVideo = false
         private var dragging = false
         private var vt: android.view.VelocityTracker? = null
+
+        override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+            super.onSizeChanged(w, h, ow, oh)
+            post { sizeCard(); if (state != Player.NONE && anim == null) applyPos(if (state == Player.MINI) 1f else 0f) }
+        }
 
         override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
             val canDrag = state == Player.FULL && !fullScreen && anim == null && !isInPictureInPictureMode
@@ -757,6 +832,7 @@ class YouTubeActivity : Activity() {
             }
             if (dragging) {
                 when (e.actionMasked) {
+                    // the video follows the finger
                     android.view.MotionEvent.ACTION_MOVE -> applyPos(((e.y - y0) / (height * DRAG_SPAN)).coerceIn(0f, 1f))
                     android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                         vt?.computeCurrentVelocity(1000)
@@ -775,7 +851,6 @@ class YouTubeActivity : Activity() {
     private fun updateMini() {
         val p = player ?: return
         miniTitle.text = page(p).title
-        miniSub.text = YtMedia.artist.takeIf { mediaOwner === p }.orEmpty()
         miniPlay.text = if (YtMedia.playing && mediaOwner === p) "❚❚" else "▶"
     }
 
@@ -905,9 +980,15 @@ class YouTubeActivity : Activity() {
                         j.optJSONArray("vrect")?.let { a ->
                             if (s === player) runOnUiThread {
                                 vTop = a.optDouble(0).toFloat(); vHeight = a.optDouble(1).toFloat()
+                                // the rest of the watch page (below the video) fades while shrinking
+                                belowFade.layoutParams = (belowFade.layoutParams as FrameLayout.LayoutParams).apply {
+                                    topMargin = (vTop + vHeight).toInt().coerceAtLeast(0)
+                                }
+                                sizeCard()
                                 if (anim == null && state == Player.MINI) applyPos(1f)
                             }
                         }
+                        if (j.optBoolean("autoplayed") && s === player) autoplayPending = false
                         j.optJSONArray("video")?.let { a ->
                             val w = a.optInt(0); val h = a.optInt(1)
                             if (w > 0 && h > 0 && (s === mediaOwner || mediaOwner == null)) runOnUiThread { videoW = w; videoH = h; updatePip() }
@@ -947,6 +1028,16 @@ class YouTubeActivity : Activity() {
                     .put("hold", holding() && YtMedia.wantPlay && s === mediaOwner))
             }
         }
+        if (autoplayPending) sendAutoplay()
+    }
+
+    private var autoplayPending = false
+    /** The video to autoplay (only that page acts on it, not the previous one still unloading). */
+    private var autoplayId = ""
+
+    private fun sendAutoplay() {
+        val port = player?.let { pages[it]?.port } ?: return // sent again when the page's helper connects
+        runCatching { port.postMessage(org.json.JSONObject().put("autoplay", autoplayId)) }
     }
 
     /** Not looking at the page: only the app's buttons can pause now. */
@@ -1016,7 +1107,7 @@ class YouTubeActivity : Activity() {
         super.onPictureInPictureModeChanged(inPip, newConfig)
         if (inPip) prepareForPip()
         progress.visibility = View.GONE
-        miniBar.visibility = if (!inPip && state == Player.MINI) View.VISIBLE else View.GONE
+        miniCard.visibility = if (!inPip && state == Player.MINI) View.VISIBLE else View.GONE
         if (!inPip && restoreMiniAfterPip) {
             restoreMiniAfterPip = false
             root.post { if (state == Player.FULL) { pos = 1f; state = Player.MINI; applyPos(1f) } }
@@ -1207,13 +1298,13 @@ class YouTubeActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private companion object {
-        /** Mini bar height and YouTube's bottom tab bar height (dp). */
-        const val MINI_H = 64
+        /** Height of the floating player's title/buttons row and of YouTube's bottom tabs (dp). */
+        const val CARD_BAR_H = 40
         const val NAV_H = 48
         /** How far (share of the screen height) a drag goes from full size to the mini bar. */
         const val DRAG_SPAN = 0.6f
-        /** Material-style easing: quick start, gentle stop. */
-        val EASE = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+        /** "Emphasized decelerate" (Material motion): moves off quickly, settles softly. */
+        val EASE = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
     }
 }
 
