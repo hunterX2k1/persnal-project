@@ -4,6 +4,12 @@
 const page = window.wrappedJSObject;
 const bg = { on: true }; // background play; the app can turn it off
 
+// While you're not looking at the page (picture-in-picture, screen off, other app), the only
+// way to pause is BlockBridge's buttons — so YouTube's own scripts aren't allowed to pause.
+let hold = false;
+const nativePause = HTMLMediaElement.prototype.pause; // the browser's real pause()
+let lastBlockLog = 0;
+
 // Messages for BlockBridge's debug log (sent once the app is connected).
 let port = null;
 const early = [];
@@ -74,6 +80,16 @@ document.addEventListener("error", (e) => {
   log("ERROR video: " + (mediaErrors[v.error.code] || v.error.code) + (v.error.message ? " — " + v.error.message : ""));
 }, true);
 
+try {
+  exportFunction(function () {
+    if (hold) {
+      if (Date.now() - lastBlockLog > 5000) { lastBlockLog = Date.now(); log("blocked YouTube's own pause (you're in PiP/background)"); }
+      return undefined;
+    }
+    return nativePause.call(this);
+  }, page.HTMLMediaElement.prototype, { defineAs: "pause" });
+} catch (e) { /* logged once connected */ setTimeout(() => log("ERROR pause guard not installed: " + e), 0); }
+
 // 2. Talk to the app: it tells us when picture-in-picture starts/ends and the settings.
 // The app may still be starting when the page loads, so keep retrying until it answers.
 let lastPause = 0, wasPlaying = false, pipSince = 0;
@@ -116,7 +132,16 @@ function onAppMessage(m) {
     }
     if (was !== !!m.pip) log(m.pip ? "picture-in-picture: showing the video only" + (v ? "" : " (ERROR no video on page)") : "picture-in-picture: normal page");
   }
-  if (m.play) { const v = document.querySelector("video"); if (v) v.play().catch(() => {}); }
+  if ("hold" in m) hold = !!m.hold;
+  if (m.pause) {
+    hold = false;
+    const v = document.querySelector("video");
+    if (v) nativePause.call(v);
+  }
+  if (m.play) {
+    const v = document.querySelector("video");
+    if (v) v.play().catch((err) => log("ERROR play refused: " + err));
+  }
 }
 
 let tries = 0;

@@ -56,7 +56,22 @@ object YtMedia {
         changed(ctx)
     }
 
-    fun toggle() { val s = session ?: return; if (playing) s.pause() else s.play() }
+    /** What you last asked for with BlockBridge's buttons (PiP, notification, lock screen). */
+    @Volatile var wantPlay = false
+    /** When you last pressed play/pause on BlockBridge's buttons (elapsedRealtime). */
+    @Volatile var requestedAt = 0L
+    /** Set by YouTube mode: carries play/pause to the page; returns false if it couldn't. */
+    @Volatile var userControl: ((Boolean) -> Boolean)? = null
+
+    fun request(play: Boolean) {
+        val s = session ?: return
+        wantPlay = play
+        requestedAt = android.os.SystemClock.elapsedRealtime()
+        if (userControl?.invoke(play) == true) return
+        if (play) s.play() else s.pause()
+    }
+
+    fun toggle() = request(!playing)
 }
 
 /**
@@ -93,14 +108,14 @@ class YtMediaService : Service() {
             })
         media = android.media.session.MediaSession(this, "BlockBridge YouTube").apply {
             setCallback(object : android.media.session.MediaSession.Callback() {
-                override fun onPlay() { YtMedia.session?.play() }
-                override fun onPause() { YtMedia.session?.pause() }
+                override fun onPlay() { YtMedia.request(true) }
+                override fun onPause() { YtMedia.request(false) }
                 override fun onSkipToNext() { YtMedia.session?.nextTrack() }
                 override fun onSkipToPrevious() { YtMedia.session?.previousTrack() }
                 override fun onFastForward() { YtMedia.session?.seekForward() }
                 override fun onRewind() { YtMedia.session?.seekBackward() }
                 override fun onSeekTo(pos: Long) { YtMedia.session?.seekTo(pos / 1000.0, false) }
-                override fun onStop() { YtMedia.session?.pause(); stopSelf() }
+                override fun onStop() { YtMedia.request(false); stopSelf() }
             })
             setSessionActivity(PendingIntent.getActivity(this@YtMediaService, 0,
                 Intent(this@YtMediaService, YouTubeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -114,7 +129,7 @@ class YtMediaService : Service() {
             TOGGLE -> YtMedia.toggle()
             NEXT -> YtMedia.session?.nextTrack()
             PREV -> YtMedia.session?.previousTrack()
-            CLOSE -> YtMedia.session?.pause()
+            CLOSE -> YtMedia.request(false)
         }
         // Always go foreground first (Android kills the app if a started foreground service doesn't).
         val n = render()

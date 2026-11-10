@@ -231,6 +231,24 @@ class YouTubeActivity : Activity() {
             }
             promptDelegate = YouTubePrompts(this@YouTubeActivity)
             mediaSessionDelegate = mediaDelegate()
+            permissionDelegate = object : GeckoSession.PermissionDelegate {
+                // Without an answer GeckoView treats autoplay as "ask", i.e. not allowed — so a
+                // video started from the PiP / notification buttons (no tap on the page) was
+                // stopped at once. YouTube may play; other sites' requests are refused.
+                override fun onContentPermissionRequest(
+                    s: GeckoSession, perm: GeckoSession.PermissionDelegate.ContentPermission,
+                ): GeckoResult<Int> {
+                    val host = runCatching { Uri.parse(perm.uri).host }.getOrNull() ?: ""
+                    val youtube = host == "youtube.com" || host.endsWith(".youtube.com")
+                    val autoplay = perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE ||
+                        perm.permission == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
+                    val allow = autoplay && youtube
+                    if (permLogs++ < 10) DiagLog.add("youtube", "permission ${perm.permission} for $host: ${if (allow) "allowed" else "refused"}")
+                    return GeckoResult.fromValue(
+                        if (allow) GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                        else GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY)
+                }
+            }
             open(runtime)
         }
 
@@ -255,6 +273,19 @@ class YouTubeActivity : Activity() {
         Gecko.onReady = { runOnUiThread { if (!isDestroyed) { attachUBlock(); attachPlus(); checkHelper() } } }
         checkHelper()
         YtMedia.onChange = { runOnUiThread { if (!isDestroyed) updatePip() } }
+        YtMedia.userControl = { play ->
+            val port = plusPort
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                DiagLog.add("youtube", "you pressed ${if (play) "play" else "pause"}${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
+                if (port != null) runCatching {
+                    // pause goes straight to the video (past the pause guard); play also via the engine
+                    port.postMessage(org.json.JSONObject().put("hold", play && holding()).put(if (play) "play" else "pause", true))
+                }
+                if (play) YtMedia.session?.play() else if (port == null) YtMedia.session?.pause()
+            }
+            true
+        }
         if (Gecko.ublock == null) Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
         DiagLog.add("youtube", "YouTube mode opened")
         Gecko.updateAddons(this, force = false) { }
@@ -362,6 +393,7 @@ class YouTubeActivity : Activity() {
             meta.artwork?.getBitmap(512)?.accept({ b -> if (b != null && YtMedia.session === m) { YtMedia.artwork = b; YtMedia.changed(app) } }, { })
         }
         override fun onPlay(s: GeckoSession, m: MediaSession) {
+            if (!holding()) YtMedia.wantPlay = true
             DiagLog.add("youtube", "play${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
             YtMedia.session = m; YtMedia.playing = true; YtMedia.changed(app)
         }
@@ -369,14 +401,28 @@ class YouTubeActivity : Activity() {
             DiagLog.add("youtube", "pause${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
             val wasPlaying = YtMedia.playing
             YtMedia.playing = false; YtMedia.changed(app)
-            // YouTube pauses itself when the page shrinks or goes to the background; if that
-            // happens right as we go into PiP / background play, start it again.
-            val justMoved = android.os.SystemClock.elapsedRealtime() - transitionAt < 2_500
-            val keepPlaying = isInPictureInPictureMode || (YtPrefs.background(app) && (stopped || !hasWindowFocus()))
-            if (wasPlaying && justMoved && keepPlaying && !ourPause) {
-                DiagLog.add("youtube", "YouTube paused itself during the switch — resuming")
+            if (ourPause) return
+            // You just pressed pause on the PiP / notification / lock-screen buttons.
+            if (!YtMedia.wantPlay && android.os.SystemClock.elapsedRealtime() - YtMedia.requestedAt < 5_000) return
+            // Leaving the screen or entering PiP: Android may report the switch a moment after
+            // YouTube already reacted to it, so a pause right after it counts as "not looking".
+            val justMoved = android.os.SystemClock.elapsedRealtime() - transitionAt < 2_500 &&
+                (YtPrefs.pip(app) || YtPrefs.background(app))
+            val notLooking = holding() || (justMoved && wasPlaying)
+            if (!notLooking) { YtMedia.wantPlay = false; return } // you paused on the page
+            // While you're not looking you can only pause with BlockBridge's buttons (they set
+            // wantPlay = false first), so this pause is YouTube's own: play again — at most
+            // 3 times in 10 s, so we never fight YouTube forever.
+            if (!YtMedia.wantPlay && !(justMoved && wasPlaying)) return
+            YtMedia.wantPlay = true
+            val now = android.os.SystemClock.elapsedRealtime()
+            while (resumes.isNotEmpty() && now - resumes.first() > 10_000) resumes.removeFirst()
+            if (resumes.size < 3) {
+                resumes.addLast(now)
+                DiagLog.add("youtube", "YouTube paused on its own — playing again")
+                tellPlus()
                 m.play()
-            }
+            } else DiagLog.add("youtube", "ERROR YouTube keeps pausing — gave up for now (send a report)")
         }
         override fun onStop(s: GeckoSession, m: MediaSession) { YtMedia.playing = false; YtMedia.changed(app) }
         override fun onPositionState(s: GeckoSession, m: MediaSession, st: MediaSession.PositionState) {
@@ -396,6 +442,8 @@ class YouTubeActivity : Activity() {
     private var ourPause = false
     private var reloadedForHelper = false
     private var pageLogs = 0
+    private var permLogs = 0
+    private val resumes = ArrayDeque<Long>()
     private var stopped = false
 
     /** Connects to BlockBridge's built-in helper on the page (it keeps playback going in the background). */
@@ -439,8 +487,12 @@ class YouTubeActivity : Activity() {
     private fun tellPlus() = runCatching {
         plusPort?.postMessage(org.json.JSONObject()
             .put("background", YtPrefs.background(this))
-            .put("pip", isInPictureInPictureMode))
+            .put("pip", isInPictureInPictureMode)
+            .put("hold", holding() && YtMedia.wantPlay))
     }
+
+    /** Not looking at the page: only BlockBridge's buttons can pause now. */
+    private fun holding() = isInPictureInPictureMode || (stopped && YtPrefs.background(this))
 
     private fun pipParams(): PictureInPictureParams {
         val playing = YtMedia.playing
@@ -490,6 +542,7 @@ class YouTubeActivity : Activity() {
         bar.visibility = if (inPip || fullScreen) View.GONE else View.VISIBLE
         progress.visibility = View.GONE
         leftPip = !inPip
+        if (inPip && YtMedia.playing) YtMedia.wantPlay = true
         if (inPip) transitionAt = android.os.SystemClock.elapsedRealtime()
         DiagLog.add("youtube", if (inPip) "picture-in-picture on" else "picture-in-picture off")
         tellPlus()
@@ -505,6 +558,7 @@ class YouTubeActivity : Activity() {
         stopped = false
         leftPip = false
         ourPause = false
+        tellPlus()
         updatePip()
     }
 
@@ -516,7 +570,11 @@ class YouTubeActivity : Activity() {
             if (YtMedia.playing) DiagLog.add("youtube", if (leftPip) "floating window closed — pausing" else "left the app, background play off — pausing")
             ourPause = true
             YtMedia.session?.pause()
-        } else if (YtMedia.playing) DiagLog.add("youtube", "left the app — background play")
+        } else if (YtMedia.playing) {
+            YtMedia.wantPlay = true
+            DiagLog.add("youtube", "left the app — background play")
+        }
+        tellPlus()
         leftPip = false
     }
 
@@ -663,6 +721,7 @@ class YouTubeActivity : Activity() {
     override fun onDestroy() {
         Gecko.onReady = null
         YtMedia.onChange = null
+        YtMedia.userControl = null
         YtMedia.clear(applicationContext)
         session.close()
         super.onDestroy()
