@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "8.6"
+        versionCode = 24
+        versionName = "8.7"
 
         if (hasHev) {
             externalNativeBuild {
@@ -85,7 +85,15 @@ android {
 
     // bbwg is an executable shipped as libbbwg.so; it must be extracted to run.
     packaging {
-        jniLibs { useLegacyPackaging = true }
+        jniLibs {
+            useLegacyPackaging = true
+            // Firefox's engine (YouTube mode) only for 64-bit phones: the 32-bit copy is ~70 MB,
+            // and phones that can't run 64-bit apps are too weak for it anyway. Ad blocking, the
+            // VPN and Tor keep their 32-bit versions. YouTubeActivity checks Gecko.supported.
+            excludes += listOf("libxul", "libclearkey", "libcrashhelper", "libcrashtools", "libfreebl3",
+                "libgkcodecs", "liblgpllibs", "libmozavcodec", "libmozavutil", "libmozglue", "libnss3",
+                "libplugin-container", "libsoftokn3").map { "lib/armeabi-v7a/$it.so" }
+        }
     }
     if (goExe != null && hasHev) {
         sourceSets.getByName("main").jniLibs.directories.add(wgOut.get().asFile.path)

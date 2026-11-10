@@ -97,7 +97,7 @@ class ControlService : Service() {
                     // First start needs the system VPN consent dialog, which only an activity can show.
                     startActivity(Intent(this, MainActivity::class.java)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        .putExtra(MainActivity.EXTRA_START, true))
+                        .putExtra(MainActivity.EXTRA_START, MainActivity.startToken))
                 }
             }
             ACTION_ADBLOCK -> {

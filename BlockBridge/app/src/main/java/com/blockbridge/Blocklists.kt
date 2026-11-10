@@ -63,6 +63,7 @@ object Catalog {
 }
 
 class Settings(ctx: Context) {
+    companion object { const val SAFE_MODE_AUTO_MS = 24 * 3_600_000L }
     private val p = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     init {
@@ -139,10 +140,26 @@ class Settings(ctx: Context) {
     var torBridgeLines: String
         get() = p.getString("tor_bridge_lines", "")!!
         set(v) = p.edit().putString("tor_bridge_lines", v).apply()
-    /** Safe mode: DNS-only filtering, no native traffic engine (used after a crash). */
+    /**
+     * Safe mode: DNS-only filtering, no native traffic engine. Turned on by you (stays on), or
+     * automatically after a crash while starting the engine — that one ends after 24 hours, so
+     * the VPN doesn't stay blocked forever.
+     */
     var safeMode: Boolean
-        get() = p.getBoolean("safe_mode", false)
-        set(v) = p.edit().putBoolean("safe_mode", v).apply()
+        get() {
+            if (!p.getBoolean("safe_mode", false)) return false
+            val autoAt = p.getLong("safe_mode_auto_at", 0)
+            if (autoAt > 0 && System.currentTimeMillis() - autoAt > SAFE_MODE_AUTO_MS) {
+                p.edit().putBoolean("safe_mode", false).remove("safe_mode_auto_at").apply()
+                DiagLog.add("tunnel", "automatic safe mode ended (24 h after the crash)")
+                return false
+            }
+            return true
+        }
+        set(v) = p.edit().putBoolean("safe_mode", v).remove("safe_mode_auto_at").apply()
+
+    fun enableSafeModeAfterCrash() =
+        p.edit().putBoolean("safe_mode", true).putLong("safe_mode_auto_at", System.currentTimeMillis()).apply()
     /** Which Tor to use for Tor servers: "builtin" or "orbot" (the Orbot app). */
     var torEngine: String
         get() = p.getString("tor_engine", "builtin")!!

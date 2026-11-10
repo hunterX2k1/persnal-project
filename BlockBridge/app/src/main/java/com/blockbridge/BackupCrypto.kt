@@ -39,7 +39,11 @@ object BackupCrypto {
     /** Throws if the password is wrong or the data was changed. */
     fun decrypt(o: JSONObject, password: String): String {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, key(password, unb64.decode(o.getString("salt")), o.optInt("iter", ITERATIONS)),
+        // The file says how many rounds were used; refuse silly values (a crafted file could
+        // freeze the app with billions of rounds, or weaken nothing useful with very few).
+        val iter = o.optInt("iter", ITERATIONS)
+        require(iter in 100_000..2_000_000) { "Not a BlockBridge backup (bad key settings)" }
+        c.init(Cipher.DECRYPT_MODE, key(password, unb64.decode(o.getString("salt")), iter),
             GCMParameterSpec(128, unb64.decode(o.getString("iv"))))
         return String(c.doFinal(unb64.decode(o.getString("data"))), Charsets.UTF_8)
     }

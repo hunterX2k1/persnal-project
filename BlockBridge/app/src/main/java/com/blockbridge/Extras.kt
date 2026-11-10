@@ -32,7 +32,7 @@ class ProtectionTile : TileService() {
         } else if (VpnService.prepare(this) == null) {
             startService(Intent(this, ShieldVpnService::class.java).setAction(ShieldVpnService.ACTION_START))
         } else {
-            openApp(this, Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_START, true))
+            openApp(this, Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_START, MainActivity.startToken))
         }
         qsTile?.let { it.state = if (ShieldVpnService.isRunning) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE; it.updateTile() }
     }

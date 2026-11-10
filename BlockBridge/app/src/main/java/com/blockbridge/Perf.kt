@@ -23,6 +23,13 @@ object Perf {
     }
 
     @Volatile private var cached: Profile? = null
+    @Volatile private var lowEndCached: Boolean? = null
+
+    /** Warms up the profile off the main thread (the video-chip scan can take a moment). */
+    fun prewarm(ctx: Context) {
+        val app = ctx.applicationContext
+        Thread({ runCatching { profile(app) } }, "perf-profile").apply { isDaemon = true }.start()
+    }
 
     fun profile(ctx: Context): Profile = cached ?: synchronized(this) {
         cached ?: run {
@@ -41,7 +48,13 @@ object Perf {
         }
     }
 
-    fun lowEnd(ctx: Context): Boolean = profile(ctx).lowEnd
+    /** Cheap (no video-chip scan): safe to call on the main thread, e.g. while drawing. */
+    fun lowEnd(ctx: Context): Boolean = cached?.lowEnd ?: lowEndCached ?: run {
+        val am = ctx.getSystemService(ActivityManager::class.java)
+        val mem = ActivityManager.MemoryInfo().also { am?.getMemoryInfo(it) }
+        (isLowEnd(am?.isLowRamDevice == true, mem.totalMem, Runtime.getRuntime().availableProcessors()) ||
+            Build.SUPPORTED_64_BIT_ABIS.isEmpty()).also { lowEndCached = it }
+    }
 
     /** YouTube mode's smooth mode default: on for low-end phones and phones without a VP9 video chip. */
     fun smoothByDefault(ctx: Context): Boolean = profile(ctx).let { smoothByDefault(it.lowEnd, it.hwVp9) }

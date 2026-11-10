@@ -35,6 +35,9 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     companion object {
         const val EXTRA_START = "start"
+        /** Secret for this run: only BlockBridge's own tile/notification know it, so other apps
+         *  can't switch protection on by opening this screen with EXTRA_START. */
+        val startToken: String = java.util.UUID.randomUUID().toString()
         const val EXTRA_TAB = "tab"
         const val TAB_HOME = 0
         const val TAB_FILTERS = 1
@@ -183,7 +186,7 @@ class MainActivity : Activity() {
     private fun handleIntent(i: Intent?) {
         if (i == null) return
         if (i.hasExtra(EXTRA_TAB)) showTab(i.getIntExtra(EXTRA_TAB, TAB_HOME))
-        if (i.getBooleanExtra(EXTRA_START, false) && !ShieldVpnService.isRunning) toggle()
+        if (i.getStringExtra(EXTRA_START) == startToken && !ShieldVpnService.isRunning) toggle()
         i.removeExtra(EXTRA_TAB); i.removeExtra(EXTRA_START)
     }
 
@@ -288,7 +291,10 @@ class MainActivity : Activity() {
             background = ripple(gradientRect(dp(20).toFloat(), 0xFFE11D48.toInt(), 0xFF8B5CF6.toInt()), dp(20).toFloat())
             setPadding(dp(16), dp(14), dp(16), dp(14))
             isClickable = true
-            setOnClickListener { startActivity(Intent(this@MainActivity, YouTubeActivity::class.java)) }
+            setOnClickListener {
+                if (Gecko.supported) startActivity(Intent(this@MainActivity, YouTubeActivity::class.java))
+                else toast("YouTube mode needs a 64-bit phone (this one is 32-bit). Ad blocking, VPN and Tor still work.")
+            }
         }
         yt.addView(TextView(this).apply { text = "▶"; textSize = 26f; setTextColor(Palette.TEXT); setPadding(0, 0, dp(14), 0) })
         val ytText = vbox()
@@ -1596,7 +1602,7 @@ class MainActivity : Activity() {
 
     private fun showCrashReport(r: CrashGuard.Report) {
         if (r.duringEngineStart && !settings.safeMode) {
-            settings.safeMode = true // next start uses DNS-only filtering
+            settings.enableSafeModeAfterCrash() // next starts use DNS-only filtering (for 24 h)
         }
         AlertDialog.Builder(this)
             .setTitle("BlockBridge stopped unexpectedly")

@@ -45,9 +45,13 @@ object Gecko {
     const val UBO_ID = "uBlock0@raymondhill.net"
     const val SPONSOR_ID = "sponsorBlocker@ajay.app"
     const val PLUS_ID = "ytplus@blockbridge"
+    val TRUSTED_ADDONS = setOf(UBO_ID, SPONSOR_ID, PLUS_ID)
     private const val UBO_URL = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi"
     private const val SPONSOR_URL = "https://addons.mozilla.org/firefox/downloads/latest/sponsorblock/latest.xpi"
     private const val PLUS_URL = "resource://android/assets/ytplus/"
+
+    /** Firefox's engine ships for 64-bit phones only (see build.gradle.kts). */
+    val supported: Boolean get() = android.os.Process.is64Bit()
 
     @Volatile private var runtime: GeckoRuntime? = null
     @Volatile var ublock: WebExtension? = null
@@ -76,13 +80,19 @@ object Gecko {
             // The default prompt answers "no", so approve explicitly (permissions yes, private
             // browsing no, no technical/interaction data sharing).
             rt.webExtensionController.promptDelegate = object : WebExtensionController.PromptDelegate {
+                // Only BlockBridge's own add-ons are approved. A web page that links to some other
+                // add-on (.xpi) gets refused — otherwise any site could install extensions.
                 override fun onInstallPromptRequest(
                     extension: WebExtension, permissions: Array<String>, origins: Array<String>, data: Array<String>,
-                ): GeckoResult<WebExtension.PermissionPromptResponse> =
-                    GeckoResult.fromValue(WebExtension.PermissionPromptResponse(true, false, false))
+                ): GeckoResult<WebExtension.PermissionPromptResponse> {
+                    val ours = extension.id in TRUSTED_ADDONS
+                    if (!ours) DiagLog.add("youtube", "refused to install add-on ${extension.id} (not one of BlockBridge's)")
+                    return GeckoResult.fromValue(WebExtension.PermissionPromptResponse(ours, false, false))
+                }
                 override fun onUpdatePrompt(
                     extension: WebExtension, permissions: Array<String>, origins: Array<String>, data: Array<String>,
-                ): GeckoResult<AllowOrDeny> = GeckoResult.fromValue(AllowOrDeny.ALLOW)
+                ): GeckoResult<AllowOrDeny> =
+                    GeckoResult.fromValue(if (extension.id in TRUSTED_ADDONS) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
             }
             rt.webExtensionController.ensureBuiltIn(PLUS_URL, PLUS_ID).accept(
                 { e -> plus = e; DiagLog.add("youtube", "YouTube Plus helper ${e?.metaData?.version} loaded"); onReady?.invoke() },
@@ -215,6 +225,10 @@ class YouTubeActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!Gecko.supported) {
+            Toast.makeText(this, "YouTube mode needs a 64-bit phone. Ad blocking, VPN and Tor still work.", Toast.LENGTH_LONG).show()
+            finish(); return
+        }
         Gecko.runtime(this)
         window.statusBarColor = Palette.BG
 
@@ -392,16 +406,7 @@ class YouTubeActivity : Activity() {
         }
     }
 
-    /** youtu.be/ID, youtube.com/watch?v=ID … → the mobile site; otherwise the home page. */
-    private fun startUrl(i: Intent?): String {
-        val u = i?.data ?: return "https://m.youtube.com/"
-        return when {
-            u.host == "youtu.be" -> "https://m.youtube.com/watch?v=${u.path?.trim('/')}"
-            u.host == "music.youtube.com" -> u.buildUpon().scheme("https").build().toString()
-            u.host?.endsWith("youtube.com") == true -> u.buildUpon().authority("m.youtube.com").scheme("https").build().toString()
-            else -> u.toString()
-        }
-    }
+    private fun startUrl(i: Intent?): String = youTubeStartUrl(i?.data)
 
     private fun topBar(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -1009,6 +1014,7 @@ class YouTubeActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (!Gecko.supported) { super.onDestroy(); return }
         Gecko.onReady = null
         YtMedia.onChange = null
         YtMedia.userControl = null
@@ -1021,6 +1027,25 @@ class YouTubeActivity : Activity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+}
+
+/**
+ * The page to open for a link another app sent us: youtu.be/ID, youtube.com/watch?v=ID … go to
+ * the mobile site. Anything else (other sites, file://, about:, javascript:…) opens YouTube's
+ * home page instead — an app on the phone must not be able to load arbitrary pages here.
+ */
+internal fun youTubeStartUrl(u: Uri?): String {
+    val home = "https://m.youtube.com/"
+    if (u == null || (u.scheme != "https" && u.scheme != "http")) return home
+    val host = u.host?.lowercase() ?: return home
+    return when {
+        host == "youtu.be" -> u.path?.trim('/')?.takeIf { Regex("^[A-Za-z0-9_-]{6,20}$").matches(it) }
+            ?.let { "https://m.youtube.com/watch?v=$it" } ?: home
+        host == "music.youtube.com" -> u.buildUpon().scheme("https").build().toString()
+        host == "youtube.com" || host.endsWith(".youtube.com") ->
+            u.buildUpon().scheme("https").authority("m.youtube.com").build().toString()
+        else -> home
+    }
 }
 
 /**
