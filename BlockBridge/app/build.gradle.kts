@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "8.1"
+        versionCode = 19
+        versionName = "8.2"
 
         if (hasHev) {
             externalNativeBuild {

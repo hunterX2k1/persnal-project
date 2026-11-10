@@ -94,7 +94,7 @@ object Gecko {
     /** Installs uBlock Origin and SponsorBlock on first use, then checks for updates about once a day. */
     private fun ensureAddons(ctx: Context, rt: GeckoRuntime) {
         val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val checkUpdates = System.currentTimeMillis() - prefs.getLong("ubo_update", 0) > 86_400_000L
+        val checkUpdates = System.currentTimeMillis() - prefs.getLong("ubo_update", 0) > 6 * 3_600_000L
         if (checkUpdates) prefs.edit().putLong("ubo_update", System.currentTimeMillis()).apply()
         rt.webExtensionController.list().accept({ list ->
             fun ensure(id: String, url: String, name: String, set: (WebExtension) -> Unit, main: Boolean) {
@@ -122,6 +122,37 @@ object Gecko {
             ensure(UBO_ID, UBO_URL, "uBlock Origin", { ublock = it }, main = true)
             ensure(SPONSOR_ID, SPONSOR_URL, "SponsorBlock", { sponsor = it; applySponsor(ctx, rt) }, main = false)
         }, { e -> status = "Extension error: ${e?.message}" })
+    }
+
+    /**
+     * Checks addons.mozilla.org for new uBlock Origin / SponsorBlock versions (every 6 hours
+     * when YouTube mode opens, or now if [force]). [done] gets a summary on the main thread.
+     */
+    fun updateAddons(ctx: Context, force: Boolean, done: (String) -> Unit) {
+        val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        if (!force && System.currentTimeMillis() - prefs.getLong("ubo_update", 0) < 6 * 3_600_000L) return
+        val c = runtime(ctx).webExtensionController
+        val exts = listOfNotNull(ublock?.let { "uBlock Origin" to it }, sponsor?.let { "SponsorBlock" to it })
+        if (exts.isEmpty()) { done("Add-ons: still installing — try again in a minute"); return }
+        prefs.edit().putLong("ubo_update", System.currentTimeMillis()).apply()
+        val lines = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        fun finish(name: String, line: String) {
+            lines[name] = line
+            if (lines.size == exts.size) main.post { done(exts.joinToString("\n") { lines[it.first] ?: "" }) }
+        }
+        for ((name, ext) in exts) {
+            val before = ext.metaData.version
+            c.update(ext).accept({ u ->
+                if (u != null) { if (ext.id == UBO_ID) { ublock = u; status = "uBlock Origin ${u.metaData.version} active" } else sponsor = u }
+                val now = u?.metaData?.version ?: before
+                if (now != before) DiagLog.add("youtube", "$name updated $before → $now")
+                finish(name, if (now != before) "$name: updated to $now" else "$name: $now (up to date)")
+            }, { e ->
+                DiagLog.add("youtube", "ERROR $name update check failed: ${e?.message}")
+                finish(name, "$name: couldn't check (${e?.message})")
+            })
+        }
     }
 
     /** Turns SponsorBlock on or off to match the YouTube Plus setting. */
@@ -221,10 +252,13 @@ class YouTubeActivity : Activity() {
         session.loadUri(startUrl(intent))
         attachUBlock()
         attachPlus()
-        Gecko.onReady = { runOnUiThread { if (!isDestroyed) { attachUBlock(); attachPlus() } } }
+        Gecko.onReady = { runOnUiThread { if (!isDestroyed) { attachUBlock(); attachPlus(); checkHelper() } } }
+        checkHelper()
         YtMedia.onChange = { runOnUiThread { if (!isDestroyed) updatePip() } }
         if (Gecko.ublock == null) Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
         DiagLog.add("youtube", "YouTube mode opened")
+        Gecko.updateAddons(this, force = false) { }
+        Updates.checkDaily(this) { u -> runOnUiThread { if (!isDestroyed) offerAppUpdate(u) } }
         CrashGuard.takeReport(this)?.let { r ->
             AlertDialog.Builder(this)
                 .setTitle("BlockBridge stopped unexpectedly last time")
@@ -333,7 +367,16 @@ class YouTubeActivity : Activity() {
         }
         override fun onPause(s: GeckoSession, m: MediaSession) {
             DiagLog.add("youtube", "pause${if (isInPictureInPictureMode) " (PiP)" else if (stopped) " (background)" else ""}")
+            val wasPlaying = YtMedia.playing
             YtMedia.playing = false; YtMedia.changed(app)
+            // YouTube pauses itself when the page shrinks or goes to the background; if that
+            // happens right as we go into PiP / background play, start it again.
+            val justMoved = android.os.SystemClock.elapsedRealtime() - transitionAt < 2_500
+            val keepPlaying = isInPictureInPictureMode || (YtPrefs.background(app) && (stopped || !hasWindowFocus()))
+            if (wasPlaying && justMoved && keepPlaying && !ourPause) {
+                DiagLog.add("youtube", "YouTube paused itself during the switch — resuming")
+                m.play()
+            }
         }
         override fun onStop(s: GeckoSession, m: MediaSession) { YtMedia.playing = false; YtMedia.changed(app) }
         override fun onPositionState(s: GeckoSession, m: MediaSession, st: MediaSession.PositionState) {
@@ -346,6 +389,12 @@ class YouTubeActivity : Activity() {
     }
 
     private var plusPort: WebExtension.Port? = null
+    private var videoW = 16
+    private var videoH = 9
+    /** When we last left the screen or went into PiP; YouTube pausing right after that gets undone. */
+    private var transitionAt = 0L
+    private var ourPause = false
+    private var reloadedForHelper = false
     private var pageLogs = 0
     private var stopped = false
 
@@ -355,10 +404,16 @@ class YouTubeActivity : Activity() {
         session.webExtensionController.setMessageDelegate(ext, object : WebExtension.MessageDelegate {
             override fun onConnect(port: WebExtension.Port) {
                 plusPort = port
+                DiagLog.add("youtube", "helper connected to the page")
                 port.setDelegate(object : WebExtension.PortDelegate {
                     override fun onPortMessage(msg: Any, p: WebExtension.Port) {
-                        (msg as? org.json.JSONObject)?.optString("log")?.takeIf { it.isNotEmpty() }?.let {
+                        val j = msg as? org.json.JSONObject ?: return
+                        j.optString("log").takeIf { it.isNotEmpty() }?.let {
                             if (pageLogs++ < 300) DiagLog.add("yt-page", it.take(300))
+                        }
+                        j.optJSONArray("video")?.let { a ->
+                            val w = a.optInt(0); val h = a.optInt(1)
+                            if (w > 0 && h > 0) runOnUiThread { videoW = w; videoH = h; updatePip() }
                         }
                     }
                     override fun onDisconnect(p: WebExtension.Port) { if (plusPort === p) plusPort = null }
@@ -366,6 +421,19 @@ class YouTubeActivity : Activity() {
                 tellPlus()
             }
         }, "blockbridge")
+    }
+
+    /**
+     * If the page loaded before the helper was ready, it never got the helper's script; reload
+     * once so background play and the PiP view work.
+     */
+    private fun checkHelper() {
+        geckoView.postDelayed({
+            if (isDestroyed || plusPort != null || reloadedForHelper || Gecko.plus == null) return@postDelayed
+            reloadedForHelper = true
+            DiagLog.add("youtube", "helper not connected to the page — reloading once")
+            session.reload()
+        }, 6_000)
     }
 
     private fun tellPlus() = runCatching {
@@ -382,16 +450,22 @@ class YouTubeActivity : Activity() {
             YtMediaService.action(this, YtMediaService.TOGGLE, 2))
         val next = RemoteAction(Icon.createWithResource(this, android.R.drawable.ic_media_next), "Next", "Next",
             YtMediaService.action(this, YtMediaService.NEXT, 3))
+        val prev = RemoteAction(Icon.createWithResource(this, android.R.drawable.ic_media_previous), "Previous", "Previous",
+            YtMediaService.action(this, YtMediaService.PREV, 1))
         return PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(16, 9))
-            .setActions(listOf(toggle, next))
+            .setAspectRatio(pipAspect(videoW, videoH))
+            .setActions(listOf(prev, toggle, next).takeLast(maxPipActions()))
             .apply {
                 // Android 12+: slide into PiP smoothly when you swipe home while a video plays.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     setAutoEnterEnabled(YtPrefs.pip(this@YouTubeActivity) && playing)
+                    setSeamlessResizeEnabled(false) // video: no cross-fade while resizing
+                }
             }
             .build()
     }
+
+    private fun maxPipActions(): Int = runCatching { maxNumPictureInPictureActions }.getOrDefault(3).coerceAtLeast(1)
 
     private fun updatePip() {
         if (packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE))
@@ -402,6 +476,7 @@ class YouTubeActivity : Activity() {
     /** Leaving the app while a video plays: shrink it into a floating window (Android 8–11). */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        transitionAt = android.os.SystemClock.elapsedRealtime()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && YtPrefs.pip(this) && YtMedia.playing &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE))
             runCatching { enterPictureInPictureMode(pipParams()) }
@@ -415,14 +490,21 @@ class YouTubeActivity : Activity() {
         bar.visibility = if (inPip || fullScreen) View.GONE else View.VISIBLE
         progress.visibility = View.GONE
         leftPip = !inPip
+        if (inPip) transitionAt = android.os.SystemClock.elapsedRealtime()
         DiagLog.add("youtube", if (inPip) "picture-in-picture on" else "picture-in-picture off")
         tellPlus()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        transitionAt = android.os.SystemClock.elapsedRealtime()
     }
 
     override fun onResume() {
         super.onResume()
         stopped = false
         leftPip = false
+        ourPause = false
         updatePip()
     }
 
@@ -432,6 +514,7 @@ class YouTubeActivity : Activity() {
         // Closing the floating window (×) or turning background play off stops the video.
         if (leftPip || !YtPrefs.background(this)) {
             if (YtMedia.playing) DiagLog.add("youtube", if (leftPip) "floating window closed — pausing" else "left the app, background play off — pausing")
+            ourPause = true
             YtMedia.session?.pause()
         } else if (YtMedia.playing) DiagLog.add("youtube", "left the app — background play")
         leftPip = false
@@ -474,7 +557,7 @@ class YouTubeActivity : Activity() {
 
     private fun menu() {
         val items = arrayOf("YouTube home", "YouTube Music", "YouTube Plus settings…", "Open uBlock Origin dashboard",
-            "SponsorBlock settings", "Open in another app", "Clear YouTube login & data", "Report a problem (share logs)")
+            "SponsorBlock settings", "Open in another app", "Clear YouTube login & data", "Report a problem (share logs)", "Check for updates")
         AlertDialog.Builder(this).setItems(items) { _, which ->
             when (which) {
                 0 -> session.loadUri("https://m.youtube.com/")
@@ -487,6 +570,7 @@ class YouTubeActivity : Activity() {
                 5 -> runCatching {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl())), "Open with"))
                 }
+                8 -> checkUpdates()
                 7 -> CrashGuard.shareFullReport(this, "BlockBridge YouTube mode report", summary())
                 6 -> AlertDialog.Builder(this)
                     .setMessage("Sign out of YouTube and delete its cookies and site data in BlockBridge?")
@@ -498,6 +582,38 @@ class YouTubeActivity : Activity() {
                     .setNegativeButton("Cancel", null).show()
             }
         }.show()
+    }
+
+    /** Updates everything YouTube mode uses: uBlock Origin, SponsorBlock and BlockBridge itself. */
+    private fun checkUpdates() {
+        Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show()
+        Gecko.updateAddons(this, force = true) { addons ->
+            kotlin.concurrent.thread(name = "update-check", isDaemon = true) {
+                val app = runCatching { Updates.check(this) }
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    val u = app.getOrNull()
+                    val appLine = when {
+                        u != null -> "BlockBridge: new version available (build ${u.versionCode})"
+                        app.isFailure -> "BlockBridge: couldn't check (${app.exceptionOrNull()?.message})"
+                        else -> "BlockBridge: up to date"
+                    }
+                    val b = AlertDialog.Builder(this).setTitle("Updates")
+                        .setMessage("$addons\n$appLine\n\nThe YouTube page itself always loads the newest version from YouTube.")
+                        .setNegativeButton("Close", null)
+                    if (u != null) b.setPositiveButton("Download") { _, _ -> offerAppUpdate(u) }
+                    b.show()
+                }
+            }
+        }
+    }
+
+    private fun offerAppUpdate(u: Updates.Available) {
+        AlertDialog.Builder(this)
+            .setTitle("BlockBridge update available")
+            .setMessage("Build ${u.versionCode} is ready. It also updates YouTube mode (the Firefox engine and the YouTube Plus helper). Download and open it to install.")
+            .setPositiveButton("Download") { _, _ -> runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url))) } }
+            .setNegativeButton("Later", null).show()
     }
 
     /** The YouTube Plus switches. */
@@ -591,5 +707,16 @@ private class YouTubePrompts(private val a: Activity) : GeckoSession.PromptDeleg
             .setItems(flat.map { it.label }.toTypedArray()) { _, i -> r.complete(p.confirm(flat[i])) }
             .setOnCancelListener { r.complete(p.dismiss()) }.show()
         return r
+    }
+}
+
+/** Picture-in-picture window shape for a video of [w]×[h], within what Android allows (2.39:1 … 1:2.39). */
+internal fun pipAspect(w: Int, h: Int): Rational {
+    if (w <= 0 || h <= 0) return Rational(16, 9)
+    val r = w.toDouble() / h
+    return when {
+        r > 2.39 -> Rational(239, 100)
+        r < 1 / 2.39 -> Rational(100, 239)
+        else -> Rational(w, h)
     }
 }

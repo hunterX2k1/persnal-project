@@ -75,17 +75,66 @@ document.addEventListener("error", (e) => {
 }, true);
 
 // 2. Talk to the app: it tells us when picture-in-picture starts/ends and the settings.
-try {
-  port = browser.runtime.connectNative("blockbridge");
-  port.onMessage.addListener((m) => {
-    if (!m) return;
-    if ("background" in m) bg.on = !!m.background;
-    if ("pip" in m) {
-      const was = document.documentElement.classList.contains("bb-pip");
-      document.documentElement.classList.toggle("bb-pip", !!m.pip);
-      if (was !== !!m.pip) log(m.pip ? "picture-in-picture: showing the video only" + (document.querySelector("video") ? "" : " (ERROR no video on page)") : "picture-in-picture: normal page");
+// The app may still be starting when the page loads, so keep retrying until it answers.
+let lastPause = 0, wasPlaying = false, pipSince = 0;
+document.addEventListener("pause", (e) => {
+  if (e.target && e.target.tagName === "VIDEO") { lastPause = Date.now(); }
+  // YouTube sometimes pauses itself as the window shrinks; undo that right after PiP starts.
+  if (pipSince && Date.now() - pipSince < 2500 && e.target.tagName === "VIDEO") {
+    log("YouTube paused while entering picture-in-picture — resuming");
+    e.target.play().catch((err) => log("ERROR resume failed: " + err));
+  }
+}, true);
+document.addEventListener("play", (e) => { if (e.target && e.target.tagName === "VIDEO") wasPlaying = true; }, true);
+
+// Tell the app the video's shape, so the floating window matches it.
+function sendSize(v) {
+  if (port && v.videoWidth && v.videoHeight) {
+    try { port.postMessage({ video: [v.videoWidth, v.videoHeight] }); } catch (e) {}
+  }
+}
+for (const t of ["loadedmetadata", "resize"]) {
+  document.addEventListener(t, (e) => { if (e.target && e.target.tagName === "VIDEO") sendSize(e.target); }, true);
+}
+
+function onAppMessage(m) {
+  if (!m) return;
+  if ("background" in m) bg.on = !!m.background;
+  if ("pip" in m) {
+    const root = document.documentElement;
+    const was = root.classList.contains("bb-pip");
+    root.classList.toggle("bb-pip", !!m.pip);
+    pipSince = m.pip ? Date.now() : 0;
+    const v = document.querySelector("video");
+    if (m.pip && v) {
+      sendSize(v);
+      // Paused in the moment before the message arrived? Keep it playing.
+      if (v.paused && wasPlaying && Date.now() - lastPause < 3000) {
+        log("resuming video paused by the switch to picture-in-picture");
+        v.play().catch(() => {});
+      }
     }
-    if (m.play) { const v = document.querySelector("video"); if (v) v.play().catch(() => {}); }
-  });
-  early.splice(0).forEach((m) => port.postMessage({ log: m }));
-} catch (e) { port = null; /* app not listening: background play still works */ }
+    if (was !== !!m.pip) log(m.pip ? "picture-in-picture: showing the video only" + (v ? "" : " (ERROR no video on page)") : "picture-in-picture: normal page");
+  }
+  if (m.play) { const v = document.querySelector("video"); if (v) v.play().catch(() => {}); }
+}
+
+let tries = 0;
+function connect() {
+  try {
+    const p = browser.runtime.connectNative("blockbridge");
+    p.onMessage.addListener(onAppMessage);
+    p.onDisconnect.addListener(() => {
+      if (port === p) port = null;
+      if (tries++ < 30) setTimeout(connect, Math.min(500 * tries, 5000));
+    });
+    port = p;
+    early.splice(0).forEach((m) => p.postMessage({ log: m }));
+    const v = document.querySelector("video");
+    if (v) sendSize(v);
+  } catch (e) {
+    port = null;
+    if (tries++ < 30) setTimeout(connect, Math.min(500 * tries, 5000));
+  }
+}
+connect();
