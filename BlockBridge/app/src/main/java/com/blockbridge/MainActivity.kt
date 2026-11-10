@@ -35,6 +35,7 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     companion object {
         const val EXTRA_START = "start"
+        const val VIDEO_PACKAGE = "com.blockbridge.video"
         /** Secret for this run: only BlockBridge's own tile/notification know it, so other apps
          *  can't switch protection on by opening this screen with EXTRA_START. */
         val startToken: String = java.util.UUID.randomUUID().toString()
@@ -284,23 +285,20 @@ class MainActivity : Activity() {
         }
         page.addView(pausedBanner, cardParams())
 
-        // YouTube mode
+        // BlockBridge Video (separate app)
         val yt = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = ripple(gradientRect(dp(20).toFloat(), 0xFFE11D48.toInt(), 0xFF8B5CF6.toInt()), dp(20).toFloat())
             setPadding(dp(16), dp(14), dp(16), dp(14))
             isClickable = true
-            setOnClickListener {
-                if (Gecko.supported) startActivity(Intent(this@MainActivity, YouTubeActivity::class.java))
-                else toast("YouTube mode needs a 64-bit phone (this one is 32-bit). Ad blocking, VPN and Tor still work.")
-            }
+            setOnClickListener { openVideoApp() }
         }
         yt.addView(TextView(this).apply { text = "▶"; textSize = 26f; setTextColor(Palette.TEXT); setPadding(0, 0, dp(14), 0) })
         val ytText = vbox()
         ytText.addView(TextView(this).apply { text = "YouTube — no ads"; textSize = 17f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT) })
         ytText.addView(TextView(this).apply {
-            text = "Firefox engine + uBlock Origin · log in once, stay logged in"; textSize = 12f; setTextColor(0xDDFFFFFF.toInt())
+            text = "Opens BlockBridge Video · uBlock Origin, background play, mini player"; textSize = 12f; setTextColor(0xDDFFFFFF.toInt())
         })
         yt.addView(ytText)
         page.addView(yt, cardParams())
@@ -1673,11 +1671,32 @@ class MainActivity : Activity() {
         }
         appendLine("Connections: ${ConnTracker.liveCount()} open · ${TrafficStats.connections.get()} total · ${TrafficStats.blockedConnections.get()} refused")
         appendLine("App exceptions: ${settings.exceptedApps.size} skip · ${settings.vpnBypassApps.size} no-VPN")
-        appendLine("YouTube mode: ${Gecko.status} · SponsorBlock ${Gecko.sponsor?.metaData?.version ?: "not installed"} · " +
-            "helper ${if (Gecko.plus != null) "ok" else "not loaded"} · playing ${if (YtMedia.session != null) (if (YtMedia.playing) "yes" else "paused") else "no"}")
+        appendLine("BlockBridge Video: ${videoAppVersion()?.let { "installed ($it)" } ?: "not installed"}")
         appendLine("Device: ${Perf.describe(this@MainActivity)}")
         append("Battery optimization: ${if (ignoringBattery()) "off (good)" else "on — Android may stop BlockBridge"}")
         TorClient.tailLog(this@MainActivity, 25)?.let { append("\n\nTor log (last lines):\n$it") }
+    }
+
+    private fun videoAppVersion(): String? =
+        runCatching { packageManager.getPackageInfo(VIDEO_PACKAGE, 0).versionName }.getOrNull()
+
+    /** YouTube without ads lives in its own app, BlockBridge Video: open it, or explain where to get it. */
+    private fun openVideoApp() {
+        packageManager.getLaunchIntentForPackage(VIDEO_PACKAGE)?.let { startActivity(it); return }
+        if (!android.os.Process.is64Bit()) {
+            toast("BlockBridge Video needs a 64-bit phone (this one is 32-bit). Ad blocking, VPN and Tor still work here.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Get BlockBridge Video")
+            .setMessage("YouTube without ads — uBlock Origin, SponsorBlock, background play, picture-in-picture " +
+                "and a mini player — is its own app now, so BlockBridge stays small.\n\n" +
+                "Download BlockBridgeVideo.apk from BlockBridge's release page and open it to install.")
+            .setPositiveButton("Open release page") { _, _ ->
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Updates.RELEASE_PAGE))) }
+            }
+            .setNegativeButton("Later", null)
+            .show()
     }
 
     /** Asks Android to let BlockBridge run unrestricted (asked once automatically). */

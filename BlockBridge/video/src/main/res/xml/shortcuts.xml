@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="subs" android:enabled="true"
+        android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_subs">
+        <intent android:action="android.intent.action.VIEW"
+            android:data="https://m.youtube.com/feed/subscriptions"
+            android:targetPackage="com.blockbridge.video"
+            android:targetClass="com.blockbridge.YouTubeActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="settings" android:enabled="true"
+        android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_settings">
+        <intent android:action="com.blockbridge.video.SETTINGS"
+            android:targetPackage="com.blockbridge.video"
+            android:targetClass="com.blockbridge.YouTubeActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="report" android:enabled="true"
+        android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/shortcut_report">
+        <intent android:action="com.blockbridge.video.REPORT"
+            android:targetPackage="com.blockbridge.video"
+            android:targetClass="com.blockbridge.YouTubeActivity" />
+    </shortcut>
+</shortcuts>

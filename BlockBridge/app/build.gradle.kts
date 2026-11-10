@@ -24,7 +24,7 @@ val hasReleaseKey = storePath != null && file(storePath).exists()
 
 android {
     namespace = "com.blockbridge"
-    // tor-android 0.4.9.6+ needs Android 37.1, GeckoView 159 needs 37.2
+    // tor-android 0.4.9.6+ needs Android 37.1
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }
@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "8.7"
+        versionCode = 25
+        versionName = "9.0"
 
         if (hasHev) {
             externalNativeBuild {
@@ -75,7 +75,6 @@ android {
         }
     }
 
-    // One APK per processor type (most phones: arm64-v8a) plus a universal one.
     // One APK for every phone: 64-bit and 32-bit ARM (all Android phones). BlockBridge checks
     // the phone's abilities when it runs (Perf.kt) and adapts. x86_64 (emulators, a few
     // Chromebooks) is left out — it would add ~100 MB for almost nobody.
@@ -85,19 +84,13 @@ android {
 
     // bbwg is an executable shipped as libbbwg.so; it must be extracted to run.
     packaging {
-        jniLibs {
-            useLegacyPackaging = true
-            // Firefox's engine (YouTube mode) only for 64-bit phones: the 32-bit copy is ~70 MB,
-            // and phones that can't run 64-bit apps are too weak for it anyway. Ad blocking, the
-            // VPN and Tor keep their 32-bit versions. YouTubeActivity checks Gecko.supported.
-            excludes += listOf("libxul", "libclearkey", "libcrashhelper", "libcrashtools", "libfreebl3",
-                "libgkcodecs", "liblgpllibs", "libmozavcodec", "libmozavutil", "libmozglue", "libnss3",
-                "libplugin-container", "libsoftokn3").map { "lib/armeabi-v7a/$it.so" }
-        }
+        jniLibs { useLegacyPackaging = true }
     }
     if (goExe != null && hasHev) {
         sourceSets.getByName("main").jniLibs.directories.add(wgOut.get().asFile.path)
     }
+    // Code shared with BlockBridge Video (logs, crash reports, device profile, updates, UI basics)
+    sourceSets.getByName("main").kotlin.directories.add(rootProject.file("common/src/main/java").path)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -114,8 +107,6 @@ dependencies {
     implementation("info.guardianproject:tor-android:0.4.9.14")
     // Tor bridges (Snowflake, obfs4/lyrebird) for networks that block Tor — Guardian Project, MIT/BSD
     implementation("com.netzarchitekten:IPtProxy:5.7.0")
-    // Firefox's engine for YouTube mode, running the real uBlock Origin (MPL-2.0)
-    implementation("org.mozilla.geckoview:geckoview:159.0.20261102144711")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // real org.json for JVM tests
     // Renders real screens on the JVM for screenshot checks (test only, not in the APK)

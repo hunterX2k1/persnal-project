@@ -180,11 +180,13 @@ object Gecko {
 }
 
 /**
- * YouTube mode: YouTube's mobile site in Firefox's engine with uBlock Origin, full-screen like
- * an app. You stay logged in. YouTube links from other apps open here.
+ * BlockBridge Video: YouTube's mobile site in Firefox's engine with uBlock Origin, full screen
+ * like the YouTube app (the site's own top bar and tabs). You stay logged in. YouTube links
+ * from other apps open here. BlockBridge's menu: the shield button added to YouTube's top bar,
+ * or long-press the app icon.
  *
- * Mini player: a playing video can shrink into a small floating player (⌄ button, swipe the top
- * bar down, or Back) while you keep browsing YouTube behind it. That's two pages: the one
+ * Mini player: a playing video can shrink into a small floating player (Back while a video
+ * plays) while you keep browsing YouTube behind it. That's two pages: the one
  * playing (moved into the small view) and a second one for browsing.
  */
 class YouTubeActivity : Activity() {
@@ -212,11 +214,8 @@ class YouTubeActivity : Activity() {
     private lateinit var miniCard: LinearLayout
     private lateinit var miniTitle: TextView
     private lateinit var miniPlay: TextView
-    private lateinit var minimizeBtn: TextView
-    private lateinit var bar: LinearLayout
-    private lateinit var title: TextView
     private lateinit var progress: ProgressBar
-    private var uboBadge: TextView? = null
+    private var backPressedAt = 0L
     private var fullScreen = false
     private val lowEnd by lazy { Perf.lowEnd(this) }
 
@@ -226,7 +225,7 @@ class YouTubeActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!Gecko.supported) {
-            Toast.makeText(this, "YouTube mode needs a 64-bit phone. Ad blocking, VPN and Tor still work.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "BlockBridge Video needs a 64-bit phone.", Toast.LENGTH_LONG).show()
             finish(); return
         }
         Gecko.runtime(this)
@@ -235,27 +234,25 @@ class YouTubeActivity : Activity() {
         session = newSession()
         geckoView = GeckoView(this).apply { setSession(this@YouTubeActivity.session) }
         miniView = GeckoView(this)
-        bar = topBar()
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progressTintList = ColorStateList.valueOf(Palette.CYAN)
             visibility = View.GONE
         }
         miniCard = miniPlayer()
+        // Like the YouTube app: the page fills the screen (YouTube's own top bar and tabs);
+        // a thin loading line on top; the mini player floats above.
         setContentView(FrameLayout(this).apply {
-            setBackgroundColor(Palette.BG)
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(bar)
-                addView(progress, LinearLayout.LayoutParams(-1, dp(3)))
-                addView(geckoView, LinearLayout.LayoutParams(-1, 0, 1f))
-            }, FrameLayout.LayoutParams(-1, -1))
+            addView(geckoView, FrameLayout.LayoutParams(-1, -1))
+            addView(progress, FrameLayout.LayoutParams(-1, dp(3), Gravity.TOP))
             addView(miniCard, FrameLayout.LayoutParams(miniWidth(), -2, Gravity.BOTTOM or Gravity.END).apply {
-                setMargins(dp(12), dp(12), dp(12), dp(12))
+                // above YouTube's bottom tab bar
+                setMargins(dp(12), dp(12), dp(12), dp(64))
             })
         })
 
         session.loadUri(startUrl(intent))
+        handleShortcut(intent)
         Gecko.onReady = { runOnUiThread { if (!isDestroyed) { pages.keys.forEach { attachAddons(it) }; checkHelper() } } }
         checkHelper()
         YtMedia.onChange = { runOnUiThread { if (!isDestroyed) { updatePip(); updateMini() } } }
@@ -264,9 +261,9 @@ class YouTubeActivity : Activity() {
             true
         }
         if (Gecko.ublock == null) Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
-        DiagLog.add("youtube", "YouTube mode opened${if (lowEnd) " (low-end phone: smooth mode)" else ""}")
+        DiagLog.add("youtube", "BlockBridge Video opened${if (lowEnd) " (low-end phone: smooth mode)" else ""}")
         Gecko.updateAddons(this, force = false) { }
-        Updates.checkDaily(this) { u -> runOnUiThread { if (!isDestroyed) offerAppUpdate(u) } }
+        Updates.checkDaily(this, Updates.VIDEO) { u -> runOnUiThread { if (!isDestroyed) offerAppUpdate(u) } }
         CrashGuard.takeReport(this)?.let { r ->
             AlertDialog.Builder(this)
                 .setTitle("BlockBridge stopped unexpectedly last time")
@@ -296,7 +293,6 @@ class YouTubeActivity : Activity() {
                     if (isDestroyed) return@runOnUiThread
                     // You opened another video while one plays in the mini player: it replaces it.
                     if (s === session && mini != null && isVideoUrl(url)) closeMini("another video opened")
-                    updateBarButtons()
                 }
             }
             override fun onLoadError(s: GeckoSession, uri: String?, error: org.mozilla.geckoview.WebRequestError): GeckoResult<String>? {
@@ -333,7 +329,6 @@ class YouTubeActivity : Activity() {
         contentDelegate = object : GeckoSession.ContentDelegate {
             override fun onTitleChange(s: GeckoSession, t: String?) {
                 page(s).title = t?.removeSuffix(" - YouTube") ?: "YouTube"
-                if (s === session) title.text = page(s).title
                 if (s === mini) updateMini()
             }
             override fun onFullScreen(s: GeckoSession, full: Boolean) { if (s === session) setFullScreen(full) }
@@ -385,7 +380,7 @@ class YouTubeActivity : Activity() {
 
     /** What YouTube mode is doing, for problem reports. */
     private fun summary() = buildString {
-        appendLine("YouTube mode: ${Gecko.status}")
+        appendLine("BlockBridge Video ${runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()}: ${Gecko.status}")
         appendLine("SponsorBlock: ${Gecko.sponsor?.metaData?.let { "${it.version} ${if (it.enabled) "on" else "off"}" } ?: "not installed"}")
         appendLine("Helper: ${if (Gecko.plus != null) "loaded" else "not loaded"} · connected to page: ${plusPort != null}")
         appendLine("Settings: background ${YtPrefs.background(this@YouTubeActivity)} · PiP ${YtPrefs.pip(this@YouTubeActivity)} · " +
@@ -395,11 +390,12 @@ class YouTubeActivity : Activity() {
         appendLine("Media: ${if (YtMedia.session == null) "none" else if (YtMedia.playing) "playing" else "paused"} · notification ${YtMediaService.instance != null}")
         appendLine("Mini player: ${if (mini != null) "open" else "closed"} · pages open: ${pages.size}")
         appendLine("PiP supported: ${packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)} · in PiP: $isInPictureInPictureMode")
-        append("Protection: ${if (ShieldVpnService.isRunning) "on" else "off"}")
+        append("A VPN (e.g. BlockBridge) is active: ${vpnActive()}")
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleShortcut(intent)
         intent.data?.let {
             if (mini != null) closeMini("a link was opened")
             session.loadUri(startUrl(intent))
@@ -408,52 +404,47 @@ class YouTubeActivity : Activity() {
 
     private fun startUrl(i: Intent?): String = youTubeStartUrl(i?.data)
 
-    private fun topBar(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setBackgroundColor(0xFF0E1426.toInt())
-        setPadding(dp(4), dp(4), dp(8), dp(4))
-        fun icon(text: String, desc: String, onClick: () -> Unit) = TextView(context).apply {
-            this.text = text; textSize = 20f; setTextColor(Palette.TEXT); gravity = Gravity.CENTER
-            contentDescription = desc
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setOnClickListener { onClick() }
-        }
-        addView(icon("←", "Back") { onBackPressed() })
-        title = TextView(context).apply {
-            text = "YouTube"; textSize = 15f; setTypeface(Typeface.DEFAULT_BOLD); setTextColor(Palette.TEXT)
-            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        minimizeBtn = icon("⌄", "Mini player") { minimize("button") }.apply { visibility = View.GONE }
-        addView(minimizeBtn)
-        addView(icon("⟳", "Reload") { session.reload() })
-        uboBadge = TextView(context).apply {
-            text = "uBO"; textSize = 12f; setTypeface(Typeface.DEFAULT_BOLD)
-            setTextColor(Palette.BG); gravity = Gravity.CENTER
-            background = gradientRect(dp(8).toFloat(), Palette.CYAN, Palette.VIOLET)
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            contentDescription = "uBlock Origin"
-            setOnClickListener { showUBlock() }
-        }
-        addView(uboBadge)
-        addView(icon("⋮", "Menu") { menu() })
-        // Swipe the bar down while a video plays: mini player.
-        var downY = 0f
-        setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> { downY = e.rawY; false }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (e.rawY - downY > dp(70) && canMinimize()) { minimize("swipe"); downY = Float.MAX_VALUE; true } else false
-                }
-                else -> false
+    /** BlockBridge's menu: opened from the shield button the helper adds to YouTube's top bar. */
+    private fun menu() {
+        val items = arrayOf("Settings (background play, PiP, SponsorBlock…)", "uBlock Origin", "uBlock Origin dashboard",
+            "SponsorBlock settings", "YouTube Music", "Report a problem (share logs)", "Check for updates",
+            "Clear YouTube login & data")
+        AlertDialog.Builder(this).setTitle(getString(com.blockbridge.video.R.string.app_name)).setItems(items) { _, which ->
+            when (which) {
+                0 -> plusSettings()
+                1 -> showUBlock()
+                2 -> Gecko.ublock?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
+                    ?: Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
+                3 -> Gecko.sponsor?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
+                    ?: Toast.makeText(this, "SponsorBlock is still installing — try again in a moment", Toast.LENGTH_LONG).show()
+                4 -> session.loadUri("https://music.youtube.com/")
+                5 -> CrashGuard.shareFullReport(this, "BlockBridge Video report", summary(), setOf("youtube", "yt-page"))
+                6 -> checkUpdates()
+                7 -> AlertDialog.Builder(this)
+                    .setMessage("Sign out of YouTube and delete its cookies and site data in this app?")
+                    .setPositiveButton("Clear") { _, _ ->
+                        closeMini("signed out")
+                        Gecko.runtime(this).storageController.clearData(
+                            org.mozilla.geckoview.StorageController.ClearFlags.ALL)
+                        session.loadUri("https://m.youtube.com/")
+                    }
+                    .setNegativeButton("Cancel", null).show()
             }
+        }.show()
+    }
+
+    /** Launcher shortcuts (long-press the app icon): Settings, Report a problem. */
+    private fun handleShortcut(i: Intent?) {
+        when (i?.action) {
+            "com.blockbridge.video.SETTINGS" -> plusSettings()
+            "com.blockbridge.video.REPORT" -> CrashGuard.shareFullReport(this, "BlockBridge Video report", summary(), setOf("youtube", "yt-page"))
         }
     }
 
-    private fun updateBarButtons() {
-        minimizeBtn.visibility = if (canMinimize()) View.VISIBLE else View.GONE
-    }
+    private fun vpnActive(): Boolean = runCatching {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+    }.getOrDefault(false)
 
     // ---- Mini player ----
 
@@ -547,7 +538,7 @@ class YouTubeActivity : Activity() {
             val m = dp(12).toFloat()
             // Card is laid out at the bottom-right; translation moves it from there.
             val minX = -(parent.width - miniCard.width - 2 * m)
-            val minY = -(parent.height - miniCard.height - 2 * m - bar.height)
+            val minY = -(parent.height - miniCard.height - m - dp(64) - dp(56)) // stay below YouTube's top bar
             val tx = if (miniCard.translationX < minX / 2) minX else 0f
             val ty = if (miniCard.translationY < minY / 2) minY else 0f
             miniCard.animate().translationX(tx).translationY(ty).alpha(1f).setDuration(if (lowEnd) 120 else 200).start()
@@ -572,10 +563,9 @@ class YouTubeActivity : Activity() {
         geckoView.setSession(browse)
         session = browse
         mini = playing
-        title.text = page(browse).title
         miniCard.translationX = 0f; miniCard.translationY = 0f; miniCard.alpha = 1f
         miniCard.visibility = View.VISIBLE
-        updateMini(); updateBarButtons(); tellPlus()
+        updateMini(); tellPlus()
         DiagLog.add("youtube", "mini player on ($how)")
     }
 
@@ -589,9 +579,8 @@ class YouTubeActivity : Activity() {
         session = m
         mini = null
         miniCard.visibility = View.GONE
-        title.text = page(m).title
         keepOrCloseSpare(browse)
-        updateBarButtons(); tellPlus()
+        tellPlus()
         DiagLog.add("youtube", "mini player expanded ($how)")
     }
 
@@ -604,7 +593,6 @@ class YouTubeActivity : Activity() {
         if (mediaOwner === m) { YtMedia.clear(applicationContext); mediaOwner = null }
         pages.remove(m)
         runCatching { m.close() }
-        updateBarButtons()
         DiagLog.add("youtube", "mini player closed ($why)")
     }
 
@@ -725,6 +713,7 @@ class YouTubeActivity : Activity() {
                         j.optString("log").takeIf { it.isNotEmpty() }?.let {
                             if (pageLogs++ < 300) DiagLog.add("yt-page", it.take(300))
                         }
+                        if (j.optBoolean("menu")) runOnUiThread { if (!isDestroyed) menu() }
                         j.optJSONArray("video")?.let { a ->
                             val w = a.optInt(0); val h = a.optInt(1)
                             if (w > 0 && h > 0 && (s === mediaOwner || mediaOwner == null)) runOnUiThread { videoW = w; videoH = h; updatePip() }
@@ -818,7 +807,6 @@ class YouTubeActivity : Activity() {
         super.onPictureInPictureModeChanged(inPip, newConfig)
         // The floating window shows the full-size page: bring the mini player's video there.
         if (inPip && mini != null && mediaOwner === mini) expand("picture-in-picture")
-        bar.visibility = if (inPip || fullScreen) View.GONE else View.VISIBLE
         progress.visibility = View.GONE
         if (inPip) miniCard.visibility = View.GONE else if (mini != null) miniCard.visibility = View.VISIBLE
         leftPip = !inPip
@@ -878,7 +866,6 @@ class YouTubeActivity : Activity() {
             override fun onBrowserAction(e: WebExtension, sess: GeckoSession?, action: WebExtension.Action) {
                 if (s !== session) return
                 uboAction = action
-                action.badgeText?.let { b -> runOnUiThread { uboBadge?.text = if (b.isBlank()) "uBO" else "uBO $b" } }
             }
             override fun onTogglePopup(e: WebExtension, action: WebExtension.Action): GeckoResult<GeckoSession> = popup()
             override fun onOpenPopup(e: WebExtension, action: WebExtension.Action): GeckoResult<GeckoSession> = popup()
@@ -905,46 +892,19 @@ class YouTubeActivity : Activity() {
         uboAction?.click() ?: Toast.makeText(this, "uBlock Origin is starting — try again in a moment", Toast.LENGTH_SHORT).show()
     }
 
-    private fun menu() {
-        val items = arrayOf("YouTube home", "YouTube Music", "YouTube Plus settings…", "Open uBlock Origin dashboard",
-            "SponsorBlock settings", "Clear YouTube login & data", "Report a problem (share logs)", "Check for updates")
-        AlertDialog.Builder(this).setItems(items) { _, which ->
-            when (which) {
-                0 -> session.loadUri("https://m.youtube.com/")
-                1 -> session.loadUri("https://music.youtube.com/")
-                2 -> plusSettings()
-                3 -> Gecko.ublock?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
-                    ?: Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
-                4 -> Gecko.sponsor?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
-                    ?: Toast.makeText(this, "SponsorBlock is still installing — try again in a moment", Toast.LENGTH_LONG).show()
-                5 -> AlertDialog.Builder(this)
-                    .setMessage("Sign out of YouTube and delete its cookies and site data in BlockBridge?")
-                    .setPositiveButton("Clear") { _, _ ->
-                        closeMini("signed out")
-                        Gecko.runtime(this).storageController.clearData(
-                            org.mozilla.geckoview.StorageController.ClearFlags.ALL)
-                        session.loadUri("https://m.youtube.com/")
-                    }
-                    .setNegativeButton("Cancel", null).show()
-                6 -> CrashGuard.shareFullReport(this, "BlockBridge YouTube mode report", summary(), setOf("youtube", "yt-page"))
-                7 -> checkUpdates()
-            }
-        }.show()
-    }
-
     /** Updates everything YouTube mode uses: uBlock Origin, SponsorBlock and BlockBridge itself. */
     private fun checkUpdates() {
         Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show()
         Gecko.updateAddons(this, force = true) { addons ->
             kotlin.concurrent.thread(name = "update-check", isDaemon = true) {
-                val app = runCatching { Updates.check(this) }
+                val app = runCatching { Updates.check(this, Updates.VIDEO) }
                 runOnUiThread {
                     if (isDestroyed) return@runOnUiThread
                     val u = app.getOrNull()
                     val appLine = when {
-                        u != null -> "BlockBridge: new version available (build ${u.versionCode})"
-                        app.isFailure -> "BlockBridge: couldn't check (${app.exceptionOrNull()?.message})"
-                        else -> "BlockBridge: up to date"
+                        u != null -> "BlockBridge Video: new version available (build ${u.versionCode})"
+                        app.isFailure -> "BlockBridge Video: couldn't check (${app.exceptionOrNull()?.message})"
+                        else -> "BlockBridge Video: up to date"
                     }
                     val b = AlertDialog.Builder(this).setTitle("Updates")
                         .setMessage("$addons\n$appLine\n\nThe YouTube page itself always loads the newest version from YouTube.")
@@ -958,8 +918,8 @@ class YouTubeActivity : Activity() {
 
     private fun offerAppUpdate(u: Updates.Available) {
         AlertDialog.Builder(this)
-            .setTitle("BlockBridge update available")
-            .setMessage("Build ${u.versionCode} is ready. It also updates YouTube mode (the Firefox engine and the YouTube Plus helper). Download and open it to install.")
+            .setTitle("BlockBridge Video update available")
+            .setMessage("Build ${u.versionCode} is ready (with the newest Firefox engine and YouTube Plus helper). Download and open it to install.")
             .setPositiveButton("Download") { _, _ -> runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url))) } }
             .setNegativeButton("Later", null).show()
     }
@@ -987,7 +947,6 @@ class YouTubeActivity : Activity() {
 
     private fun setFullScreen(full: Boolean) {
         fullScreen = full
-        bar.visibility = if (full) View.GONE else View.VISIBLE
         if (full) miniCard.visibility = View.GONE else if (mini != null) miniCard.visibility = View.VISIBLE
         window.insetsController?.let { c ->
             if (full) {
@@ -997,7 +956,6 @@ class YouTubeActivity : Activity() {
         }
         requestedOrientation = if (full) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        updateBarButtons()
     }
 
     @Deprecated("Deprecated in Java")
@@ -1009,6 +967,11 @@ class YouTubeActivity : Activity() {
             page(session).canGoBack -> session.goBack()
             // Mini player still playing: go to the home screen and keep playing in the background.
             mini != null && YtMedia.playing -> moveTaskToBack(true)
+            // Like the YouTube app: press Back twice to leave.
+            android.os.SystemClock.elapsedRealtime() - backPressedAt > 2_000 -> {
+                backPressedAt = android.os.SystemClock.elapsedRealtime()
+                Toast.makeText(this, "Press back again to exit", Toast.LENGTH_SHORT).show()
+            }
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
     }

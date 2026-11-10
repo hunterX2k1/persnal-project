@@ -36,3 +36,11 @@ html:has(video) video {
 /* YouTube's "get the app" banners and "open in app" links: BlockBridge is the app here. */
 ytm-mealbar-promo-renderer, ytm-app-promo-renderer, ytm-open-app-banner-renderer,
 a[href^="intent:"], a[href^="vnd.youtube:"] { display: none !important; }
+
+/* BlockBridge's menu button (shield) in YouTube's top bar */
+#bb-menu { border: 0; background: transparent; color: inherit; padding: 8px; margin: 0 2px;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+#bb-menu:active { background: rgba(128, 128, 128, .25); }
+#bb-menu.bb-menu-float { position: fixed; top: 6px; right: 6px; z-index: 2147483646;
+  background: rgba(15, 15, 15, .55); color: #fff; }
+html.bb-pip #bb-menu { display: none !important; }

@@ -1,6 +1,7 @@
 package com.blockbridge
 
 import android.app.Notification
+import com.blockbridge.video.R
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -174,7 +175,7 @@ class YtMediaService : Service() {
             Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, icon), label,
                 action(this, action, req)).build()
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_shield)
+            .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle(m.title.ifBlank { "YouTube" })
             .setContentText(m.artist.ifBlank { "BlockBridge · no ads" })
             .apply { m.artwork?.let { setLargeIcon(it) } }

@@ -102,6 +102,35 @@ function hideAppPromos(root) {
   }
 }
 
+// BlockBridge's menu button (shield), placed in YouTube's top bar next to search. If YouTube
+// changes its page and the bar isn't found, a small floating shield is shown instead.
+const SHIELD = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">' +
+  '<path fill="currentColor" d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z M10 8v8l6-4z"/></svg>';
+const pageStart = Date.now();
+function openMenu(e) {
+  e.preventDefault(); e.stopPropagation();
+  try { if (port) port.postMessage({ menu: true }); else log("ERROR menu: app not connected"); } catch (err) {}
+}
+function addMenuButton() {
+  if (window.top !== window || !document.body) return;
+  if (document.getElementById("bb-menu")) return;
+  const bar = document.querySelector(
+    "ytm-mobile-topbar-renderer .mobile-topbar-header-content, .mobile-topbar-header-content, ytm-mobile-topbar-renderer header, header.mobile-topbar-header");
+  const b = document.createElement("button");
+  b.id = "bb-menu";
+  b.setAttribute("aria-label", "BlockBridge menu");
+  b.innerHTML = SHIELD;
+  b.addEventListener("click", openMenu, true);
+  if (bar) {
+    b.className = "bb-menu-inline";
+    bar.appendChild(b);
+  } else if (Date.now() - pageStart > 5000) {
+    b.className = "bb-menu-float";
+    document.body.appendChild(b);
+    log("YouTube's top bar not found — showing the floating menu button");
+  }
+}
+
 // Page changes are checked at most every 400 ms (not on every change) — lighter on slow phones.
 let scheduled = false;
 new MutationObserver(() => {
@@ -111,6 +140,7 @@ new MutationObserver(() => {
     scheduled = false;
     try { autoContinue(document); } catch (e) { log("ERROR auto-continue: " + e); }
     try { hideAppPromos(document); } catch (e) { log("ERROR open-app filter: " + e); }
+    try { addMenuButton(); } catch (e) { log("ERROR menu button: " + e); }
   }, 400);
 }).observe(document, { childList: true, subtree: true });
 

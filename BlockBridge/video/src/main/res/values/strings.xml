@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlockBridge Video</string>
+    <string name="shortcut_subs">Subscriptions</string>
+    <string name="shortcut_settings">Settings</string>
+    <string name="shortcut_report">Report a problem</string>
+</resources>

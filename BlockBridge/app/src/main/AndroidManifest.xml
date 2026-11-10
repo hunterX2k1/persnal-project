@@ -9,11 +9,11 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <!-- List launchable apps for the app exception picker -->
     <queries>
         <package android:name="org.torproject.android" />
+        <package android:name="com.blockbridge.video" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -38,29 +38,6 @@
             </intent-filter>
         </activity>
 
-        <!-- YouTube mode: YouTube in Firefox's engine with uBlock Origin. Can open YouTube links. -->
-        <activity
-            android:name=".YouTubeActivity"
-            android:exported="true"
-            android:label="YouTube (no ads)"
-            android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:supportsPictureInPicture="true"
-            android:resizeableActivity="true"
-            android:theme="@style/AppTheme">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" />
-                <data android:scheme="http" />
-                <data android:host="youtube.com" />
-                <data android:host="www.youtube.com" />
-                <data android:host="m.youtube.com" />
-                <data android:host="music.youtube.com" />
-                <data android:host="youtu.be" />
-            </intent-filter>
-        </activity>
 
         <service
             android:name=".ShieldVpnService"
@@ -139,18 +116,5 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <service
-            android:name=".YtMediaService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
-        <service
-            android:name=".GeckoCrashService"
-            android:exported="false"
-            android:process=":crash"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Saves a crash report after the built-in browser engine crashes" />
-        </service>
     </application>
 </manifest>

@@ -57,12 +57,14 @@ jobs:
       - name: Rename APKs
         run: |
           cp app/build/outputs/apk/release/app-release.apk BlockBridge.apk
+          cp video/build/outputs/apk/release/video-release.apk BlockBridgeVideo.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: BlockBridge-apk
           path: |
             BlockBridge/BlockBridge.apk
+            BlockBridge/BlockBridgeVideo.apk
 
       # Phone-friendly download link: Releases › "BlockBridge (latest build)"
       - name: Publish latest release
@@ -71,8 +73,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete blockbridge-latest --yes --cleanup-tag || true
-          gh release create blockbridge-latest BlockBridge.apk \
+          gh release create blockbridge-latest BlockBridge.apk BlockBridgeVideo.apk \
             --target "$GITHUB_SHA" \
             --title "BlockBridge (latest build)" \
-            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Download BlockBridge.apk (one APK for every phone; it adapts to the phone) and open it to install. versionCode=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)" \
+            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. BlockBridge.apk: ad blocking, VPN and Tor for every phone. BlockBridgeVideo.apk: YouTube without ads (64-bit phones). Download and open to install. versionCode=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts) videoVersionCode=$(grep -oP 'versionCode = \K[0-9]+' video/build.gradle.kts)" \
             --prerelease
