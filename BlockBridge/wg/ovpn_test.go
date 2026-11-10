@@ -27,3 +27,20 @@ func TestIPPacketLen(t *testing.T) {
 		t.Fatal("split failed")
 	}
 }
+
+// A TLS handshake failure ends the connection attempt at once with its real reason.
+func TestHandshakeFailureAbortsWithReason(t *testing.T) {
+	var got error
+	abort := func(err error) { got = err }
+	ovpnAbort.Store(&abort)
+	defer ovpnAbort.Store(nil)
+
+	warn("tlssession: worker: something harmless")
+	if got != nil {
+		t.Fatalf("ordinary warning aborted: %v", got)
+	}
+	warn("tlssession: worker: handshake failure: cannot verify chain: x509: certificate signed by unknown authority")
+	if got == nil || got.Error() != "cannot verify chain: x509: certificate signed by unknown authority" {
+		t.Fatalf("got %v", got)
+	}
+}

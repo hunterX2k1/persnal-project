@@ -137,7 +137,7 @@ class ShieldVpnService : VpnService() {
         val ok = VpnClient.startAll(this, profiles)
         StateBus.changed()
         if (!ok) {
-            DiagLog.add("vpn", "connect failed: ${VpnClient.error}")
+            DiagLog.add("vpn", "connect failed: ${VpnClient.error ?: "stopped (another server was chosen)"}")
             return // the supervisor retries with backoff
         }
         setDnsVia(VpnClient.primary)

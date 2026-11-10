@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	ovpnconfig "github.com/ooni/minivpn/pkg/config"
@@ -33,8 +35,23 @@ func dbg(f string, v ...any) {
 		fmt.Fprintf(os.Stderr, "openvpn: "+f+"\n", v...)
 	}
 }
-func (quietLogger) Warn(m string)            { fmt.Fprintln(os.Stderr, "openvpn:", m) }
-func (quietLogger) Warnf(f string, v ...any) { fmt.Fprintf(os.Stderr, "openvpn: "+f+"\n", v...) }
+func (quietLogger) Warn(m string)            { warn(m) }
+func (quietLogger) Warnf(f string, v ...any) { warn(fmt.Sprintf(f, v...)) }
+
+// ovpnAbort, while connecting, ends the attempt at once (instead of waiting for the timeout).
+var ovpnAbort atomic.Pointer[func(error)]
+
+func warn(m string) {
+	fmt.Fprintln(os.Stderr, "openvpn:", m)
+	// A failed TLS handshake won't fix itself (bad certificate, wrong key…): give up now and
+	// report why, rather than "no response" after the full timeout.
+	if i := strings.Index(m, "handshake failure"); i >= 0 {
+		if abort := ovpnAbort.Load(); abort != nil {
+			reason := strings.TrimPrefix(strings.TrimPrefix(m[i:], "handshake failure"), ":")
+			(*abort)(errors.New(strings.TrimSpace(reason)))
+		}
+	}
+}
 
 // ovpnLink is a running OpenVPN tunnel; done is closed when it goes down.
 type ovpnLink struct {
@@ -54,10 +71,17 @@ func startOpenVPN(path, listen string, dialer tunnel.SimpleDialer) (*ovpnLink, n
 	}
 	cfg := ovpnconfig.NewConfig(ovpnconfig.WithOpenVPNOptions(opts), ovpnconfig.WithLogger(quietLogger{}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	base, abort := context.WithCancelCause(context.Background())
+	ctx, cancel := context.WithTimeout(base, 40*time.Second)
 	defer cancel()
+	abortFn := func(err error) { abort(err) }
+	ovpnAbort.Store(&abortFn)
 	t, err := tunnel.Start(ctx, dialer, cfg)
+	ovpnAbort.Store(nil)
 	if err != nil {
+		if cause := context.Cause(base); cause != nil && !errors.Is(cause, context.Canceled) {
+			return nil, nil, fmt.Errorf("OpenVPN handshake failed: %v", cause)
+		}
 		return nil, nil, fmt.Errorf("OpenVPN connect: %w", err)
 	}
 

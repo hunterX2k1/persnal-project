@@ -36,4 +36,32 @@ class CrashReportTest {
         val h = CrashGuard.header(RuntimeEnvironment.getApplication())
         assertTrue(h.startsWith("BlockBridge ") && "Android" in h)
     }
+
+    @Test fun reportPutsProblemAreaFirstAndKeepsOnlySystemErrors() {
+        val log = listOf(
+            "11-10 07:53:00.000 [tor] bootstrap 50%",
+            "11-10 07:54:00.000 [youtube] picture-in-picture on",
+            "11-10 07:54:01.000 [yt-page] YouTube paused while entering picture-in-picture — resuming",
+            "11-10 07:55:00.000 [vpn] connecting",
+        )
+        val crashes = "=".repeat(40) + "\nnewest crash\n\n" + "=".repeat(40) + "\nolder crash\n"
+        val sys = "11-10 07:54:00.100  1234  1250 I GeckoView: chatter\n" +
+            "11-10 07:54:00.200  1234  1250 E GeckoConsole: real error\n" +
+            "11-10 07:54:00.300  1234  1250 W ActivityTaskManager: pip warning"
+        val r = CrashGuard.buildReport("HEADER", "SUMMARY", log, crashes, sys, setOf("youtube", "yt-page"))
+        val focus = r.substringAfter("youtube/yt-page log").substringBefore("---- Debug log")
+        assertTrue("picture-in-picture on" in focus && "resuming" in focus && "bootstrap" !in focus)
+        assertTrue(r.indexOf("youtube/yt-page log") < r.indexOf("---- Debug log"))
+        assertTrue("newest crash" in r && "older crash" !in r)
+        assertTrue("real error" in r && "pip warning" in r && "chatter" !in r)
+    }
+
+    @Test fun repeatedLinesAreCollapsed() {
+        DiagLog.clear()
+        repeat(5) { DiagLog.add("vpn", "same warning") }
+        DiagLog.add("vpn", "different")
+        val t = DiagLog.text()
+        assertTrue(Regex("same warning").findAll(t).count() == 1)
+        assertTrue("repeated 4 more times" in t)
+    }
 }

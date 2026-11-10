@@ -33,7 +33,9 @@ jobs:
 
       - name: Test VPN helper (bbwg)
         working-directory: BlockBridge/wg
-        run: go test -race ./...
+        run: |
+          go test -race ./...
+          (cd third_party/minivpn && go test ./internal/tlssession/ -run TestVerifyUsesServerIntermediates)
 
       - name: Release signing key (from secrets)
         env:

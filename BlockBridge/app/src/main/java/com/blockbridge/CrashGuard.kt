@@ -31,7 +31,15 @@ object CrashGuard {
     fun install(ctx: Context) {
         dir = ctx.filesDir
         DiagLog.persistTo(logFile)
-        DiagLog.add("app", "started (${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE})")
+        val version = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()
+        val proc = if (Build.VERSION.SDK_INT >= 28) Application.getProcessName() else ""
+        val part = when {
+            proc.endsWith(":tor") -> "Tor process"
+            proc.endsWith(":crash") -> "crash recorder"
+            proc.contains(":") -> "process ${proc.substringAfter(':')}"
+            else -> "app"
+        }
+        DiagLog.add("app", "$part started · BlockBridge $version (${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE})")
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching {
@@ -138,20 +146,40 @@ object CrashGuard {
      * A full problem report: [summary], the saved debug log, recent crashes and the system log.
      * Built off the main thread, then shared (text) with any app — email, WhatsApp, Drive…
      */
-    fun shareFullReport(a: android.app.Activity, subject: String, summary: String) {
+    fun shareFullReport(a: android.app.Activity, subject: String, summary: String, focusTags: Set<String> = emptySet()) {
         android.widget.Toast.makeText(a, "Collecting logs…", android.widget.Toast.LENGTH_SHORT).show()
         Thread {
-            val text = buildString {
-                appendLine(header(a)); appendLine()
-                appendLine(summary); appendLine()
-                appendLine("---- Debug log ----")
-                appendLine(runCatching { logFile.readText().takeLast(80_000) }.getOrDefault(DiagLog.text()))
-                history()?.let { appendLine(); appendLine("---- Recent crashes ----"); appendLine(it.take(30_000)) }
-                appendLine(); appendLine("---- System log (logcat) ----")
-                append(systemLog().takeLast(120_000))
-            }
+            val text = buildReport(header(a), summary,
+                runCatching { logFile.readLines() }.getOrDefault(DiagLog.text().lines()), history(), systemLog(), focusTags)
             a.runOnUiThread { if (!a.isFinishing) share(a, subject, text) }
         }.start()
+    }
+
+    /**
+     * A report short enough to paste into a chat in full: the summary, the lines about the
+     * problem area ([focusTags]) first, then the most recent log, the last crash, and only the
+     * warnings/errors from the system log.
+     */
+    internal fun buildReport(header: String, summary: String, log: List<String>, crashes: String?,
+                             systemLog: String, focusTags: Set<String>): String = buildString {
+        appendLine(header); appendLine()
+        appendLine(summary.trim()); appendLine()
+        if (focusTags.isNotEmpty()) {
+            val focus = log.filter { l -> focusTags.any { "[$it]" in l } }.takeLast(150)
+            appendLine("---- ${focusTags.joinToString("/")} log (latest ${focus.size} lines) ----")
+            focus.forEach(::appendLine); appendLine()
+        }
+        val recent = log.filter { it.isNotBlank() }.takeLast(200)
+        appendLine("---- Debug log (latest ${recent.size} lines) ----")
+        recent.forEach(::appendLine)
+        crashes?.let { c ->
+            val last = c.split("=".repeat(40)).map { it.trim() }.firstOrNull { it.isNotEmpty() }
+            if (last != null) { appendLine(); appendLine("---- Last crash ----"); appendLine(last.take(8_000)) }
+        }
+        // Warnings, errors and fatal lines only (threadtime format: "date time pid tid LEVEL tag: msg").
+        val important = systemLog.lines().filter { Regex("^\\S+ \\S+\\s+\\d+\\s+\\d+ [WEF] ").containsMatchIn(it) }.takeLast(150)
+        appendLine(); appendLine("---- System log: warnings & errors (latest ${important.size}) ----")
+        important.forEach(::appendLine)
     }
 
     fun share(a: android.app.Activity, subject: String, text: String) {

@@ -17,15 +17,37 @@ object DiagLog {
         file = f
         runCatching { if (f.length() > 200_000) f.writeText(f.readText().takeLast(100_000)) }
     }
-    private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
+    private var repeats = 0
 
     fun add(tag: String, msg: String) {
         synchronized(lines) {
-            val l = Line(System.currentTimeMillis(), tag, msg.take(500))
+            val m = msg.take(500)
+            val last = lines.peekLast()
+            // The same line again (e.g. a retry loop): count it instead of flooding the log.
+            if (last != null && last.tag == tag && last.msg == m && System.currentTimeMillis() - last.time < 600_000) {
+                repeats++
+                return
+            }
+            flushRepeats()
+            val l = Line(System.currentTimeMillis(), tag, m)
             lines.addLast(l)
             while (lines.size > 400) lines.removeFirst()
-            file?.let { f -> runCatching { f.appendText("${fmt.format(Date(l.time))} [${l.tag}] ${l.msg}\n") } }
+            write(l)
         }
+    }
+
+    private fun flushRepeats() {
+        if (repeats == 0) return
+        val last = lines.peekLast()
+        val l = Line(System.currentTimeMillis(), last?.tag ?: "log", "(previous line repeated $repeats more times)")
+        repeats = 0
+        lines.addLast(l)
+        write(l)
+    }
+
+    private fun write(l: Line) {
+        file?.let { f -> runCatching { f.appendText("${fmt.format(Date(l.time))} [${l.tag}] ${l.msg}\n") } }
     }
 
     fun error(tag: String, msg: String, e: Throwable? = null) =
@@ -33,7 +55,7 @@ object DiagLog {
 
     fun all(): List<Line> = synchronized(lines) { lines.toList() }
 
-    fun text(): String = all().joinToString("\n") { "${fmt.format(Date(it.time))} [${it.tag}] ${it.msg}" }
+    fun text(): String = synchronized(lines) { flushRepeats(); lines.toList() }.joinToString("\n") { "${fmt.format(Date(it.time))} [${it.tag}] ${it.msg}" }
 
     fun clear() = synchronized(lines) { lines.clear() }
 }

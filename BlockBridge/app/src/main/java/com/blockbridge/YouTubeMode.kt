@@ -571,7 +571,7 @@ class YouTubeActivity : Activity() {
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl())), "Open with"))
                 }
                 8 -> checkUpdates()
-                7 -> CrashGuard.shareFullReport(this, "BlockBridge YouTube mode report", summary())
+                7 -> CrashGuard.shareFullReport(this, "BlockBridge YouTube mode report", summary(), setOf("youtube", "yt-page"))
                 6 -> AlertDialog.Builder(this)
                     .setMessage("Sign out of YouTube and delete its cookies and site data in BlockBridge?")
                     .setPositiveButton("Clear") { _, _ ->
