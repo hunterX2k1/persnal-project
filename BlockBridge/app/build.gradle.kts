@@ -33,8 +33,8 @@ android {
         applicationId = "com.blockbridge"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "8.5"
+        versionCode = 23
+        versionName = "8.6"
 
         if (hasHev) {
             externalNativeBuild {
@@ -76,14 +76,11 @@ android {
     }
 
     // One APK per processor type (most phones: arm64-v8a) plus a universal one.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            // Firefox's engine (YouTube mode) makes a universal APK over 200 MB; ship per-ABI only.
-            isUniversalApk = false
-        }
+    // One APK for every phone: 64-bit and 32-bit ARM (all Android phones). BlockBridge checks
+    // the phone's abilities when it runs (Perf.kt) and adapts. x86_64 (emulators, a few
+    // Chromebooks) is left out — it would add ~100 MB for almost nobody.
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     // bbwg is an executable shipped as libbbwg.so; it must be extracted to run.
@@ -129,7 +126,6 @@ val buildBbwg = tasks.register("buildBbwg") {
         val targets = mapOf(
             "arm64-v8a" to Triple("arm64", "aarch64-linux-android26-clang", ""),
             "armeabi-v7a" to Triple("arm", "armv7a-linux-androideabi26-clang", "7"),
-            "x86_64" to Triple("amd64", "x86_64-linux-android26-clang", ""),
         )
         for ((abi, t) in targets) {
             val out = wgOut.get().file("$abi/libbbwg.so").asFile

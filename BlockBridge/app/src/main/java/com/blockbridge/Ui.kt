@@ -84,12 +84,14 @@ class PowerButton(context: Context) : View(context) {
             if ((on || busy) && frameDue()) invalidate()
         }
     }
-    // Low-end phones: redraw ~20 times a second instead of every frame (60–120).
-    private val lowEnd = Perf.lowEnd(context)
+    // Low-end phones and Battery Saver: redraw ~20 times a second instead of every frame (60–120).
+    private var saving = false
+    private var savingCheckedAt = 0L
     private var lastFrame = 0L
     private fun frameDue(): Boolean {
-        if (!lowEnd) return true
         val now = android.os.SystemClock.uptimeMillis()
+        if (now - savingCheckedAt > 5_000) { savingCheckedAt = now; saving = Perf.saving(context) }
+        if (!saving) return true
         if (now - lastFrame < 50) return false
         lastFrame = now; return true
     }

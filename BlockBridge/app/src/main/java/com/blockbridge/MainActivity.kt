@@ -1669,6 +1669,7 @@ class MainActivity : Activity() {
         appendLine("App exceptions: ${settings.exceptedApps.size} skip · ${settings.vpnBypassApps.size} no-VPN")
         appendLine("YouTube mode: ${Gecko.status} · SponsorBlock ${Gecko.sponsor?.metaData?.version ?: "not installed"} · " +
             "helper ${if (Gecko.plus != null) "ok" else "not loaded"} · playing ${if (YtMedia.session != null) (if (YtMedia.playing) "yes" else "paused") else "no"}")
+        appendLine("Device: ${Perf.describe(this@MainActivity)}")
         append("Battery optimization: ${if (ignoringBattery()) "off (good)" else "on — Android may stop BlockBridge"}")
         TorClient.tailLog(this@MainActivity, 25)?.let { append("\n\nTor log (last lines):\n$it") }
     }

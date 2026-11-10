@@ -22,8 +22,9 @@ object YtPrefs {
     fun pip(ctx: Context) = p(ctx).getBoolean("yt_pip", true)
     fun sponsorBlock(ctx: Context) = p(ctx).getBoolean("yt_sponsor", true)
     fun debug(ctx: Context) = p(ctx).getBoolean("yt_debug", false)
-    /** Smooth mode: H.264 video (hardware-decoded on every phone). On by default on low-end phones. */
-    fun smooth(ctx: Context) = p(ctx).getBoolean("yt_smooth", Perf.lowEnd(ctx))
+    /** Smooth mode: H.264 video (hardware-decoded on every phone). On by default on low-end
+     *  phones and phones without a VP9 video chip (see [Perf]). */
+    fun smooth(ctx: Context) = p(ctx).getBoolean("yt_smooth", Perf.smoothByDefault(ctx))
     fun set(ctx: Context, key: String, on: Boolean) = p(ctx).edit().putBoolean(key, on).apply()
 }
 

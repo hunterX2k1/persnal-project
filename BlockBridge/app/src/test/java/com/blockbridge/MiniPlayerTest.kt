@@ -38,4 +38,16 @@ class MiniPlayerTest {
         assertTrue(Perf.isLowEnd(false, 6_000_000_000L, 4))   // only 4 cores
         assertFalse(Perf.isLowEnd(false, 12_000_000_000L, 8)) // e.g. edge 60 pro
     }
+
+    @Test fun smoothModeFollowsTheVideoChip() {
+        assertFalse(Perf.smoothByDefault(lowEnd = false, hwVp9 = true))  // strong phone with a VP9 chip: full quality formats
+        assertTrue(Perf.smoothByDefault(lowEnd = false, hwVp9 = false))  // no VP9 chip: H.264
+        assertTrue(Perf.smoothByDefault(lowEnd = true, hwVp9 = true))    // low-end: H.264 regardless
+    }
+
+    @Test fun profileOnThisDeviceIsReadable() {
+        val ctx = org.robolectric.RuntimeEnvironment.getApplication()
+        val d = Perf.describe(ctx)
+        assertTrue(d.contains("RAM") && d.contains("video chip"))
+    }
 }
