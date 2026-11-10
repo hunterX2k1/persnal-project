@@ -196,52 +196,88 @@ class YouTubeActivity : Activity() {
         var url = "https://m.youtube.com/"
         var title = "YouTube"
         var canGoBack = false
+        /** The last non-video page here: what shows behind the mini player. */
+        var lastBrowseUrl = "https://m.youtube.com/"
+        /** Where the video sits on a watch page, in pixels (reported by the helper). */
+        var vTop = 0f
+        var vHeight = 0f
     }
 
-    private enum class Player { NONE, FULL, MINI }
+    /**
+     * A YouTube page and the view that shows it. There are two; their roles swap: the one you
+     * watch in can shrink into the floating mini player while the other one shows YouTube behind.
+     * Videos play inside the page itself (YouTube's own navigation): instant, autoplaying.
+     */
+    private inner class Slot(val session: GeckoSession) {
+        // TextureView: the page can be shrunk and moved smoothly (GPU transform, no surface rebuilt).
+        val view = GeckoView(this@YouTubeActivity).apply {
+            setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW)
+            setSession(this@Slot.session)
+        }
+        /** Covers the rest of the watch page (below the video) while it shrinks. */
+        val fade = View(this@YouTubeActivity).apply { setBackgroundColor(pageColor); alpha = 0f }
+        val box = SlotBox(this)
+        var pos = 0f
+        var cropTop = 0f
+        var cropBottom = 0f
+        var corner = 0f
+        val page get() = page(session)
+        init {
+            box.addView(view, FrameLayout.LayoutParams(-1, -1))
+            box.addView(fade, FrameLayout.LayoutParams(-1, -1))
+        }
+    }
+
+    private inner class SlotBox(val slot: Slot) : FrameLayout(this@YouTubeActivity) {
+        init {
+            setBackgroundColor(pageColor)
+            // crop to the video with rounded corners while shrinking / floating
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    if (slot.pos <= 0f) outline.setRect(0, 0, view.width, view.height)
+                    else outline.setRoundRect(0, slot.cropTop.toInt(), view.width, slot.cropBottom.toInt(), slot.corner)
+                }
+            }
+            clipToOutline = true
+        }
+        // The floating player's touches go to its card; nothing goes to a page mid-animation.
+        override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean =
+            if (slot === mini || anim != null) false else super.dispatchTouchEvent(e)
+    }
 
     private val pages = HashMap<GeckoSession, Page>()
-    /** The YouTube page you browse (home, search, subscriptions, channels…). */
-    private lateinit var browse: GeckoSession
-    /** The watch page, in the player layer above (created on first video). */
-    private var player: GeckoSession? = null
-    private var state = Player.NONE
-    /** The page in front: the player when it's open full size, otherwise the browsing page. */
-    private val session: GeckoSession get() = player?.takeIf { state == Player.FULL } ?: browse
+    private lateinit var slotA: Slot
+    private lateinit var slotB: Slot
+    /** The page shown full size. */
+    private lateinit var main: Slot
+    /** The page in the floating mini player, if any. */
+    private var mini: Slot? = null
+    /** The other slot: the mini player, or (when there's none) a page kept ready behind. */
+    private val other: Slot get() = if (main === slotA) slotB else slotA
+    private val session: GeckoSession get() = main.session
     /** The page whose video the notification/PiP/lock-screen buttons control. */
     private var mediaOwner: GeckoSession? = null
 
     private lateinit var root: Root
-    private lateinit var browseView: GeckoView
-    private lateinit var playerView: GeckoView
-    private lateinit var playerBox: PlayerBox
     private lateinit var miniCard: LinearLayout
     private lateinit var miniVideoSpace: View
-    /** Dims the browsing page behind the player; fades away as the player shrinks. */
+    /** Dims the page behind while a video shrinks or grows. */
     private lateinit var scrim: View
-    /** Covers the rest of the watch page (below the video) as it fades out while shrinking. */
-    private lateinit var belowFade: View
     private lateinit var miniTitle: TextView
     private lateinit var miniPlay: TextView
     private lateinit var progress: ProgressBar
     private var backPressedAt = 0L
     private var fullScreen = false
     private val lowEnd by lazy { Perf.lowEnd(this) }
-
-    /** Where the video sits on the watch page, in pixels (reported by the helper). */
-    private var vTop = 0f
-    private var vHeight = 0f
-    /** 0 = player full size, 1 = mini bar. */
-    private var pos = 0f
     private var anim: android.animation.ValueAnimator? = null
     private var restoreMiniAfterPip = false
 
     private fun page(s: GeckoSession) = pages.getOrPut(s) { Page() }
-    private val plusPort get() = pages[browse]?.port
+    private fun slotOf(s: GeckoSession): Slot? = when (s) { slotA.session -> slotA; slotB.session -> slotB; else -> null }
+    private val plusPort get() = pages[session]?.port
     private val isNight get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     private val pageColor get() = if (isNight) 0xFF0F0F0F.toInt() else 0xFFFFFFFF.toInt()
     private val textColor get() = if (isNight) 0xFFF1F1F1.toInt() else 0xFF0F0F0F.toInt()
-    private val subColor get() = if (isNight) 0xFFAAAAAA.toInt() else 0xFF606060.toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -252,36 +288,30 @@ class YouTubeActivity : Activity() {
         Perf.preferHighRefreshRate(this)
         Gecko.runtime(this)
 
-        browse = newSession()
-        browseView = GeckoView(this).apply { setSession(browse) }
-        // The player draws into a TextureView so it can shrink and move smoothly (GPU transform,
-        // no surface rebuilt) when it turns into the mini bar.
-        playerView = GeckoView(this).apply { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
-        belowFade = View(this).apply { setBackgroundColor(pageColor); alpha = 0f }
-        playerBox = PlayerBox().apply {
-            visibility = View.GONE
-            setBackgroundColor(pageColor)
-            addView(playerView, FrameLayout.LayoutParams(-1, -1))
-            addView(belowFade, FrameLayout.LayoutParams(-1, -1))
-        }
-        scrim = View(this).apply { setBackgroundColor(0xFF000000.toInt()); alpha = 0f; visibility = View.GONE }
+        slotA = Slot(newSession())
+        slotB = Slot(newSession())
+        main = slotA
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progressTintList = ColorStateList.valueOf(Palette.CYAN)
             visibility = View.GONE
+            translationZ = dp(30).toFloat()
         }
+        scrim = View(this).apply { setBackgroundColor(0xFF000000.toInt()); alpha = 0f; visibility = View.GONE }
         miniCard = miniCard()
         root = Root().apply {
-            addView(browseView, FrameLayout.LayoutParams(-1, -1))
+            addView(slotA.box, FrameLayout.LayoutParams(-1, -1))
+            addView(slotB.box, FrameLayout.LayoutParams(-1, -1))
             addView(scrim, FrameLayout.LayoutParams(-1, -1))
             addView(miniCard, FrameLayout.LayoutParams(dp(200), dp(160), Gravity.TOP or Gravity.START))
-            addView(playerBox, FrameLayout.LayoutParams(-1, -1))
             addView(progress, FrameLayout.LayoutParams(-1, dp(2), Gravity.TOP))
         }
         setContentView(root)
+        order()
 
         val start = startUrl(intent)
-        if (isWatchUrl(start)) { browse.loadUri("https://m.youtube.com/"); openVideo(start, "link") } else browse.loadUri(start)
+        main.session.loadUri(start)
+        if (isWatchUrl(start)) requestAutoplay(start)
         handleShortcut(intent)
         Gecko.onReady = { runOnUiThread { if (!isDestroyed) { pages.keys.forEach { attachAddons(it) }; checkHelper() } } }
         checkHelper()
@@ -304,6 +334,18 @@ class YouTubeActivity : Activity() {
         }
     }
 
+    /** Stacking: the floating player on top, then its card, the dim, the main page; the spare page hidden. */
+    private fun order() {
+        val m = mini
+        main.box.translationZ = 0f
+        main.box.visibility = View.VISIBLE
+        other.box.translationZ = if (m != null) dp(12).toFloat() else -dp(1).toFloat()
+        // the spare page is fully covered: don't draw it at all
+        other.box.visibility = if (m != null) View.VISIBLE else View.INVISIBLE
+        scrim.translationZ = dp(6).toFloat()
+        miniCard.translationZ = dp(10).toFloat()
+    }
+
     /** A new YouTube page with all of the app's handlers. */
     private fun newSession(): GeckoSession = GeckoSession().apply {
         val me = this
@@ -312,12 +354,15 @@ class YouTubeActivity : Activity() {
             override fun onCanGoBack(s: GeckoSession, value: Boolean) { page(s).canGoBack = value }
             override fun onLocationChange(s: GeckoSession, url: String?, perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
                 if (url == null) return
-                page(s).url = url
+                val p = page(s)
+                p.url = url
+                if (!isWatchUrl(url) && url.startsWith("http")) p.lastBrowseUrl = url
                 // host and page type only (no video IDs or searches) — enough to follow what happened
                 runCatching { Uri.parse(url) }.getOrNull()?.let { u ->
-                    DiagLog.add("youtube", "page ${u.host}${u.path?.take(40) ?: ""}${if (s === player) " (player)" else ""}")
+                    if (u.scheme?.startsWith("http") == true)
+                        DiagLog.add("youtube", "page ${u.host}${u.path?.take(40) ?: ""}${if (s === mini?.session) " (mini player)" else ""}")
                 }
-                runOnUiThread { if (!isDestroyed) routeNavigation(s, url) }
+                runOnUiThread { if (!isDestroyed) onNavigated(s, url) }
             }
             override fun onLoadError(s: GeckoSession, uri: String?, error: org.mozilla.geckoview.WebRequestError): GeckoResult<String>? {
                 DiagLog.add("youtube", "ERROR loading ${uri?.let { runCatching { Uri.parse(it).host }.getOrNull() }}: " +
@@ -335,7 +380,7 @@ class YouTubeActivity : Activity() {
                 // "Open in the YouTube app" links (intent://…, vnd.youtube:…) stay here instead.
                 youTubeAppLink(request.uri)?.let { web ->
                     DiagLog.add("youtube", "kept an 'open in YouTube app' link inside the app")
-                    if (web.isNotEmpty()) runOnUiThread { if (isWatchUrl(web)) openVideo(web, "app link") else s.loadUri(web) }
+                    if (web.isNotEmpty()) runOnUiThread { s.loadUri(web); if (isWatchUrl(web)) requestAutoplay(web) }
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
                 // mailto:, tel: and other apps' links still open those apps.
@@ -353,7 +398,7 @@ class YouTubeActivity : Activity() {
         contentDelegate = object : GeckoSession.ContentDelegate {
             override fun onTitleChange(s: GeckoSession, t: String?) {
                 page(s).title = t?.removeSuffix(" - YouTube") ?: "YouTube"
-                if (s === player) updateMini()
+                if (s === mini?.session) updateMini()
             }
             override fun onFullScreen(s: GeckoSession, full: Boolean) { if (s === session) setFullScreen(full) }
             override fun onCrash(s: GeckoSession) = recover(s, "crashed")
@@ -383,37 +428,41 @@ class YouTubeActivity : Activity() {
         attachAddons(me)
     }
 
-    /**
-     * Like the YouTube app: videos play in the player layer; everything else (channels, search,
-     * Shorts…) opens in the browsing page, and the player shrinks to the mini bar.
-     */
-    private fun routeNavigation(s: GeckoSession, url: String) {
-        if (s === browse && isWatchUrl(url)) {
-            // A video opened in the browsing page (the helper usually catches the tap before this).
-            if (page(browse).canGoBack) browse.goBack()
-            openVideo(url, "tap (fallback)")
-        } else if (s === player && state != Player.NONE && !isWatchUrl(url) && url.startsWith("http")) {
-            player?.goBack()
-            browse.loadUri(url)
-            if (isShortsUrl(url)) closePlayer("Shorts opened") else if (state == Player.FULL) animateTo(1f, "a page opened from the video")
-        }
+    /** The page you're on opened a video: it plays right there; get the page behind ready. */
+    private fun onNavigated(s: GeckoSession, url: String) {
+        if (s !== main.session || !isWatchUrl(url)) return
+        // a new video while one floats: it replaces it, like the YouTube app
+        if (mini != null) closeMini("another video opened", animate = false)
+        // keep YouTube (where you came from) loaded in the spare page, so shrinking is instant
+        if (!lowEnd) prepareBehind(main.page.lastBrowseUrl)
+    }
+
+    /** Loads [url] in the spare page if it isn't there yet (hidden, not drawing). */
+    private fun prepareBehind(url: String) {
+        val b = other
+        if (b === mini) return
+        if (b.page.url != url) b.session.loadUri(url)
+        b.session.setActive(false)
     }
 
     private fun attachAddons(s: GeckoSession) { attachUBlock(s); attachPlus(s) }
 
     /** A page's engine process died: log it, reopen it and reload where it was. */
     private fun recover(s: GeckoSession, what: String) {
-        DiagLog.add("youtube", "ERROR page $what${if (s === player) " (player)" else ""} — reloading")
+        DiagLog.add("youtube", "ERROR page $what${if (s === mini?.session) " (mini player)" else ""} — reloading")
         if (mediaOwner === s) YtMedia.clear(applicationContext)
         runOnUiThread {
             if (isDestroyed) return@runOnUiThread
+            val slot = slotOf(s) ?: return@runOnUiThread
+            if (slot === mini) closeMini("its page $what", animate = false)
             runCatching {
                 if (!s.isOpen) s.open(Gecko.runtime(this))
-                val view = if (s === player) playerView else browseView
-                view.releaseSession(); view.setSession(s)
+                slot.view.releaseSession(); slot.view.setSession(s)
             }.onFailure { DiagLog.error("youtube", "couldn't reopen the page", it) }
-            s.loadUri(page(s).url)
-            Toast.makeText(this, "YouTube page $what — reloaded", Toast.LENGTH_SHORT).show()
+            if (slot === main) {
+                s.loadUri(page(s).url)
+                Toast.makeText(this, "YouTube page $what — reloaded", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -427,7 +476,7 @@ class YouTubeActivity : Activity() {
             "detailed log ${YtPrefs.debug(this@YouTubeActivity)}")
         appendLine("Phone: ${Perf.describe(this@YouTubeActivity)} · ${Perf.refreshInfo(this@YouTubeActivity)}")
         appendLine("Media: ${if (YtMedia.session == null) "none" else if (YtMedia.playing) "playing" else "paused"} · notification ${YtMediaService.instance != null}")
-        appendLine("Player: $state · pages open: ${pages.size}")
+        appendLine("Mini player: ${if (mini != null) "open" else "closed"}")
         appendLine("PiP supported: ${packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)} · in PiP: $isInPictureInPictureMode")
         append("A VPN (e.g. BlockBridge) is active: ${vpnActive()}")
     }
@@ -437,7 +486,9 @@ class YouTubeActivity : Activity() {
         handleShortcut(intent)
         intent.data?.let {
             val url = startUrl(intent)
-            if (isWatchUrl(url)) openVideo(url, "link") else { if (state == Player.FULL) animateTo(1f, "link"); browse.loadUri(url) }
+            if (isWatchUrl(url) && mini != null) closeMini("a link was opened", animate = false)
+            main.session.loadUri(url)
+            if (isWatchUrl(url)) requestAutoplay(url)
         }
     }
 
@@ -452,29 +503,24 @@ class YouTubeActivity : Activity() {
             when (which) {
                 0 -> plusSettings()
                 1 -> showUBlock()
-                2 -> Gecko.ublock?.metaData?.optionsPageUrl?.let { openInBrowse(it) }
+                2 -> Gecko.ublock?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
                     ?: Toast.makeText(this, Gecko.status, Toast.LENGTH_LONG).show()
-                3 -> Gecko.sponsor?.metaData?.optionsPageUrl?.let { openInBrowse(it) }
+                3 -> Gecko.sponsor?.metaData?.optionsPageUrl?.let { session.loadUri(it) }
                     ?: Toast.makeText(this, "SponsorBlock is still installing — try again in a moment", Toast.LENGTH_LONG).show()
-                4 -> openInBrowse("https://music.youtube.com/")
+                4 -> session.loadUri("https://music.youtube.com/")
                 5 -> CrashGuard.shareFullReport(this, "BlockBridge Video report", summary(), setOf("youtube", "yt-page"))
                 6 -> checkUpdates()
                 7 -> AlertDialog.Builder(this)
                     .setMessage("Sign out of YouTube and delete its cookies and site data in this app?")
                     .setPositiveButton("Clear") { _, _ ->
-                        closePlayer("signed out")
+                        closeMini("signed out", animate = false)
                         Gecko.runtime(this).storageController.clearData(
                             org.mozilla.geckoview.StorageController.ClearFlags.ALL)
-                        browse.loadUri("https://m.youtube.com/")
+                        session.loadUri("https://m.youtube.com/")
                     }
                     .setNegativeButton("Cancel", null).show()
             }
         }.show()
-    }
-
-    private fun openInBrowse(url: String) {
-        if (state == Player.FULL) animateTo(1f, "menu")
-        browse.loadUri(url)
     }
 
     /** Launcher shortcuts (long-press the app icon): Settings, Report a problem. */
@@ -490,7 +536,7 @@ class YouTubeActivity : Activity() {
         cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
     }.getOrDefault(false)
 
-    // ---- Player layer and mini bar ----
+    // ---- Mini player ----
 
     private fun isWatchUrl(url: String) = runCatching { Uri.parse(url) }.getOrNull()?.let { u ->
         val h = u.host ?: ""
@@ -498,116 +544,137 @@ class YouTubeActivity : Activity() {
             (u.path == "/watch" || u.path?.startsWith("/live/") == true)
     } == true
 
-    private fun isShortsUrl(url: String) = runCatching { Uri.parse(url).path?.startsWith("/shorts") }.getOrNull() == true
+    /** A video on the main page can shrink (not Shorts, not full screen). */
+    private fun canMinimize() = mini == null && anim == null && !fullScreen && isWatchUrl(main.page.url)
 
-    /** Opens [url] in the player layer: it slides up over the browsing page, like the YouTube app. */
-    private fun openVideo(url: String, how: String) {
-        val p = player ?: newSession().also { s -> player = s; playerView.setSession(s); tellPlus() }
-        p.setActive(true)
-        p.loadUri(url)
-        vTop = 0f; vHeight = 0f
-        // A video loaded into the player wasn't tapped on its own page, so YouTube's mobile site
-        // would wait for another tap: the helper starts it as soon as it's ready.
-        autoplayId = runCatching { Uri.parse(url).getQueryParameter("v") }.getOrNull()
-            ?: runCatching { Uri.parse(url).lastPathSegment }.getOrNull() ?: ""
-        autoplayPending = true
-        sendAutoplay()
-        DiagLog.add("youtube", "video opened in the player ($how)")
-        when (state) {
-            Player.FULL -> {}
-            Player.MINI -> animateTo(0f, "another video")
-            Player.NONE -> {
-                state = Player.FULL
-                pos = 0f
-                playerBox.visibility = View.VISIBLE
-                playerBox.alpha = 1f
-                applyPos(0f)
-                // slide up from the bottom, over a dim that fades in (like the YouTube app)
-                val hgt = root.height.toFloat().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels.toFloat()
-                playerBox.translationY = hgt
-                scrim.visibility = View.VISIBLE; scrim.alpha = 0f
-                scrim.animate().alpha(0.55f).setDuration(if (lowEnd) 220 else 300).start()
-                playerBox.animate().translationY(0f).setDuration(if (lowEnd) 260 else 340)
-                    .setInterpolator(EASE).withEndAction { scrim.visibility = View.GONE; settle() }.start()
-            }
-        }
-        tellPlus()
+    /** Starts shrinking the main page's video: it becomes the floating player; the spare page shows YouTube behind. */
+    private fun beginMinimize(): Slot? {
+        if (!canMinimize()) return null
+        val playing = main
+        val behind = other
+        val back = playing.page.lastBrowseUrl
+        if (behind.page.url != back) behind.session.loadUri(back) // low-end phones load it now
+        behind.session.setActive(true)
+        behind.pos = 0f
+        resetBox(behind)
+        main = behind
+        mini = playing
+        order()
+        sizeCard()
+        return playing
     }
 
-    /** Closes the player (✕, swipe away): stops the video. */
-    private fun closePlayer(why: String) {
-        val p = player ?: return
-        if (state == Player.NONE) return
-        anim?.cancel()
-        state = Player.NONE
-        playerBox.visibility = View.GONE
-        playerBox.animate().cancel()
+    private fun minimize(how: String) {
+        val m = beginMinimize() ?: return
+        animate(m, 1f, how)
+    }
+
+    private fun expand(how: String) {
+        val m = mini ?: return
+        animate(m, 0f, how)
+    }
+
+    /** Ends with the floating page full size again (its slot becomes the main page). */
+    private fun finishExpand(m: Slot) {
+        val behind = main
+        mini = null
+        main = m
+        m.pos = 0f
+        resetBox(m)
+        behind.session.setActive(false) // covered: stop drawing it
+        order()
         miniCard.visibility = View.GONE
         scrim.visibility = View.GONE
-        belowFade.alpha = 0f
-        if (mediaOwner === p) { YtMedia.clear(applicationContext); mediaOwner = null }
-        if (lowEnd) {
-            // free the memory on low-end phones
-            playerView.releaseSession(); pages.remove(p); runCatching { p.close() }; player = null
-        } else {
-            p.loadUri("about:blank"); p.setActive(false)
+        updatePip(); tellPlus()
+    }
+
+    /** Closes the floating player: its video stops; the page becomes the spare again. */
+    private fun closeMini(why: String, animate: Boolean = true) {
+        val m = mini ?: return
+        val done = {
+            if (mini === m) {
+                mini = null
+                if (mediaOwner === m.session) { YtMedia.clear(applicationContext); mediaOwner = null }
+                m.session.loadUri("about:blank")
+                m.session.setActive(false)
+                m.pos = 0f
+                resetBox(m)
+                m.box.alpha = 1f
+                miniCard.alpha = 1f
+                miniCard.visibility = View.GONE
+                dragX = 0f; dragY = 0f
+                order()
+                tellPlus()
+                DiagLog.add("youtube", "mini player closed ($why)")
+            }
         }
-        browse.setActive(true)
-        tellPlus()
-        DiagLog.add("youtube", "player closed ($why)")
+        anim?.cancel(); anim = null
+        if (!animate) { done(); return }
+        val dur = if (lowEnd) 160L else 220L
+        for (v in listOf(miniCard, m.box)) v.animate().translationYBy(dp(90).toFloat()).alpha(0f).setDuration(dur).setInterpolator(EASE).start()
+        root.postDelayed({ listOf(miniCard, m.box).forEach { it.animate().cancel() }; done() }, dur + 10)
+    }
+
+    private fun resetBox(s: Slot) {
+        s.box.scaleX = 1f; s.box.scaleY = 1f
+        s.box.translationX = 0f; s.box.translationY = 0f
+        s.box.elevation = 0f
+        s.fade.alpha = 0f
+        s.box.invalidateOutline()
     }
 
     /**
-     * Positions the player for [p] (0 = full size, 1 = floating mini player) with GPU transforms
+     * Positions the floating page for [p] (0 = full size, 1 = floating) with GPU transforms
      * only: the page keeps its size (no relayout, no reload); it's scaled, moved and cropped to
      * the video with rounded corners. Like the YouTube app, the rest of the watch page fades out
      * as it shrinks and the page behind comes up from a dim.
      */
-    private fun applyPos(p: Float) {
-        pos = p
-        val w = playerBox.width.toFloat(); val h = playerBox.height.toFloat()
+    private fun applyPos(s: Slot, p: Float) {
+        s.pos = p
+        val box = s.box
+        val w = box.width.toFloat(); val h = box.height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val vh = (if (vHeight > 0f) vHeight else w * 9f / 16f).coerceIn(1f, h)
-        val vt = vTop.coerceIn(0f, h - vh)
-        val cw = cardWidth().toFloat()
-        val target = cw / w                           // scale of the floating video
+        val vh = (if (s.page.vHeight > 0f) s.page.vHeight else w * 9f / 16f).coerceIn(1f, h)
+        val vt = s.page.vTop.coerceIn(0f, h - vh)
+        val target = cardWidth() / w                   // scale of the floating video
         val (cx, cy) = cardXY()
-        val s = 1f + (target - 1f) * p
-        val left = cx * p
+        val sc = 1f + (target - 1f) * p
         val top = vt + (cy - vt) * p
-        playerBox.pivotX = 0f; playerBox.pivotY = 0f
-        playerBox.scaleX = s; playerBox.scaleY = s
-        playerBox.translationX = left
-        playerBox.translationY = top - vt * s
-        // Crop toward the video (bottom goes first, a bit faster), rounded corners growing in.
-        val cropP = (p * 1.35f).coerceAtMost(1f)
-        cropTop = vt * p
-        cropBottom = h + (vt + vh - h) * cropP
-        cornerPx = dp(12) * p / s
-        playerBox.invalidateOutline()
-        // The rest of the watch page fades into the page colour; the browsing page un-dims.
-        belowFade.alpha = (p * 2.2f).coerceAtMost(1f)
+        box.pivotX = 0f; box.pivotY = 0f
+        box.scaleX = sc; box.scaleY = sc
+        box.translationX = cx * p
+        box.translationY = top - vt * sc
+        // crop toward the video (the bottom goes a bit faster), corners round in
+        s.cropTop = vt * p
+        s.cropBottom = h + (vt + vh - h) * (p * 1.35f).coerceAtMost(1f)
+        s.corner = dp(12) * p / sc
+        box.invalidateOutline()
+        box.elevation = dp(10) * p
+        // the rest of the watch page fades into the page colour; the page behind un-dims
+        val lp = s.fade.layoutParams as FrameLayout.LayoutParams
+        val fadeTop = (vt + vh).toInt()
+        if (lp.topMargin != fadeTop) { lp.topMargin = fadeTop; s.fade.layoutParams = lp }
+        s.fade.alpha = (p * 2.2f).coerceAtMost(1f)
         scrim.alpha = (1f - p) * 0.55f
         scrim.visibility = if (p in 0.001f..0.999f) View.VISIBLE else View.GONE
-        // The card (title, buttons) appears under the video near the end.
+        // the card (title, buttons) appears under the video near the end
         miniCard.translationX = cx
         miniCard.translationY = cy
-        val cardAlpha = ((p - 0.7f) / 0.3f).coerceIn(0f, 1f)
-        miniCard.alpha = cardAlpha
+        miniCard.alpha = ((p - 0.7f) / 0.3f).coerceIn(0f, 1f)
         miniCard.visibility = if (p > 0.69f) View.VISIBLE else View.GONE
-        playerBox.elevation = dp(10) * p
     }
 
-    private var cropTop = 0f
-    private var cropBottom = 0f
-    private var cornerPx = 0f
-    /** Where the floating player sits (top-left, in px), remembered between minimizes. */
+    /** Where the floating player sits, remembered between minimizes. */
     private var cardCorner = 3 // 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right
+    /** While you drag the floating player, how far it's moved from its corner. */
+    private var dragX = 0f
+    private var dragY = 0f
 
     private fun cardWidth() = (root.width * (if (lowEnd) 0.5f else 0.56f)).toInt().coerceAtLeast(dp(180))
     private fun cardVideoHeight(): Int {
-        val w = playerBox.width.toFloat().coerceAtLeast(1f)
-        val vh = if (vHeight > 0f) vHeight else w * 9f / 16f
+        val s = mini ?: main
+        val w = s.box.width.toFloat().coerceAtLeast(1f)
+        val vh = if (s.page.vHeight > 0f) s.page.vHeight else w * 9f / 16f
         return (cardWidth() * vh / w).toInt()
     }
     private fun cardHeight() = cardVideoHeight() + dp(CARD_BAR_H)
@@ -621,47 +688,34 @@ class YouTubeActivity : Activity() {
         val y = if (bottom) root.height - dp(NAV_H) - cardHeight() - m else dp(56) + m
         return (x + dragX) to (y + dragY)
     }
-    /** While you drag the floating player, how far it's moved from its corner. */
-    private var dragX = 0f
-    private var dragY = 0f
 
     /**
-     * Animates to full (0) or mini (1) with the screen's refresh rate (Choreographer), on an
-     * emphasized-decelerate curve like Android/YouTube motion.
+     * Animates [s] to full (0) or floating (1) in step with the screen's refresh rate
+     * (Choreographer), on an emphasized-decelerate curve like Android/YouTube motion.
      */
-    private fun animateTo(target: Float, how: String, velocity: Float = 0f) {
-        if (state == Player.NONE) return
+    private fun animate(s: Slot, target: Float, how: String, velocity: Float = 0f) {
         anim?.cancel()
-        browse.setActive(true) // shown behind the shrinking player
-        val from = pos
-        val dist = kotlin.math.abs(target - from)
+        val from = s.pos
         val base = if (lowEnd) 260L else 340L
-        // a fast fling finishes faster
-        val dur = (base * dist * (if (kotlin.math.abs(velocity) > dp(1500)) 0.7f else 1f)).toLong().coerceIn(120L, base)
+        val dur = (base * kotlin.math.abs(target - from) * (if (kotlin.math.abs(velocity) > dp(1500)) 0.7f else 1f))
+            .toLong().coerceIn(120L, base)
         anim = android.animation.ValueAnimator.ofFloat(from, target).apply {
             duration = dur
             interpolator = EASE
-            addUpdateListener { applyPos(it.animatedValue as Float) }
+            addUpdateListener { applyPos(s, it.animatedValue as Float) }
             addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: android.animation.Animator) { if (anim === a) { anim = null; settle() } }
+                override fun onAnimationEnd(a: android.animation.Animator) {
+                    if (anim !== a) return
+                    anim = null
+                    if (target <= 0f) finishExpand(s) else { applyPos(s, 1f); updateMini(); tellPlus(); updatePip() }
+                }
             })
             start()
         }
-        if (target >= 1f && state == Player.FULL) DiagLog.add("youtube", "mini player ($how)")
-        if (target <= 0f && state == Player.MINI) DiagLog.add("youtube", "player expanded ($how)")
+        DiagLog.add("youtube", if (target >= 1f) "mini player ($how)" else "player expanded ($how)")
     }
 
-    /** After an animation: record the state, pause what's hidden (saves battery and GPU). */
-    private fun settle() {
-        if (state == Player.NONE) return
-        state = if (pos >= 0.99f) Player.MINI else Player.FULL
-        applyPos(if (state == Player.MINI) 1f else 0f)
-        // The browsing page is fully covered by the full-size player: stop drawing it.
-        browse.setActive(state == Player.MINI)
-        updateMini(); tellPlus(); updatePip()
-    }
-
-    /** The floating player's card: the video goes on top (drawn by the player layer), then title and buttons. */
+    /** The floating player's card: the video goes on top (drawn by its page), then title and buttons. */
     private fun miniCard(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
@@ -689,12 +743,12 @@ class YouTubeActivity : Activity() {
             }
             miniPlay = btn("❚❚", "Play/pause") { YtMedia.request(!YtMedia.playing) }
             addView(miniPlay)
-            addView(btn("✕", "Close") { dismissMini(0f, dp(80).toFloat()) })
+            addView(btn("✕", "Close") { closeMini("closed") })
         }, LinearLayout.LayoutParams(-1, dp(CARD_BAR_H)))
         setOnTouchListener(MiniGesture())
     }
 
-    /** Sizes the card to the video (called when the video's shape is known or the screen turns). */
+    /** Sizes the card to the video. */
     private fun sizeCard() {
         val lp = miniCard.layoutParams ?: return
         val w = cardWidth(); val h = cardHeight()
@@ -703,28 +757,14 @@ class YouTubeActivity : Activity() {
         if (vlp.height != cardVideoHeight()) { vlp.height = cardVideoHeight(); miniVideoSpace.layoutParams = vlp }
     }
 
-    /** Fling the floating player away: it slides off and fades, then the player closes. */
-    private fun dismissMini(dx: Float, dy: Float) {
-        val dur = if (lowEnd) 160L else 220L
-        val ex = if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) kotlin.math.sign(dx) * root.width * 0.6f else 0f
-        val ey = if (ex == 0f) dp(120).toFloat() else 0f
-        for (v in listOf(miniCard, playerBox)) {
-            v.animate().translationXBy(ex).translationYBy(ey).alpha(0f).setDuration(dur).setInterpolator(EASE).start()
-        }
-        root.postDelayed({
-            listOf(miniCard, playerBox).forEach { it.animate().cancel(); it.alpha = 1f }
-            dragX = 0f; dragY = 0f
-            closePlayer("swiped away")
-        }, dur + 10)
-    }
-
-    /** Floating player: tap to expand; drag it anywhere (snaps to a corner); fling it off the side or down to close. */
+    /** Floating player: tap to expand; drag it anywhere (snaps to a corner); fling it off the side to close. */
     private inner class MiniGesture : View.OnTouchListener {
         private var x0 = 0f; private var y0 = 0f
         private var moved = false
         private var vt: android.view.VelocityTracker? = null
         override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
-            if (state != Player.MINI || anim != null) return false
+            val m = mini ?: return false
+            if (anim != null && e.actionMasked == android.view.MotionEvent.ACTION_DOWN) return false
             if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) { vt?.recycle(); vt = android.view.VelocityTracker.obtain() }
             vt?.addMovement(e)
             val slop = android.view.ViewConfiguration.get(this@YouTubeActivity).scaledTouchSlop
@@ -733,33 +773,37 @@ class YouTubeActivity : Activity() {
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - x0; val dy = e.rawY - y0
                     if (!moved && kotlin.math.hypot(dx, dy) > slop) moved = true
-                    if (moved) { dragX = dx; dragY = dy; applyPos(1f) }
+                    if (moved) { dragX = dx; dragY = dy; applyPos(m, 1f) }
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     vt?.computeCurrentVelocity(1000)
                     val vx = vt?.xVelocity ?: 0f; val vy = vt?.yVelocity ?: 0f
                     vt?.recycle(); vt = null
-                    if (!moved) { if (e.actionMasked == android.view.MotionEvent.ACTION_UP) animateTo(0f, "tap"); return true }
+                    if (!moved) { if (e.actionMasked == android.view.MotionEvent.ACTION_UP) expand("tap"); return true }
                     val (cx, _) = cardXY()
                     val offSide = cx < -cardWidth() * 0.35f || cx + cardWidth() > root.width + cardWidth() * 0.35f
                     val flung = kotlin.math.abs(vx) > dp(1800) && kotlin.math.abs(vx) > kotlin.math.abs(vy)
-                    if (offSide || flung) { dismissMini(if (vx != 0f) vx else dragX, 0f); return true }
-                    snapToCorner(vx, vy)
+                    if (offSide || flung) flingAway(m, if (vx != 0f) vx else dragX) else snapToCorner(m, vx, vy)
                 }
             }
             return true
         }
     }
 
+    /** Flung off the side: it keeps going and fades, then closes. */
+    private fun flingAway(m: Slot, vx: Float) {
+        val dir = if (vx < 0) -1f else 1f
+        val dur = if (lowEnd) 160L else 220L
+        for (v in listOf(miniCard, m.box)) v.animate().translationXBy(dir * root.width * 0.6f).alpha(0f).setDuration(dur).setInterpolator(EASE).start()
+        root.postDelayed({ listOf(miniCard, m.box).forEach { it.animate().cancel() }; closeMini("swiped away", animate = false) }, dur + 10)
+    }
+
     /** Lets go of a dragged floating player: it glides to the nearest corner (fling direction counts). */
-    private fun snapToCorner(vx: Float, vy: Float) {
+    private fun snapToCorner(m: Slot, vx: Float, vy: Float) {
         val (cx, cy) = cardXY()
-        // where it's heading, a little ahead along the fling
         val px = cx + cardWidth() / 2f + vx * 0.12f
         val py = cy + cardHeight() / 2f + vy * 0.12f
-        val newCorner = (if (py > root.height / 2f) 2 else 0) + (if (px > root.width / 2f) 1 else 0)
-        // keep the on-screen position while switching the base corner, then animate the offset to 0
-        cardCorner = newCorner
+        cardCorner = (if (py > root.height / 2f) 2 else 0) + (if (px > root.width / 2f) 1 else 0)
         dragX = 0f; dragY = 0f
         val (tx, ty) = cardXY()
         val startX = cx - tx; val startY = cy - ty
@@ -767,79 +811,61 @@ class YouTubeActivity : Activity() {
         anim = android.animation.ValueAnimator.ofFloat(1f, 0f).apply {
             duration = if (lowEnd) 200L else 260L
             interpolator = EASE
-            addUpdateListener { a -> val f = a.animatedValue as Float; dragX = startX * f; dragY = startY * f; applyPos(1f) }
+            addUpdateListener { a -> val f = a.animatedValue as Float; dragX = startX * f; dragY = startY * f; applyPos(m, 1f) }
             addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: android.animation.Animator) { if (anim === a) { anim = null; dragX = 0f; dragY = 0f; applyPos(1f) } }
+                override fun onAnimationEnd(a: android.animation.Animator) { if (anim === a) { anim = null; dragX = 0f; dragY = 0f; applyPos(m, 1f) } }
             })
             start()
         }
     }
 
-    /** The full-size player: hands touches to the page, except while it's floating (the card takes them). */
-    private inner class PlayerBox : FrameLayout(this@YouTubeActivity) {
-        init {
-            // crop to the video with rounded corners while shrinking/floating
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    if (pos <= 0f) outline.setRect(0, 0, view.width, view.height)
-                    else outline.setRoundRect(0, cropTop.toInt(), view.width, cropBottom.toInt(), cornerPx)
-                }
-            }
-            clipToOutline = true
-        }
-        override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean =
-            if (state == Player.FULL && anim == null) super.dispatchTouchEvent(e) else false
-    }
-
     /**
-     * Swipe the video down to shrink it, like the YouTube app: watches every touch before the
-     * page gets it, and takes over once it's clearly a downward drag that started on the video.
+     * Swipe a video down to shrink it, like the YouTube app: watches every touch before the
+     * page gets it and takes over once it's clearly a downward drag that started on the video.
+     * Only on normal video pages — Shorts keep their own up/down swiping.
      */
     private inner class Root : FrameLayout(this@YouTubeActivity) {
         private var x0 = 0f; private var y0 = 0f
         private var onVideo = false
-        private var dragging = false
+        private var dragging: Slot? = null
         private var vt: android.view.VelocityTracker? = null
 
         override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
             super.onSizeChanged(w, h, ow, oh)
-            post { sizeCard(); if (state != Player.NONE && anim == null) applyPos(if (state == Player.MINI) 1f else 0f) }
+            post { sizeCard(); mini?.let { if (anim == null) applyPos(it, 1f) } }
         }
 
         override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
-            val canDrag = state == Player.FULL && !fullScreen && anim == null && !isInPictureInPictureMode
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    dragging = false
-                    x0 = e.x; y0 = e.y
-                    val vh = if (vHeight > 0f) vHeight else width * 9f / 16f
-                    onVideo = canDrag && e.y >= vTop - dp(8) && e.y <= vTop + vh
-                    vt?.recycle(); vt = if (onVideo) android.view.VelocityTracker.obtain() else null
-                }
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                dragging = null
+                x0 = e.x; y0 = e.y
+                val p = main.page
+                val vh = if (p.vHeight > 0f) p.vHeight else width * 9f / 16f
+                onVideo = canMinimize() && !isInPictureInPictureMode && e.y >= p.vTop - dp(8) && e.y <= p.vTop + vh
+                vt?.recycle(); vt = if (onVideo) android.view.VelocityTracker.obtain() else null
             }
             vt?.addMovement(e)
-            if (!dragging && onVideo && canDrag && e.actionMasked == android.view.MotionEvent.ACTION_MOVE) {
+            if (dragging == null && onVideo && e.actionMasked == android.view.MotionEvent.ACTION_MOVE) {
                 val dx = e.x - x0; val dy = e.y - y0
                 val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop * 2
                 if (dy > slop && dy > kotlin.math.abs(dx) * 1.5f) {
-                    dragging = true
-                    // the page stops handling this gesture
+                    // the page stops handling this gesture; the video follows the finger
                     val cancel = android.view.MotionEvent.obtain(e).apply { action = android.view.MotionEvent.ACTION_CANCEL }
                     super.dispatchTouchEvent(cancel); cancel.recycle()
-                    browse.setActive(true)
+                    dragging = beginMinimize()
                     y0 = e.y - 0.5f
                 }
             }
-            if (dragging) {
+            val d = dragging
+            if (d != null) {
                 when (e.actionMasked) {
-                    // the video follows the finger
-                    android.view.MotionEvent.ACTION_MOVE -> applyPos(((e.y - y0) / (height * DRAG_SPAN)).coerceIn(0f, 1f))
+                    android.view.MotionEvent.ACTION_MOVE -> applyPos(d, ((e.y - y0) / (height * DRAG_SPAN)).coerceIn(0f, 1f))
                     android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                         vt?.computeCurrentVelocity(1000)
                         val vy = vt?.yVelocity ?: 0f
                         vt?.recycle(); vt = null
-                        dragging = false
-                        animateTo(if (pos > 0.3f || vy > dp(900)) 1f else 0f, "swipe down", vy)
+                        dragging = null
+                        animate(d, if (d.pos > 0.3f || vy > dp(900)) 1f else 0f, "swipe down", vy)
                     }
                 }
                 return true
@@ -849,9 +875,9 @@ class YouTubeActivity : Activity() {
     }
 
     private fun updateMini() {
-        val p = player ?: return
-        miniTitle.text = page(p).title
-        miniPlay.text = if (YtMedia.playing && mediaOwner === p) "❚❚" else "▶"
+        val m = mini ?: return
+        miniTitle.text = m.page.title
+        miniPlay.text = if (YtMedia.playing && mediaOwner === m.session) "❚❚" else "▶"
     }
 
     // ---- Background play, lock-screen controls, picture-in-picture ----
@@ -930,7 +956,7 @@ class YouTubeActivity : Activity() {
     private fun where(s: GeckoSession) = when {
         isInPictureInPictureMode -> " (PiP)"
         stopped -> " (background)"
-        s === player && state == Player.MINI -> " (mini player)"
+        s === mini?.session -> " (mini player)"
         else -> ""
     }
 
@@ -964,7 +990,7 @@ class YouTubeActivity : Activity() {
         s.webExtensionController.setMessageDelegate(ext, object : WebExtension.MessageDelegate {
             override fun onConnect(port: WebExtension.Port) {
                 page(s).port = port
-                DiagLog.add("youtube", "helper connected to the page${if (s === player) " (player)" else ""}")
+                DiagLog.add("youtube", "helper connected to the page${if (s === mini?.session) " (mini player)" else ""}")
                 port.setDelegate(object : WebExtension.PortDelegate {
                     override fun onPortMessage(msg: Any, p: WebExtension.Port) {
                         val j = msg as? org.json.JSONObject ?: return
@@ -972,23 +998,16 @@ class YouTubeActivity : Activity() {
                             if (pageLogs++ < 300) DiagLog.add("yt-page", it.take(300))
                         }
                         if (j.optBoolean("menu")) runOnUiThread { if (!isDestroyed) menu() }
-                        // A video tapped on the browsing page: play it in the player layer.
-                        j.optString("open").takeIf { it.isNotEmpty() && s === browse }?.let { url ->
-                            runOnUiThread { if (!isDestroyed && isWatchUrl(url)) openVideo(url, "tap") }
-                        }
                         // Where the video is on the watch page (for swipe-down and the shrink).
                         j.optJSONArray("vrect")?.let { a ->
-                            if (s === player) runOnUiThread {
-                                vTop = a.optDouble(0).toFloat(); vHeight = a.optDouble(1).toFloat()
-                                // the rest of the watch page (below the video) fades while shrinking
-                                belowFade.layoutParams = (belowFade.layoutParams as FrameLayout.LayoutParams).apply {
-                                    topMargin = (vTop + vHeight).toInt().coerceAtLeast(0)
-                                }
-                                sizeCard()
-                                if (anim == null && state == Player.MINI) applyPos(1f)
+                            runOnUiThread {
+                                // only while it isn't shrunk (then the page is scaled)
+                                val slot = slotOf(s)
+                                if (slot == null || slot.pos > 0f) return@runOnUiThread
+                                page(s).vTop = a.optDouble(0).toFloat(); page(s).vHeight = a.optDouble(1).toFloat()
                             }
                         }
-                        if (j.optBoolean("autoplayed") && s === player) autoplayPending = false
+                        if (j.optBoolean("autoplayed")) autoplayPending = false
                         j.optJSONArray("video")?.let { a ->
                             val w = a.optInt(0); val h = a.optInt(1)
                             if (w > 0 && h > 0 && (s === mediaOwner || mediaOwner == null)) runOnUiThread { videoW = w; videoH = h; updatePip() }
@@ -1006,21 +1025,20 @@ class YouTubeActivity : Activity() {
      * once so background play and the PiP view work.
      */
     private fun checkHelper() {
-        browseView.postDelayed({
+        root.postDelayed({
             if (isDestroyed || plusPort != null || reloadedForHelper || Gecko.plus == null) return@postDelayed
             reloadedForHelper = true
             DiagLog.add("youtube", "helper not connected to the page — reloading once")
-            browse.reload()
+            session.reload()
         }, 6_000)
     }
 
-    /** Tells every page's helper its role and state: browsing page or player, PiP, held. */
+    /** Tells every page's helper its state: PiP, held, background play, smooth mode. */
     private fun tellPlus() {
         for ((s, p) in pages) {
             val port = p.port ?: continue
             runCatching {
                 port.postMessage(org.json.JSONObject()
-                    .put("role", if (s === player) "player" else "browse")
                     .put("background", YtPrefs.background(this))
                     .put("smooth", YtPrefs.smooth(this))
                     // video-only view in the floating window
@@ -1035,8 +1053,20 @@ class YouTubeActivity : Activity() {
     /** The video to autoplay (only that page acts on it, not the previous one still unloading). */
     private var autoplayId = ""
 
+    /**
+     * A watch page opened straight from a link (another app, a shortcut): no tap happened on the
+     * page, so YouTube's mobile site would wait for one. The helper starts it once it's ready.
+     * (Videos you tap inside YouTube play by themselves, as on the site.)
+     */
+    private fun requestAutoplay(url: String) {
+        autoplayId = runCatching { Uri.parse(url).getQueryParameter("v") }.getOrNull()
+            ?: runCatching { Uri.parse(url).lastPathSegment }.getOrNull() ?: ""
+        autoplayPending = true
+        sendAutoplay()
+    }
+
     private fun sendAutoplay() {
-        val port = player?.let { pages[it]?.port } ?: return // sent again when the page's helper connects
+        val port = pages[main.session]?.port ?: return // sent again when the page's helper connects
         runCatching { port.postMessage(org.json.JSONObject().put("autoplay", autoplayId)) }
     }
 
@@ -1093,12 +1123,11 @@ class YouTubeActivity : Activity() {
 
     /** The floating window shows the player full size (video only). */
     private fun prepareForPip() {
-        if (state == Player.MINI && mediaOwner === player) {
-            restoreMiniAfterPip = true
-            anim?.cancel()
-            state = Player.FULL
-            applyPos(0f)
-        }
+        val m = mini ?: return
+        if (mediaOwner !== m.session) return
+        restoreMiniAfterPip = true
+        anim?.cancel(); anim = null
+        finishExpand(m)
     }
 
     private var leftPip = false
@@ -1107,10 +1136,9 @@ class YouTubeActivity : Activity() {
         super.onPictureInPictureModeChanged(inPip, newConfig)
         if (inPip) prepareForPip()
         progress.visibility = View.GONE
-        miniCard.visibility = if (!inPip && state == Player.MINI) View.VISIBLE else View.GONE
         if (!inPip && restoreMiniAfterPip) {
             restoreMiniAfterPip = false
-            root.post { if (state == Player.FULL) { pos = 1f; state = Player.MINI; applyPos(1f) } }
+            root.post { beginMinimize()?.let { applyPos(it, 1f); updateMini() } }
         }
         leftPip = !inPip
         if (inPip && YtMedia.playing) YtMedia.wantPlay = true
@@ -1152,12 +1180,10 @@ class YouTubeActivity : Activity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // Android is short of memory: drop the idle player page.
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && state == Player.NONE) {
-            player?.let { p ->
-                playerView.releaseSession(); pages.remove(p); runCatching { p.close() }; player = null
-                DiagLog.add("youtube", "low memory — closed the idle player page")
-            }
+        // Android is short of memory: empty the spare page kept behind.
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && mini == null) {
+            other.session.loadUri("about:blank")
+            DiagLog.add("youtube", "low memory — emptied the spare page")
         }
     }
 
@@ -1267,11 +1293,11 @@ class YouTubeActivity : Activity() {
         when {
             fullScreen -> session.exitFullScreen()
             anim != null -> {}
-            // Like the YouTube app: Back on the full-size player shrinks it to the mini bar.
-            state == Player.FULL -> animateTo(1f, "back")
-            page(browse).canGoBack -> browse.goBack()
+            // Like the YouTube app: Back on a playing video shrinks it to the floating player.
+            canMinimize() && YtMedia.playing && mediaOwner === session -> minimize("back")
+            main.page.canGoBack -> session.goBack()
             // Mini player still playing: go to the home screen and keep playing in the background.
-            state == Player.MINI && YtMedia.playing -> moveTaskToBack(true)
+            mini != null && YtMedia.playing -> moveTaskToBack(true)
             // Like the YouTube app: press Back twice to leave.
             android.os.SystemClock.elapsedRealtime() - backPressedAt > 2_000 -> {
                 backPressedAt = android.os.SystemClock.elapsedRealtime()
@@ -1288,8 +1314,8 @@ class YouTubeActivity : Activity() {
         YtMedia.onChange = null
         YtMedia.userControl = null
         YtMedia.clear(applicationContext)
-        runCatching { browseView.releaseSession() }
-        runCatching { playerView.releaseSession() }
+        runCatching { slotA.view.releaseSession() }
+        runCatching { slotB.view.releaseSession() }
         pages.keys.toList().forEach { runCatching { it.close() } }
         pages.clear()
         super.onDestroy()

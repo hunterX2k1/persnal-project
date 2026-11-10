@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BlockBridge YouTube Plus",
-  "version": "1.6",
+  "version": "1.7",
   "description": "Background play, picture-in-picture view and no 'Continue watching?' interruptions for BlockBridge YouTube mode.",
   "browser_specific_settings": { "gecko": { "id": "ytplus@blockbridge" } },
   "permissions": ["nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"],

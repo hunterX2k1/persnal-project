@@ -24,8 +24,8 @@ android {
         applicationId = "com.blockbridge.video"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
         // Firefox's engine is for 64-bit phones only (the 32-bit copy is ~70 MB and too heavy
         // for those phones). Practically every phone of the last years is 64-bit.
         ndk { abiFilters += listOf("arm64-v8a") }

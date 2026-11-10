@@ -141,7 +141,7 @@ new MutationObserver(() => {
     try { autoContinue(document); } catch (e) { log("ERROR auto-continue: " + e); }
     try { hideAppPromos(document); } catch (e) { log("ERROR open-app filter: " + e); }
     try { addMenuButton(); } catch (e) { log("ERROR menu button: " + e); }
-    if (role === "player") scheduleRect();
+    if (onWatchPage()) scheduleRect();
   }, 400);
 }).observe(document, { childList: true, subtree: true });
 
@@ -186,29 +186,14 @@ for (const t of ["loadedmetadata", "resize"]) {
   document.addEventListener(t, (e) => { if (e.target && e.target.tagName === "VIDEO") sendSize(e.target); }, true);
 }
 
-// The app runs two pages: "browse" (home, search, channels…) and "player" (the watch page in
-// the player layer, which can shrink to the mini bar).
-let role = "browse";
+// Which page this is doesn't matter to the helper: videos play inside YouTube's own page.
+let role = "page";
 
-// On the browsing page, a tapped video opens in the player layer (like the YouTube app),
-// instead of loading the watch page here.
-window.addEventListener("click", (e) => {
-  if (role !== "browse" || !port || e.defaultPrevented) return;
-  const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
-  if (!a) return;
-  let u;
-  try { u = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
-  if (!/(^|\.)youtube\.com$/.test(u.hostname) || u.hostname === "music.youtube.com") return;
-  if (u.pathname !== "/watch" && !u.pathname.startsWith("/live/")) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  try { port.postMessage({ open: u.href }); } catch (err) {}
-}, true);
-
-// On the player page: where the video is (in screen pixels), for swipe-down and the shrink.
+// On a watch page: where the video is (in screen pixels), for swipe-down and the shrink.
 let rectTimer = 0;
+function onWatchPage() { return location.pathname === "/watch" || location.pathname.startsWith("/live/"); }
 function sendRect() {
-  if (role !== "player" || !port) return;
+  if (!onWatchPage() || !port) return;
   const box = document.querySelector("#player-container-id, .player-container, ytm-player") || document.querySelector("video");
   if (!box) return;
   const r = box.getBoundingClientRect();
@@ -248,14 +233,15 @@ document.addEventListener("loadedmetadata", () => { if (autoplayUntil) tryAutopl
 
 function onAppMessage(m) {
   if (!m) return;
-  if (m.autoplay && role === "player" && !autoplayUntil) {
+  if (m.autoplay && onWatchPage() && !autoplayUntil) {
     // only the page of that video (not the previous one, still unloading)
     const id = String(m.autoplay);
     const here = new URL(location.href);
     const mine = id === "true" || here.searchParams.get("v") === id || here.pathname.endsWith("/" + id);
     if (mine) { autoplayUntil = Date.now() + 12000; tryAutoplay(); }
   }
-  if ("role" in m) { role = m.role; if (role === "player") scheduleRect(); }
+  if ("role" in m) role = m.role;
+  scheduleRect();
   if ("background" in m) bg.on = !!m.background;
   if ("smooth" in m) {
     const was = smooth;
