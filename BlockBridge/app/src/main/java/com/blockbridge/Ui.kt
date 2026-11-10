@@ -81,8 +81,17 @@ class PowerButton(context: Context) : View(context) {
             val f = it.animatedValue as Float
             spin = f * 360f * (if (busy) 2f else 1f)
             pulse = (f * 2f) % 1f
-            if (on || busy) invalidate()
+            if ((on || busy) && frameDue()) invalidate()
         }
+    }
+    // Low-end phones: redraw ~20 times a second instead of every frame (60–120).
+    private val lowEnd = Perf.lowEnd(context)
+    private var lastFrame = 0L
+    private fun frameDue(): Boolean {
+        if (!lowEnd) return true
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastFrame < 50) return false
+        lastFrame = now; return true
     }
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -94,6 +103,11 @@ class PowerButton(context: Context) : View(context) {
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); animator.start() }
     override fun onDetachedFromWindow() { animator.cancel(); super.onDetachedFromWindow() }
+    // Off screen (app in the background, other tab): stop animating.
+    override fun onWindowVisibilityChanged(v: Int) {
+        super.onWindowVisibilityChanged(v)
+        if (v == VISIBLE) { if (isAttachedToWindow && !animator.isStarted) animator.start() } else animator.cancel()
+    }
 
     override fun onDraw(c: Canvas) {
         val cx = width / 2f
@@ -218,6 +232,10 @@ class SpeedGauge(context: Context) : View(context) {
 
     override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
     override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+    override fun onWindowVisibilityChanged(v: Int) {
+        super.onWindowVisibilityChanged(v)
+        if (v == VISIBLE) { if (isAttachedToWindow && !anim.isStarted) anim.start() } else anim.cancel()
+    }
 
     /** 0..1 position on a log scale; 0 Mbps maps to the start. */
     private fun pos(v: Double): Float {

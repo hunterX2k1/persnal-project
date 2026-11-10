@@ -32,3 +32,7 @@ html:has(video) video {
   background: #000 !important; transform: none !important;
 }
 }
+
+/* YouTube's "get the app" banners and "open in app" links: BlockBridge is the app here. */
+ytm-mealbar-promo-renderer, ytm-app-promo-renderer, ytm-open-app-banner-renderer,
+a[href^="intent:"], a[href^="vnd.youtube:"] { display: none !important; }

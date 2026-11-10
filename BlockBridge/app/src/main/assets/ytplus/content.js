@@ -53,6 +53,25 @@ window.addEventListener("blur", (e) => {
   if (bg.on && (e.target === window || e.target === document)) e.stopImmediatePropagation();
 }, true);
 
+// Smooth mode (low-end phones): tell YouTube we only play H.264. Nearly every phone decodes
+// H.264 in hardware, while VP9/AV1 can be decoded on the CPU — choppy and hot on a slow phone.
+// YouTube asks at startup, so the setting is remembered on the page for next time.
+let smooth = false;
+try { smooth = localStorage.getItem("bb-smooth") === "1"; } catch (e) {}
+const heavy = /vp0?9|vp8|av01/i;
+try {
+  const nativeIsType = MediaSource.isTypeSupported.bind(MediaSource);
+  exportFunction(function (type) {
+    if (smooth && heavy.test(String(type))) return false;
+    return nativeIsType(type);
+  }, page.MediaSource, { defineAs: "isTypeSupported" });
+  const nativeCanPlay = HTMLMediaElement.prototype.canPlayType;
+  exportFunction(function (type) {
+    if (smooth && heavy.test(String(type))) return "";
+    return nativeCanPlay.call(this, type);
+  }, page.HTMLMediaElement.prototype, { defineAs: "canPlayType" });
+} catch (e) { setTimeout(() => log("ERROR smooth mode not installed: " + e), 0); }
+
 // YouTube measures "last activity" to show "Video paused. Continue watching?". Keep it fresh.
 setInterval(() => { try { page._lact = Date.now(); } catch (e) {} }, 60 * 1000);
 
@@ -69,8 +88,31 @@ function autoContinue(root) {
   const v = document.querySelector("video");
   if (v && v.paused) v.play().catch(() => {});
 }
-new MutationObserver(() => { try { autoContinue(document); } catch (e) { log("ERROR auto-continue: " + e); } })
-  .observe(document, { childList: true, subtree: true });
+// "Open App" / "Get the app" buttons and banners: BlockBridge is the app here.
+const appPromo = /^(open( the)?( youtube)? app|open in( the)?( youtube)? app|get( the)?( youtube)? app|use the app|switch to the app)$/i;
+function hideAppPromos(root) {
+  for (const el of root.querySelectorAll('button, a, [role="button"], ytm-button-renderer, tp-yt-paper-button')) {
+    if (el.dataset.bbChecked) continue;
+    el.dataset.bbChecked = "1";
+    const label = ((el.getAttribute("aria-label") || el.textContent || "").trim());
+    if (label.length < 30 && appPromo.test(label)) {
+      (el.closest("ytm-button-renderer, ytm-mealbar-promo-renderer") || el).style.setProperty("display", "none", "important");
+      log("hid an '" + label + "' button");
+    }
+  }
+}
+
+// Page changes are checked at most every 400 ms (not on every change) — lighter on slow phones.
+let scheduled = false;
+new MutationObserver(() => {
+  if (scheduled) return;
+  scheduled = true;
+  setTimeout(() => {
+    scheduled = false;
+    try { autoContinue(document); } catch (e) { log("ERROR auto-continue: " + e); }
+    try { hideAppPromos(document); } catch (e) { log("ERROR open-app filter: " + e); }
+  }, 400);
+}).observe(document, { childList: true, subtree: true });
 
 // Video playback errors (media errors don't bubble, so listen in the capture phase).
 const mediaErrors = ["", "aborted", "network error", "can't decode", "format not supported"];
@@ -116,6 +158,12 @@ for (const t of ["loadedmetadata", "resize"]) {
 function onAppMessage(m) {
   if (!m) return;
   if ("background" in m) bg.on = !!m.background;
+  if ("smooth" in m) {
+    const was = smooth;
+    smooth = !!m.smooth;
+    try { localStorage.setItem("bb-smooth", smooth ? "1" : "0"); } catch (e) {}
+    if (was !== smooth) log("smooth mode " + (smooth ? "on (H.264 video)" : "off") + " — applies from the next video");
+  }
   if ("pip" in m) {
     const root = document.documentElement;
     const was = root.classList.contains("bb-pip");
