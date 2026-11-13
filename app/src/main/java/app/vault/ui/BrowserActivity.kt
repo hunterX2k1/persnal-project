@@ -40,9 +40,9 @@ class BrowserActivity : ComponentActivity() {
     private var web: WebView? = null
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
-    private var title by mutableStateOf("")
-    private var url by mutableStateOf("")
-    private var progress by mutableIntStateOf(0)
+    private var pageTitle by mutableStateOf("")
+    private var pageUrl by mutableStateOf("")
+    private var loadProgress by mutableIntStateOf(0)
     private var canBack by mutableStateOf(false)
     private var canForward by mutableStateOf(false)
 
@@ -69,19 +69,19 @@ class BrowserActivity : ComponentActivity() {
                     // Stay inside the browser; block intent://, market:// and other app jumps.
                     return scheme != "http" && scheme != "https"
                 }
-                override fun onPageStarted(view: WebView, u: String, favicon: Bitmap?) { url = u; refreshNav() }
-                override fun onPageFinished(view: WebView, u: String) { url = u; title = view.title.orEmpty(); refreshNav() }
+                override fun onPageStarted(view: WebView, u: String, favicon: Bitmap?) { pageUrl = u; refreshNav() }
+                override fun onPageFinished(view: WebView, u: String) { pageUrl = u; pageTitle = view.title.orEmpty(); refreshNav() }
             }
             webChromeClient = object : WebChromeClient() {
-                override fun onProgressChanged(view: WebView, p: Int) { progress = p }
-                override fun onReceivedTitle(view: WebView, t: String?) { title = t.orEmpty() }
+                override fun onProgressChanged(view: WebView, p: Int) { loadProgress = p }
+                override fun onReceivedTitle(view: WebView, t: String?) { pageTitle = t.orEmpty() }
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) = enterFullscreen(view, callback)
                 override fun onHideCustomView() = exitFullscreen()
             }
             loadUrl(start)
         }
         web = wv
-        url = start
+        pageUrl = start
 
         setContent {
             VaultTheme {
@@ -99,7 +99,7 @@ class BrowserActivity : ComponentActivity() {
                 ) { pad ->
                     Box(Modifier.padding(pad).fillMaxSize()) {
                         AndroidView(factory = { wv }, modifier = Modifier.fillMaxSize())
-                        if (progress in 1..99) LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                        if (loadProgress in 1..99) LinearProgressIndicator(progress = { loadProgress / 100f }, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -117,19 +117,19 @@ class BrowserActivity : ComponentActivity() {
         Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { finish() }) { Icon(Icons.Default.Close, "Close") }
             Column(Modifier.weight(1f)) {
-                Text(title.ifBlank { "Loading…" }, maxLines = 1, fontSize = 14.sp)
-                Text(Uri.parse(url).host.orEmpty(), maxLines = 1, fontSize = 12.sp, color = Muted)
+                Text(pageTitle.ifBlank { "Loading…" }, maxLines = 1, fontSize = 14.sp)
+                Text(Uri.parse(pageUrl).host.orEmpty(), maxLines = 1, fontSize = 12.sp, color = Muted)
             }
             IconButton(onClick = { web?.reload() }) { Icon(Icons.Default.Refresh, "Reload") }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem(text = { Text("Copy link") }, onClick = {
-                        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("link", url))
+                        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("link", pageUrl))
                         Toast.makeText(this@BrowserActivity, "Copied", Toast.LENGTH_SHORT).show(); menu = false
                     })
                     DropdownMenuItem(text = { Text("Open in phone browser") }, onClick = {
-                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }; menu = false
+                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pageUrl))) }; menu = false
                     })
                     DropdownMenuItem(text = { Text("Play video from link") }, onClick = { promptVideo(); menu = false })
                 }
@@ -149,8 +149,8 @@ class BrowserActivity : ComponentActivity() {
     /** Lets the user paste a direct .mp4/.m3u8 link to watch it in the native player. */
     private fun promptVideo() {
         val clip = getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString()
-        val candidate = clip?.takeIf { it.startsWith("http") } ?: url
-        playVideo(candidate, title)
+        val candidate = clip?.takeIf { it.startsWith("http") } ?: pageUrl
+        playVideo(candidate, pageTitle)
     }
 
     private fun enterFullscreen(view: View, callback: WebChromeClient.CustomViewCallback) {
