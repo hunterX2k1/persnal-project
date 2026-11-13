@@ -83,6 +83,8 @@ fun SettingsScreen() {
             }
         }
 
+        DiagnosticsSection()
+
         SectionTitle("About")
         Text(
             "Performer data comes from ThePornDB. Only adults (18+) are shown. This app stores no content itself; " +

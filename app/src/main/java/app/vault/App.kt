@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.vault.data.AppLog
 import app.vault.data.Prefs
 import app.vault.data.Repo
 import app.vault.sync.SyncWorker
@@ -18,6 +19,7 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         prefs = Prefs(this)
         repo = Repo(this, prefs)
         // Re-lock whenever the whole app goes to the background.

@@ -40,13 +40,22 @@ class TpdbApi(private val key: () -> String) {
             .header("Authorization", "Bearer $k")
             .header("Accept", "application/json")
             .build()
-        client.newCall(req).execute().use { r ->
+        val started = System.currentTimeMillis()
+        val r0 = runCatching { client.newCall(req).execute() }
+            .onFailure { AppLog.e("API", "GET $path failed: ${it.javaClass.simpleName}: ${it.message}") }
+            .getOrElse { throw ApiException("Network error: ${it.message}") }
+        r0.use { r ->
+            AppLog.i("API", "GET $path → ${r.code} in ${System.currentTimeMillis() - started} ms")
             when {
                 r.code == 401 || r.code == 403 -> throw ApiException("API key was rejected (HTTP ${r.code})")
                 r.code == 429 -> throw ApiException("Rate limited — try again in a minute")
                 !r.isSuccessful -> throw ApiException("Server error (HTTP ${r.code})")
             }
-            JSONObject(r.body?.string().orEmpty())
+            val body = r.body?.string().orEmpty()
+            runCatching { JSONObject(body) }.getOrElse {
+                AppLog.e("API", "Bad JSON from $path: ${body.take(300)}")
+                throw ApiException("Unexpected response from server")
+            }
         }
     }
 
@@ -55,6 +64,7 @@ class TpdbApi(private val key: () -> String) {
         val json = get("/performers?page=$page&per_page=50$q")
         val data = json.optJSONArray("data") ?: JSONArray()
         val items = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parsePerformer) }
+        if (data.length() > 0 && items.isEmpty()) AppLog.w("API", "Could not parse performers. First item: ${data.optJSONObject(0)?.toString()?.take(400)}")
         val meta = json.optJSONObject("meta")
         val last = meta?.optInt("last_page", 0) ?: 0
         return PageResult(items, page, last)
@@ -68,8 +78,10 @@ class TpdbApi(private val key: () -> String) {
     suspend fun scenes(p: Performer): List<Scene> {
         val byId = runCatching { get("/performers/${URLEncoder.encode(p.id, "UTF-8")}/scenes?per_page=50") }.getOrNull()
         val json = byId ?: get("/scenes?per_page=50&q=" + URLEncoder.encode(p.name, "UTF-8"))
-        val data = json.optJSONArray("data") ?: return emptyList()
-        return (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parseScene) }
+        val data = json.optJSONArray("data") ?: return emptyList<Scene>().also { AppLog.w("API", "Scenes response had no data array") }
+        val scenes = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parseScene) }
+        AppLog.i("API", "Scenes for performer: ${scenes.size} (via ${if (byId != null) "performer endpoint" else "search fallback"}), with site: ${scenes.count { it.siteName != null }}, with trailer: ${scenes.count { it.trailer != null }}")
+        return scenes
     }
 
     // ---- parsing ----

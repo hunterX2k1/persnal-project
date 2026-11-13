@@ -24,6 +24,7 @@ class Repo(context: Context, val prefs: Prefs) {
      * so the local database fills up over time and keeps refreshing. Favourites are always refreshed.
      */
     suspend fun syncStep(pages: Int = 6): String = syncLock.withLock {
+        AppLog.i("Sync", "Starting at page ${prefs.syncCursor}")
         var page = prefs.syncCursor
         var fetched = 0
         for (i in 0 until pages) {
@@ -39,7 +40,7 @@ class Repo(context: Context, val prefs: Prefs) {
             runCatching { api.performer(id) }.getOrNull()?.let { performers.upsert(listOf(it)) }
         }
         prefs.lastSync = System.currentTimeMillis()
-        "Updated $fetched profiles".also { prefs.lastSyncMessage = it }
+        "Updated $fetched profiles".also { prefs.lastSyncMessage = it; AppLog.i("Sync", "$it, next page $page") }
     }
 
     /** Searches the online database and caches matches locally. */
@@ -83,8 +84,12 @@ class Repo(context: Context, val prefs: Prefs) {
                 .filter { !it.startsWith("http") && Regex("^[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)+(/.*)?$").matches(it) }
                 .forEach { addLink(found, "https://$it", "") }
         }
-        if (found.isEmpty()) throw IllegalStateException("No website links found")
+        if (found.isEmpty()) {
+            AppLog.w("Sites", "Import found no links in ${text.length} chars (starts: ${text.take(80).replace('\n', ' ')})")
+            throw IllegalStateException("No website links found")
+        }
         val inserted = sites.insertAll(found.values.toList()).count { it != -1L }
+        AppLog.i("Sites", "Import: ${text.length} chars → ${found.size} sites, $inserted new")
         found.size to inserted
     }
 
@@ -126,6 +131,7 @@ class Repo(context: Context, val prefs: Prefs) {
             val dn = norm(d.substringBeforeLast('.'))
             keys.any { k -> k == d || d.endsWith(".$k") || k.endsWith(".$d") || (k.length >= 4 && k == dn) }
         }
+        AppLog.i("Sites", "Match: ${scenes.size} scenes, ${keys.size} site keys, ${confirmed.size}/${all.size} of my sites confirmed")
         return confirmed to (all - confirmed.toSet())
     }
 

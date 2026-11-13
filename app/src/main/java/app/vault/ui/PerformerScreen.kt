@@ -50,8 +50,8 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
             val p = performer.filterNotNull().first()
             runCatching { repo.scenes(p) }
                 .onSuccess { scenes.value = it }
-                .onFailure { scenes.value = emptyList(); scenesError.value = it.message }
-            runCatching { repo.refresh(id) }
+                .onFailure { AppLog.e("Profile", "Loading scenes failed", it); scenes.value = emptyList(); scenesError.value = it.message }
+            runCatching { repo.refresh(id) }.onFailure { AppLog.w("Profile", "Refresh failed: ${it.message}") }
         }
     }
 
@@ -71,6 +71,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
     val tags by vm.tags.collectAsStateWithLifecycle()
     val scenes by vm.scenes.collectAsStateWithLifecycle()
     val sites by vm.sites.collectAsStateWithLifecycle()
+    val scenesError by vm.scenesError.collectAsStateWithLifecycle()
     var showSites by remember { mutableStateOf(false) }
     var showTag by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
@@ -157,7 +158,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
             }
             when {
                 scenes == null -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
-                scenes!!.isEmpty() -> Text("No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
+                scenes!!.isEmpty() -> Text(scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(scenes!!, key = { it.id }) { s -> SceneCard(s) { sceneMenu = s } }
                 }

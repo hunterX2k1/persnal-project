@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.vault.AppLock
 import app.vault.app
+import app.vault.data.AppLog
 
 /** Private in-app browser: blocks pop-ups and jumps to other apps, supports full-screen video. */
 class BrowserActivity : ComponentActivity() {
@@ -52,6 +53,7 @@ class BrowserActivity : ComponentActivity() {
         enableEdgeToEdge()
         applyPrivacyFlags()
         val start = intent.getStringExtra(EXTRA_URL) ?: "about:blank"
+        AppLog.i("Browser", "Open ${Uri.parse(start).host}")
 
         val wv = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -68,6 +70,19 @@ class BrowserActivity : ComponentActivity() {
                     val scheme = req.url.scheme ?: return true
                     // Stay inside the browser; block intent://, market:// and other app jumps.
                     return scheme != "http" && scheme != "https"
+                }
+                override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
+                    if (req.isForMainFrame) AppLog.w("Browser", "Page error ${err.errorCode} (${err.description}) on ${req.url.host}")
+                }
+                override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, res: WebResourceResponse) {
+                    if (req.isForMainFrame) AppLog.w("Browser", "HTTP ${res.statusCode} on ${req.url.host}")
+                }
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    // Without this, a crashed web page takes the whole app down.
+                    AppLog.e("Browser", "Web page renderer died (crashed=${detail.didCrash()}) on ${Uri.parse(pageUrl).host}")
+                    web = null
+                    finish()
+                    return true
                 }
                 override fun onPageStarted(view: WebView, u: String, favicon: Bitmap?) { pageUrl = u; refreshNav() }
                 override fun onPageFinished(view: WebView, u: String) { pageUrl = u; pageTitle = view.title.orEmpty(); refreshNav() }

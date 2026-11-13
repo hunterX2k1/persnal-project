@@ -48,7 +48,7 @@ private fun Root(onLeave: () -> Unit) {
                 title = "Enter PIN",
                 onDone = { pin -> prefs.checkPin(pin).also { if (it) AppLock.locked = false } },
             )
-            else -> MainScaffold(onPanic = onLeave)
+            else -> { MainScaffold(onPanic = onLeave); CrashPrompt() }
         }
     }
 }

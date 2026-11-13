@@ -81,7 +81,10 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
         if (busy.value) return
         viewModelScope.launch {
             busy.value = true
-            message.value = runCatching { block() }.getOrElse { it.message ?: "Something went wrong" }
+            message.value = runCatching { block() }.getOrElse {
+                AppLog.e("Discover", "Action failed", it)
+                it.message ?: "Something went wrong"
+            }
             busy.value = false
         }
     }

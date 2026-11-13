@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.vault.app
+import app.vault.data.AppLog
 import app.vault.data.Site
 import kotlinx.coroutines.launch
 
@@ -36,7 +37,7 @@ fun SitesScreen() {
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             val msg = runCatching { repo.importSites(ctx, uri) }
-                .fold({ (found, added) -> "Found $found sites · $added new" }, { "Import failed: ${it.message}" })
+                .fold({ (found, added) -> "Found $found sites · $added new" }, { AppLog.e("Sites", "File import failed", it); "Import failed: ${it.message}" })
             snack.showSnackbar(msg)
         }
     }

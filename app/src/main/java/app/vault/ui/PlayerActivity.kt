@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import app.vault.AppLock
 import app.vault.app
+import app.vault.data.AppLog
 
 /**
  * Full-screen native player: double-tap left/right to skip 10s, built-in speed & quality menu,
@@ -81,6 +82,7 @@ class PlayerActivity : ComponentActivity() {
         player.playWhenReady = true
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                AppLog.e("Player", "Playback failed: ${error.errorCodeName} on ${android.net.Uri.parse(url).host}", error)
                 android.widget.Toast.makeText(this@PlayerActivity, "Can't play this link: ${error.errorCodeName}", android.widget.Toast.LENGTH_LONG).show()
             }
         })
