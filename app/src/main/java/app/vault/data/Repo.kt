@@ -62,15 +62,28 @@ class Repo(context: Context, val prefs: Prefs) {
 
     /** Reads every link from an HTML file (bookmarks export or any page) and adds one entry per domain. */
     suspend fun importSites(context: Context, uri: Uri): Pair<Int, Int> = withContext(Dispatchers.IO) {
-        val html = context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+        val text = context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
             ?: throw IllegalStateException("Could not read the file")
+        importSitesText(text)
+    }
+
+    /**
+     * Imports pasted text: HTML, full links, or bare domains (one per line or separated by spaces/commas).
+     * Returns (sites found, sites newly added).
+     */
+    suspend fun importSitesText(text: String): Pair<Int, Int> = withContext(Dispatchers.IO) {
         val found = linkedMapOf<String, Site>()
-        val doc = Jsoup.parse(html)
-        for (a in doc.select("a[href]")) addLink(found, a.attr("href"), a.text())
-        if (found.isEmpty()) {
-            // Plain text / unusual format: pick up bare URLs.
-            Regex("https?://[^\\s\"'<>]+").findAll(html).forEach { addLink(found, it.value, "") }
+        if (text.contains("<a", ignoreCase = true)) {
+            for (a in Jsoup.parse(text).select("a[href]")) addLink(found, a.attr("href"), a.text())
         }
+        Regex("https?://[^\\s\"'<>]+").findAll(text).forEach { addLink(found, it.value, "") }
+        // Bare domains like "example.com" or "www.example.co.uk/page"
+        if (!text.contains("<")) {
+            text.split(Regex("[\\s,;]+")).map { it.trim() }
+                .filter { !it.startsWith("http") && Regex("^[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)+(/.*)?$").matches(it) }
+                .forEach { addLink(found, "https://$it", "") }
+        }
+        if (found.isEmpty()) throw IllegalStateException("No website links found")
         val inserted = sites.insertAll(found.values.toList()).count { it != -1L }
         found.size to inserted
     }

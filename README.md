@@ -13,7 +13,7 @@ opens from the original sites.
   nationality, hair, eyes, cup size, tattoos, piercings and your own tags. Sort by name, age,
   debut, career length, scene count or recently updated.
 - **Profiles** with full stats, bio, scene list with previews, favourites and custom tags.
-- **Find on my sites**: import your list of websites from an HTML file (e.g. a bookmarks export).
+- **Find on my sites**: import your list of websites by uploading an HTML file (e.g. a bookmarks export) or pasting HTML, links or domains.
   On any profile, tap *Find on my sites*. Sites where the database confirms the performer appeared
   are marked ✓ at the top. Tapping a site opens it searching for that performer's name.
   You can give each site its own search link (`https://site.com/search?q={q}`).
@@ -34,7 +34,7 @@ opens from the original sites.
 1. Install the APK (allow "Install unknown apps" for your browser or file manager).
 2. Create a free account at theporndb.net. Copy your API token from your profile.
 3. In the app, go to **Settings → ThePornDB API key**, paste the token and tap **Update now**.
-4. Go to **My sites → Import HTML file** and pick your file.
+4. Go to **My sites** and tap **Upload file** to pick your HTML file, or **Paste** to paste HTML, links or domains.
 
 ## Building
 

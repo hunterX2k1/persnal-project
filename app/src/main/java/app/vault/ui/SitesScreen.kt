@@ -30,6 +30,7 @@ fun SitesScreen() {
     var editing by remember { mutableStateOf<Site?>(null) }
     var adding by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var pasting by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -48,13 +49,19 @@ fun SitesScreen() {
                 if (sites.isNotEmpty()) IconButton(onClick = { confirmClear = true }) { Icon(Icons.Default.DeleteSweep, "Clear all", tint = Muted) }
             }
             Text("Stored only on this phone. Used by \"Find on my sites\" on every profile.", color = Muted, fontSize = 13.sp)
-            Button(
-                onClick = { picker.launch(arrayOf("text/html", "text/plain", "application/xhtml+xml", "*/*")) },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).height(50.dp),
-            ) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Import HTML file", fontWeight = FontWeight.Bold) }
+            Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = { picker.launch(arrayOf("text/html", "text/plain", "application/xhtml+xml", "*/*")) },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                ) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Upload file", fontWeight = FontWeight.Bold) }
+                FilledTonalButton(
+                    onClick = { pasting = true },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                ) { Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(8.dp)); Text("Paste", fontWeight = FontWeight.Bold) }
+            }
 
             if (sites.isEmpty()) {
-                EmptyState("No sites yet", "Import a bookmarks export or any HTML page with links. Every website in it is added once.")
+                EmptyState("No sites yet", "Upload a bookmarks export or HTML page, or paste links. Every website is added once.")
             } else {
                 OutlinedTextField(q, { q = it }, placeholder = { Text("Filter ${sites.size} sites") }, singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth())
@@ -77,6 +84,14 @@ fun SitesScreen() {
     if (adding) TextPrompt("Add site", "example.com", onDismiss = { adding = false }) { url ->
         repo.addSite(url.trim(), null)?.let { scope.launch { repo.sites.upsert(it) } }
         adding = false
+    }
+    if (pasting) PasteDialog(onDismiss = { pasting = false }) { text ->
+        pasting = false
+        scope.launch {
+            val msg = runCatching { repo.importSitesText(text) }
+                .fold({ (found, added) -> "Found $found sites · $added new" }, { "Import failed: ${it.message}" })
+            snack.showSnackbar(msg)
+        }
     }
     if (confirmClear) AlertDialog(
         onDismissRequest = { confirmClear = false },
@@ -111,5 +126,30 @@ private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> 
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+    )
+}
+
+@Composable
+private fun PasteDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Paste websites") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Paste HTML, links or domains — one per line is fine.", color = Muted, fontSize = 13.sp)
+                OutlinedTextField(
+                    text, { text = it },
+                    placeholder = { Text("example.com\nhttps://another-site.com\n<a href=\"...\">…</a>") },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 320.dp),
+                )
+                TextButton(onClick = { clipboard.getText()?.text?.let { text = if (text.isBlank()) it else text + "\n" + it } }) {
+                    Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(6.dp)); Text("Paste from clipboard")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onImport(text) }, enabled = text.isNotBlank()) { Text("Import") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
