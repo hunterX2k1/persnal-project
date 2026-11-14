@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:name="app.atlas.App"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_atlas"
+        android:roundIcon="@mipmap/ic_atlas"
+        android:label="Atlas"
+        android:supportsRtl="true"
+        android:hardwareAccelerated="true"
+        android:theme="@style/Theme.Atlas">
+
+        <activity
+            android:name="app.atlas.ui.MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="app.atlas.ui.BrowserActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:exported="false" />
+    </application>
+</manifest>

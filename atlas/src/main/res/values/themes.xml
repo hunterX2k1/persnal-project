@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg">#FF0E1014</color>
+    <color name="icon_bg">#FF1B2333</color>
+    <style name="Theme.Atlas" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+    </style>
+</resources>

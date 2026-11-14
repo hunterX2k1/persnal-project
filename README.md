@@ -1,3 +1,32 @@
+# Apps
+
+This repo has two separate Android apps:
+
+- **Atlas** (`atlas/`): an unofficial reader for the FMHY index of free sites and tools.
+- **Vault** (`app/`): see below.
+
+## Atlas
+
+Reads FMHY's public Markdown pages (github.com/fmhy/edit) and shows them as a native app.
+It hosts nothing itself.
+
+- 25 pages, about 16,800 sites, organised into sections like the website.
+  Shows 🌟 / ⭐ ratings, descriptions and mirror links.
+- Global search across every page, filtering inside a page, a section list and
+  "Recommended only" mode.
+- FMHY links between pages open inside the app.
+- Bookmarks and history.
+- Works offline once loaded and refreshes daily.
+- In-app browser built for video sites:
+  - blocks ads, trackers and malware (StevenBlack hosts list)
+  - blocks pop-ups and redirects (offers to open them anyway)
+  - warns before opening sites FMHY lists as unsafe
+  - full-screen landscape video with picture-in-picture
+  - downloads to the Downloads folder
+  - desktop mode
+  - can turn off blocking per site
+- Debug report (Settings → Diagnostics) for crashes and errors.
+
 # Vault
 
 A private Android app (18+) for browsing an auto-updating performer directory and finding
