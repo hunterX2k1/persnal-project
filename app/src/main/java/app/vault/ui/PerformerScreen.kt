@@ -43,13 +43,14 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
     val tags = repo.performers.tagsFor(id).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val sites = repo.sites.all().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val scenes = MutableStateFlow<List<Scene>?>(null)
+    val noKey = MutableStateFlow(false)
     val scenesError = MutableStateFlow<String?>(null)
 
     init {
         viewModelScope.launch {
             val p = performer.filterNotNull().first()
             runCatching { repo.scenes(p) }
-                .onSuccess { scenes.value = it }
+                .onSuccess { if (it == null) { noKey.value = true; scenes.value = emptyList() } else scenes.value = it }
                 .onFailure { AppLog.e("Profile", "Loading scenes failed", it); scenes.value = emptyList(); scenesError.value = it.message }
             runCatching { repo.refresh(id) }.onFailure { AppLog.w("Profile", "Refresh failed: ${it.message}") }
         }
@@ -72,6 +73,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
     val scenes by vm.scenes.collectAsStateWithLifecycle()
     val sites by vm.sites.collectAsStateWithLifecycle()
     val scenesError by vm.scenesError.collectAsStateWithLifecycle()
+    val noKey by vm.noKey.collectAsStateWithLifecycle()
     var showSites by remember { mutableStateOf(false) }
     var showTag by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
@@ -158,7 +160,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
             }
             when {
                 scenes == null -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
-                scenes!!.isEmpty() -> Text(scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
+                scenes!!.isEmpty() -> Text(if (noKey) "Scene lists and ✓ site matches need the optional ThePornDB key (Settings)." else scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(scenes!!, key = { it.id }) { s -> SceneCard(s) { sceneMenu = s } }
                 }

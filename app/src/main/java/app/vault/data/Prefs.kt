@@ -43,6 +43,7 @@ class Prefs(context: Context) {
     var clearBrowserOnExit by bool("clear_browser", true)
     var iconAlias by str("icon_alias", "Vault")
     var syncCursor by int("sync_cursor", 1)
+    var freeCursor by int("free_cursor", 0)
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
 

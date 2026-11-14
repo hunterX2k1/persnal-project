@@ -27,6 +27,8 @@ data class Performer(
     val image: String? = null,
     val thumb: String? = null,
     val sceneCount: Int? = null,
+    /** English Wikipedia article (free source only). */
+    val wiki: String? = null,
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
@@ -52,6 +54,18 @@ interface PerformerDao {
 
     @Query("SELECT * FROM performers WHERE id = :id") fun observe(id: String): Flow<Performer?>
     @Query("SELECT * FROM performers WHERE id = :id") suspend fun get(id: String): Performer?
+
+    // ---- merging the free source with ThePornDB (same person, two ids) ----
+    @Query("SELECT id FROM performers WHERE id LIKE 'wd:%' AND name = :name COLLATE NOCASE")
+    suspend fun freeIdsNamed(name: String): List<String>
+    @Query("SELECT LOWER(name) FROM performers WHERE id NOT LIKE 'wd:%' AND LOWER(name) IN (:lowerNames)")
+    suspend fun paidNamesIn(lowerNames: List<String>): List<String>
+    @Query("UPDATE OR IGNORE favorites SET performerId = :to WHERE performerId = :from") suspend fun moveFavorites(from: String, to: String)
+    @Query("UPDATE OR IGNORE tags SET performerId = :to WHERE performerId = :from") suspend fun moveTags(from: String, to: String)
+    @Query("DELETE FROM favorites WHERE performerId = :id") suspend fun deleteFavoritesOf(id: String)
+    @Query("DELETE FROM tags WHERE performerId = :id") suspend fun deleteTagsOf(id: String)
+    @Query("DELETE FROM performers WHERE id = :id") suspend fun delete(id: String)
+    @Query("UPDATE performers SET bio = :bio WHERE id = :id") suspend fun setBio(id: String, bio: String)
 
     @RawQuery(observedEntities = [Performer::class, Favorite::class, Tag::class])
     fun query(q: SupportSQLiteQuery): Flow<List<Performer>>
@@ -87,8 +101,16 @@ interface SiteDao {
     @Query("DELETE FROM sites") suspend fun clear()
 }
 
-@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 1, exportSchema = false)
+@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 2, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun performers(): PerformerDao
     abstract fun sites(): SiteDao
+
+    companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE performers ADD COLUMN wiki TEXT")
+            }
+        }
+    }
 }

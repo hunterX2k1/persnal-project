@@ -65,27 +65,30 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
     ) { a -> FilterOptions(a[0], a[1], a[2], a[3], a[4], a[5], a[6]) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FilterOptions())
 
-    val busy = MutableStateFlow(false)
+    private val localBusy = MutableStateFlow(false)
+    val busy = combine(localBusy, repo.syncing) { a, b -> a || b }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val progress = repo.syncProgress
     val message = MutableStateFlow<String?>(null)
 
     fun update(f: Filter) { filter.value = f; limit.value = PAGE }
     fun loadMore() { limit.value += PAGE }
 
-    fun sync() = launchBusy { repo.syncStep() }
+    fun sync() = repo.startSync { message.value = it }
     fun searchOnline(q: String) {
         if (q.isBlank()) return
-        launchBusy { "Found ${repo.searchOnline(q)} online" }
+        launchBusy { repo.searchOnline(q) }
     }
 
     private fun launchBusy(block: suspend () -> String) {
-        if (busy.value) return
+        if (localBusy.value) return
         viewModelScope.launch {
-            busy.value = true
+            localBusy.value = true
             message.value = runCatching { block() }.getOrElse {
                 AppLog.e("Discover", "Action failed", it)
                 it.message ?: "Something went wrong"
             }
-            busy.value = false
+            localBusy.value = false
         }
     }
 
@@ -105,6 +108,7 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
     val total by vm.total.collectAsStateWithLifecycle()
     val options by vm.options.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val progress by vm.progress.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     var showFilters by remember { mutableStateOf(false) }
     var showSort by remember { mutableStateOf(false) }
@@ -112,6 +116,8 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
     val focus = LocalFocusManager.current
     val grid = rememberLazyGridState()
 
+    // First run: fill the library straight away from the free database.
+    LaunchedEffect(total) { if (total == 0 && !favoritesOnly) { kotlinx.coroutines.delay(800); if (vm.total.value == 0) vm.sync() } }
     LaunchedEffect(message) { message?.let { snack.showSnackbar(it); vm.message.value = null } }
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= results.size - 12 } }
     LaunchedEffect(nearEnd, results.size) { if (nearEnd && results.size >= DiscoverVm.PAGE) vm.loadMore() }
@@ -178,16 +184,14 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
                 }
             }
             Text(
-                "${results.size}${if (results.size >= DiscoverVm.PAGE) "+" else ""} shown · $total in library",
+                progress ?: "${results.size}${if (results.size >= DiscoverVm.PAGE) "+" else ""} shown · $total in library",
                 color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
 
             PullToRefreshBox(isRefreshing = busy, onRefresh = { vm.sync() }, modifier = Modifier.fillMaxSize()) {
                 when {
-                    vm.prefs.apiKey.isBlank() && total == 0 -> EmptyState(
-                        "Connect the database", "Add your free ThePornDB API key in Settings to load performers.", "Open Settings", onSettings
-                    )
-                    total == 0 -> EmptyState("Library is empty", "Pull down or tap below to download the first batch of profiles.", "Sync now") { vm.sync() }
+                    total == 0 && busy -> EmptyState("Setting up your library", progress ?: "Downloading profiles…")
+                    total == 0 -> EmptyState("Library is empty", "Tap below to download profiles. No account or key needed.", "Download now") { vm.sync() }
                     results.isEmpty() && filter.text.isNotBlank() -> EmptyState(
                         "No matches saved", "Search the online database for \"${filter.text}\"?", "Search online"
                     ) { vm.searchOnline(filter.text) }

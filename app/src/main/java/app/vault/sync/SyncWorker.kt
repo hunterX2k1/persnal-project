@@ -10,8 +10,7 @@ import java.util.concurrent.TimeUnit
 class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext.app
-        if (app.prefs.apiKey.isBlank()) return Result.success()
-        return runCatching { app.repo.syncStep(pages = 10) }
+        return runCatching { app.repo.sync(tpdbPages = 10) }
             .onFailure { AppLog.e("Sync", "Background sync failed (attempt $runAttemptCount)", it) }
             .fold({ Result.success() }, { if (runAttemptCount < 3) Result.retry() else Result.failure() })
     }

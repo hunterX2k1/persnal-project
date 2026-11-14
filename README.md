@@ -7,7 +7,8 @@ opens from the original sites.
 ## Features
 
 - **Age gate** on first launch.
-- **Performer directory** from ThePornDB that updates itself in the background every 12 hours.
+- **Performer directory** from Wikidata (free, no account or key; about 13,000 profiles), plus ThePornDB
+  if you add an optional key. Updates itself in the background every 12 hours.
   Only adults are shown: anyone with a known birthday under 18 is always excluded.
 - **Filters & sorting**: age range, active/retired, debut year, height, gender, ethnicity,
   nationality, hair, eyes, cup size, tattoos, piercings and your own tags. Sort by name, age,
@@ -32,8 +33,9 @@ opens from the original sites.
 ## Setup
 
 1. Install the APK (allow "Install unknown apps" for your browser or file manager).
-2. Create a free account at theporndb.net. Copy your API token from your profile.
-3. In the app, go to **Settings → ThePornDB API key**, paste the token and tap **Update now**.
+2. Open the app. It downloads the free profile database by itself (a few minutes on first run).
+3. Optional: for more profiles, scene lists and ✓ site matches, create a free account at theporndb.net
+   and paste your API token in **Settings → ThePornDB API key**.
 4. Go to **My sites** and tap **Upload file** to pick your HTML file, or **Paste** to paste HTML, links or domains.
 
 ## Building

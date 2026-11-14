@@ -33,7 +33,8 @@ fun SettingsScreen() {
     val scope = rememberCoroutineScope()
     val total by repo.performers.count().collectAsState(initial = 0)
     var key by remember { mutableStateOf(prefs.apiKey) }
-    var syncing by remember { mutableStateOf(false) }
+    val syncing by repo.syncing.collectAsState()
+    val progress by repo.syncProgress.collectAsState()
     var pinStep by remember { mutableStateOf(0) } // 0 none, 1 enter new, 2 confirm
     var firstPin by remember { mutableStateOf("") }
 
@@ -41,31 +42,34 @@ fun SettingsScreen() {
         Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
 
         SectionTitle("Database")
-        OutlinedTextField(
-            key, { key = it }, label = { Text("ThePornDB API key") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+        Text(
+            "Profiles come from Wikidata, a free public database. No account or key needed.",
+            fontSize = 13.sp, color = Muted,
         )
-        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { prefs.apiKey = key.trim() }, enabled = key.trim() != prefs.apiKey) { Text("Save key") }
-            OutlinedButton(onClick = { ctx.openBrowser("https://theporndb.net/register") }) { Text("Get a free key") }
-        }
         Text(
             "$total profiles saved on this phone. Updates automatically every 12 hours in the background." +
                 (if (prefs.lastSync > 0) "\nLast update: ${DateFormat.getDateTimeInstance().format(Date(prefs.lastSync))} · ${prefs.lastSyncMessage}" else ""),
             color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp),
         )
         OutlinedButton(
-            enabled = !syncing && prefs.apiKey.isNotBlank(),
-            onClick = {
-                syncing = true
-                scope.launch {
-                    prefs.lastSyncMessage = runCatching { repo.syncStep(pages = 10) }.getOrElse { "Failed: ${it.message}" }
-                    syncing = false
-                }
-            },
+            enabled = !syncing,
+            onClick = { repo.startSync() },
             modifier = Modifier.padding(top = 8.dp),
-        ) { Text(if (syncing) "Updating…" else "Update now") }
+        ) { Text(if (syncing) (progress ?: "Updating…") else "Update now") }
 
+        SectionTitle("Optional: ThePornDB key")
+        Text(
+            "Adds more profiles, extra details (measurements, tattoos…), scene lists with previews and ✓ matches on your sites.",
+            fontSize = 13.sp, color = Muted, modifier = Modifier.padding(bottom = 8.dp),
+        )
+        OutlinedTextField(
+            key, { key = it }, label = { Text("ThePornDB API key") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+        )
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { prefs.apiKey = key.trim(); if (prefs.apiKey.isNotBlank()) repo.startSync() }, enabled = key.trim() != prefs.apiKey) { Text("Save key") }
+            OutlinedButton(onClick = { ctx.openBrowser("https://theporndb.net/register") }) { Text("Get a free key") }
+        }
         SectionTitle("Privacy")
         ToggleRow("Hide from Recent apps & block screenshots", "Shows a blank card in the app switcher", prefs.hideInRecents) { prefs.hideInRecents = it }
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }

@@ -10,10 +10,11 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.vault.data.AppLog
 import app.vault.data.Prefs
+import app.vault.data.USER_AGENT
 import app.vault.data.Repo
 import app.vault.sync.SyncWorker
 
-class App : Application() {
+class App : Application(), coil.ImageLoaderFactory {
     lateinit var prefs: Prefs
     lateinit var repo: Repo
 
@@ -30,6 +31,16 @@ class App : Application() {
         })
         SyncWorker.schedule(this)
     }
+
+    /** Image loader that identifies the app (Wikimedia rejects anonymous image requests). */
+    override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this)
+        .okHttpClient {
+            okhttp3.OkHttpClient.Builder()
+                .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build()) }
+                .build()
+        }
+        .crossfade(true)
+        .build()
 }
 
 object AppLock {
