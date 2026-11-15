@@ -145,9 +145,9 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
         return hits >= 2 || (echoes && extract(html, url, site, VideoQuery(sample, emptyList())).size + hits >= 1)
     }
 
-    private class Page(val code: Int, val html: String?, val blocked: Boolean)
+    class Page(val code: Int, val html: String?, val blocked: Boolean, val finalUrl: String? = null)
 
-    private suspend fun fetch(url: String): Page = withContext(Dispatchers.IO) {
+    suspend fun fetch(url: String): Page = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(url)
             .header("User-Agent", BROWSER_UA)
             .header("Accept", "text/html,application/xhtml+xml")
@@ -160,7 +160,7 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
                 when {
                     r.code == 403 || r.code == 503 || r.code == 429 || bot -> Page(r.code, null, true)
                     !r.isSuccessful -> Page(r.code, null, false)
-                    else -> Page(r.code, body, false)
+                    else -> Page(r.code, body, false, r.request.url.toString())
                 }
             }
         }.getOrElse { Page(0, null, false) }

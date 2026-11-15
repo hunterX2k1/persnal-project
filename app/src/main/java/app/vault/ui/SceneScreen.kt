@@ -52,6 +52,8 @@ class SceneVm(app: Application, val sceneId: String) : AndroidViewModel(app) {
             siteCount.value = sites.size
             AppLog.i("SiteSearch", "Searching ${sites.size} sites for a video")
             val q = VideoQuery(s.title, s.performers.map { it.name })
+            // Meanwhile, look for this video on sites not in my list yet.
+            launch { repo.discover(q).forEach { p -> progress.value = progress.value + (p.site.domain to p) } }
             repo.siteSearch.searchAll(sites, q).collect { p ->
                 progress.value = progress.value + (p.site.domain to p)
                 if (progress.value.values.none { it.status is SiteStatus.Searching } && progress.value.size == sites.size) running.value = false

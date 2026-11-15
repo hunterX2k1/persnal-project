@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import app.vault.AppLock
 import app.vault.app
 import app.vault.data.AdBlock
@@ -375,6 +377,11 @@ class BrowserActivity : ComponentActivity() {
                         leadingIcon = { Icon(Icons.Default.Shield, null) },
                         onClick = { prefs.toggleAllowAds(currentSite); web.reload(); menu = false },
                     )
+                    DropdownMenuItem(text = { Text("Add this site to My sites") }, leadingIcon = { Icon(Icons.Default.AddLink, null) },
+                        onClick = {
+                            menu = false
+                            lifecycleScope.launch { show(app.repo.addSiteAndScan(pageUrl), null) }
+                        })
                     DropdownMenuItem(text = { Text("Copy link") }, leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
                         onClick = { copy(pageUrl, "Link copied"); menu = false })
                     DropdownMenuItem(text = { Text("Open in phone browser") }, leadingIcon = { Icon(Icons.Default.Public, null) },

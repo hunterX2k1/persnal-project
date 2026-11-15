@@ -3,6 +3,10 @@ package app.vault.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import app.vault.data.SiteKind
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -32,6 +36,10 @@ fun SitesScreen() {
     var adding by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var pasting by remember { mutableStateOf(false) }
+    var kindFilter by remember { mutableStateOf("all") }
+    var menu by remember { mutableStateOf(false) }
+    val scanning by repo.scanning.collectAsState()
+    val scanStatus by repo.scanStatus.collectAsState()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -47,7 +55,15 @@ fun SitesScreen() {
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("My sites", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
                 IconButton(onClick = { adding = true }) { Icon(Icons.Default.Add, "Add site") }
-                if (sites.isNotEmpty()) IconButton(onClick = { confirmClear = true }) { Icon(Icons.Default.DeleteSweep, "Clear all", tint = Muted) }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text("Rescan all sites") }, leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                            onClick = { menu = false; repo.scanSites(rescan = true) }, enabled = !scanning)
+                        if (sites.isNotEmpty()) DropdownMenuItem(text = { Text("Remove all sites") }, leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                            onClick = { menu = false; confirmClear = true })
+                    }
+                }
             }
             Text("Stored only on this phone. Used by \"Find on my sites\" on every profile.", color = Muted, fontSize = 13.sp)
             Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -61,15 +77,60 @@ fun SitesScreen() {
                 ) { Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(8.dp)); Text("Paste", fontWeight = FontWeight.Bold) }
             }
 
+            // Scanner: sorts sites by type and finds the search page of video sites
+            val unscanned = sites.count { it.kind == null && !it.domain.contains('/') }
+            if (sites.isNotEmpty()) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface1).padding(12.dp)) {
+                Text(
+                    when {
+                        scanning -> scanStatus ?: "Scanning…"
+                        unscanned > 0 -> "$unscanned sites not checked yet. Scan them to find which ones have videos and a search page."
+                        else -> "${sites.count { it.kind == SiteKind.VIDEO }} video sites · ${sites.count { it.inVideoSearch && it.kind == SiteKind.VIDEO }} searchable · ${sites.count { it.discovered }} found automatically"
+                    },
+                    fontSize = 13.sp,
+                )
+                if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                else if (unscanned > 0) Button(onClick = { repo.scanSites() }, modifier = Modifier.padding(top = 8.dp)) {
+                    Icon(Icons.Default.Radar, null); Spacer(Modifier.width(6.dp)); Text("Scan $unscanned sites")
+                }
+            }
+
             if (sites.isEmpty()) {
                 EmptyState("No sites yet", "Upload a bookmarks export or HTML page, or paste links. Every website is added once.")
             } else {
                 OutlinedTextField(q, { q = it }, placeholder = { Text("Filter ${sites.size} sites") }, singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth())
-                val shown = sites.filter { q.isBlank() || it.title.contains(q, true) || it.domain.contains(q, true) }
+                    leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
+                // Type filter chips with counts
+                val filters = remember(sites) {
+                    buildList {
+                        add(Triple("all", "All", sites.size))
+                        add(Triple("searchable", "Searchable", sites.count { it.inVideoSearch && !it.searchTemplate.isNullOrBlank() }))
+                        add(Triple("new", "Found automatically", sites.count { it.discovered }))
+                        SiteKind.LABELS.forEach { (k, label) -> add(Triple(k, label, sites.count { it.kind == k })) }
+                        add(Triple("unscanned", "Not checked", sites.count { it.kind == null }))
+                    }.filter { it.third > 0 || it.first == "all" }
+                }
+                androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(filters, key = { it.first }) { (k, label, n) -> FilterChip(kindFilter == k, { kindFilter = k }, label = { Text("$label · $n") }) }
+                }
+                val shown = sites.filter { s ->
+                    (q.isBlank() || s.title.contains(q, true) || s.domain.contains(q, true)) && when (kindFilter) {
+                        "all" -> true
+                        "searchable" -> s.inVideoSearch && !s.searchTemplate.isNullOrBlank()
+                        "new" -> s.discovered
+                        "unscanned" -> s.kind == null
+                        else -> s.kind == kindFilter
+                    }
+                }
                 LazyColumn(Modifier.fillMaxSize().padding(top = 8.dp)) {
                     items(shown, key = { it.domain }) { s ->
                         SiteRow(s, false, trailing = {
+                            Column(horizontalAlignment = Alignment.End) {
+                                s.kind?.let { k -> Text(SiteKind.LABELS[k] ?: k, fontSize = 11.sp, color = if (k == SiteKind.VIDEO) Accent else Muted) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (s.discovered) Text("NEW", fontSize = 10.sp, color = Accent, fontWeight = FontWeight.Bold)
+                                    if (s.inVideoSearch && !s.searchTemplate.isNullOrBlank()) Icon(Icons.Default.ManageSearch, "Searchable", tint = Accent, modifier = Modifier.size(14.dp))
+                                }
+                            }
                             IconButton(onClick = { editing = s }) { Icon(Icons.Default.Edit, "Edit", tint = Muted) }
                         }) { ctx.openBrowser(s.url) }
                     }

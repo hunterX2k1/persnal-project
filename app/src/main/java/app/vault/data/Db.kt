@@ -58,6 +58,10 @@ data class Site(
     @ColumnInfo(defaultValue = "1") val inVideoSearch: Boolean = true,
     /** When automatic search-link detection last ran (0 = never). */
     @ColumnInfo(defaultValue = "0") val searchCheckedAt: Long = 0,
+    /** What the site is: video, images, comics, stories, games, forum, other (null = not scanned yet). */
+    val kind: String? = null,
+    /** Added automatically because it had a video I searched for. */
+    @ColumnInfo(defaultValue = "0") val discovered: Boolean = false,
 )
 
 @Dao
@@ -83,6 +87,7 @@ interface PerformerDao {
     fun query(q: SupportSQLiteQuery): Flow<List<Performer>>
 
     @Query("SELECT COUNT(*) FROM performers") fun count(): Flow<Int>
+    @Query("SELECT name FROM performers WHERE id NOT LIKE 'wd:%' ORDER BY (sceneCount IS NULL), sceneCount DESC, (image IS NULL) LIMIT 1") suspend fun samplePerformerName(): String?
     @Query("SELECT id, name, aliases, thumb, image FROM performers WHERE birthday IS NULL OR birthday <= date('now', '-18 years')") suspend fun nameIndex(): List<NameRow>
     @Query("SELECT name FROM performers WHERE name LIKE :prefix || '%' ORDER BY name COLLATE NOCASE LIMIT 8") suspend fun namesStarting(prefix: String): List<String>
 
@@ -110,13 +115,14 @@ interface PerformerDao {
 interface SiteDao {
     @Query("SELECT * FROM sites ORDER BY title COLLATE NOCASE") fun all(): Flow<List<Site>>
     @Query("SELECT * FROM sites") suspend fun list(): List<Site>
+    @Query("SELECT * FROM sites WHERE domain = :d") suspend fun get(d: String): Site?
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertAll(list: List<Site>): List<Long>
     @Upsert suspend fun upsert(site: Site)
     @Delete suspend fun delete(site: Site)
     @Query("DELETE FROM sites") suspend fun clear()
 }
 
-@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 3, exportSchema = false)
+@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 4, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun performers(): PerformerDao
     abstract fun sites(): SiteDao
@@ -134,6 +140,12 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE sites ADD COLUMN inVideoSearch INTEGER NOT NULL DEFAULT 1")
                 db.execSQL("ALTER TABLE sites ADD COLUMN searchCheckedAt INTEGER NOT NULL DEFAULT 0")
                 // Old rows stored "35DD"-style cup sizes; they are rewritten on the next sync.
+            }
+        }
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sites ADD COLUMN kind TEXT")
+                db.execSQL("ALTER TABLE sites ADD COLUMN discovered INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

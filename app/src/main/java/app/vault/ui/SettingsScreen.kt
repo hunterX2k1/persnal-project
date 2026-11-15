@@ -75,6 +75,10 @@ fun SettingsScreen() {
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }
         ToggleRow("Clear browser data on close", "Cookies, history and cache are wiped each time", prefs.clearBrowserOnExit) { prefs.clearBrowserOnExit = it }
 
+        SectionTitle("Finding new sites")
+        ToggleRow("Look for new sites while searching", "When you search your sites for a video, also search the web for it", prefs.discoverSites) { prefs.discoverSites = it }
+        ToggleRow("Add sites that have the video", "New sites with a matching video are added to My sites (marked New)", prefs.autoAddDiscovered) { prefs.autoAddDiscovered = it }
+
         SectionTitle("Ad blocker")
         ToggleRow("Block ads & trackers", "${app.vault.data.AdBlock.adHostCount} ad, tracker and malware hosts, including the pop-up networks adult sites use", prefs.adblock) { prefs.adblock = it }
         ToggleRow("Block pop-ups & redirects", "Stops sites jumping to other sites unless you tap something; you can still open them from the message", prefs.blockRedirects) { prefs.blockRedirects = it }

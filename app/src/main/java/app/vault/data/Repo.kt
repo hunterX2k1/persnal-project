@@ -11,13 +11,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import java.net.URLEncoder
 
 class Repo(private val context: Context, val prefs: Prefs) {
     private val db = Room.databaseBuilder(context, AppDb::class.java, "vault.db")
-        .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3)
+        .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4)
         .fallbackToDestructiveMigration()
         .build()
     val performers = db.performers()
@@ -161,9 +162,87 @@ class Repo(private val context: Context, val prefs: Prefs) {
         val now = System.currentTimeMillis()
         return sites.list().filter {
             it.inVideoSearch && !it.domain.contains('/') && !SiteSearch.isNonVideo(it.domain) &&
+                (it.kind == null || it.kind == SiteKind.VIDEO) &&
                 // already checked, no search page found: skip for a month
                 !(it.searchTemplate.isNullOrBlank() && it.searchCheckedAt > 0 && now - it.searchCheckedAt < month)
         }.sortedByDescending { !it.searchTemplate.isNullOrBlank() } // working sites first
+    }
+
+    // ---------------- Site scanner ----------------
+
+    private val scanner = SiteScanner(siteSearch)
+    val scanning = MutableStateFlow(false)
+    val scanStatus = MutableStateFlow<String?>(null)
+    private val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    private suspend fun sampleName() = performers.samplePerformerName() ?: "Jane Doe"
+
+    /** Scans sites (unscanned ones, or all with [rescan]) to sort them by type and find search pages of video sites. */
+    fun scanSites(rescan: Boolean = false) {
+        if (scanning.value) return
+        bg.launch {
+            scanning.value = true
+            try {
+                val todo = sites.list().filter { !it.domain.contains('/') && (rescan || it.kind == null) }
+                val sample = sampleName()
+                var done = 0; var video = 0; var searchable = 0
+                val gate = kotlinx.coroutines.sync.Semaphore(6)
+                kotlinx.coroutines.coroutineScope {
+                    todo.forEach { s ->
+                        launch {
+                            gate.withPermit {
+                                val r = attempt { kotlinx.coroutines.withTimeoutOrNull(45_000) { scanner.scan(s, sample) } }.getOrNull()
+                                    ?: SiteScanner.Result(SiteKind.UNREACHABLE, null)
+                                val tpl = r.template ?: s.searchTemplate
+                                sites.upsert(s.copy(kind = r.kind, searchTemplate = tpl, searchCheckedAt = System.currentTimeMillis(),
+                                    inVideoSearch = r.kind == SiteKind.VIDEO && !tpl.isNullOrBlank()))
+                                synchronized(this@Repo) {
+                                    done++; if (r.kind == SiteKind.VIDEO) video++; if (r.kind == SiteKind.VIDEO && !tpl.isNullOrBlank()) searchable++
+                                    scanStatus.value = "Scanned $done / ${todo.size} · $video video sites · $searchable searchable"
+                                }
+                            }
+                        }
+                    }
+                }
+                AppLog.i("Scan", "Finished: ${todo.size} sites, $video video, $searchable searchable")
+            } finally { scanning.value = false }
+        }
+    }
+
+    /** Adds a site (e.g. from the browser) and scans it in the background. */
+    suspend fun addSiteAndScan(url: String): String {
+        val host = cleanDomain(attempt { java.net.URI(url).host }.getOrNull()) ?: return "That isn't a website address"
+        if (sites.get(host) != null) return "${prettyDomain(host)} is already in My sites"
+        val site = Site(host, prettyDomain(host), "https://$host/")
+        sites.upsert(site)
+        bg.launch {
+            val r = attempt { scanner.scan(site, sampleName()) }.getOrNull() ?: return@launch
+            sites.upsert(site.copy(kind = r.kind, searchTemplate = r.template, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = r.kind == SiteKind.VIDEO && r.template != null))
+        }
+        return "Added ${prettyDomain(host)} — checking what kind of site it is"
+    }
+
+    // ---------------- Discovering new sites ----------------
+
+    private val discovery = Discovery(siteSearch)
+
+    /** Web-searches for a video and returns matches on sites not in my list (adding those sites if enabled). */
+    suspend fun discover(q: VideoQuery): List<SiteProgress> {
+        if (!prefs.discoverSites) return emptyList()
+        val known = sites.list().map { it.domain }.toSet()
+        val hits = attempt { discovery.discover(q, known) }.getOrDefault(emptyList())
+        return hits.groupBy { it.domain }.map { (domain, hs) ->
+            val site = Site(domain, "${prettyDomain(domain)} (new)", "https://$domain/", kind = SiteKind.VIDEO, discovered = true)
+            if (prefs.autoAddDiscovered && sites.get(domain) == null) {
+                sites.upsert(site.copy(title = prettyDomain(domain)))
+                AppLog.i("Discover", "Added new site $domain")
+                bg.launch {
+                    val tpl = attempt { siteSearch.detectTemplate(site, sampleName()) }.getOrNull()
+                    sites.get(domain)?.let { sites.upsert(it.copy(searchTemplate = tpl, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = tpl != null)) }
+                }
+            }
+            SiteProgress(site, SiteStatus.Found(hs.size), hs)
+        }
     }
 
     /** One-time tidy-up of imported sites: fix "site.com)" style names, drop .onion and dot-less hosts, switch off non-video sites. */

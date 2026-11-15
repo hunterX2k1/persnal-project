@@ -47,7 +47,9 @@ class FindVideosVm(app: Application, val performerId: String) : AndroidViewModel
             siteCount.value = sites.size
             AppLog.i("FindVideos", "Searching ${sites.size} sites for a performer")
             val names = listOf(p.name) + p.aliases?.split(',')?.map { it.trim() }?.filter { it.length >= 4 }.orEmpty().take(2)
-            repo.siteSearch.searchAll(sites, VideoQuery(p.name, names)).collect { pr -> progress.value = progress.value + (pr.site.domain to pr) }
+            val q = VideoQuery(p.name, names)
+            launch { repo.discover(q).forEach { pr -> progress.value = progress.value + (pr.site.domain to pr) } }
+            repo.siteSearch.searchAll(sites, q).collect { pr -> progress.value = progress.value + (pr.site.domain to pr) }
         }
         job?.invokeOnCompletion { running.value = false }
     }
