@@ -16,6 +16,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val tabs = listOf(
     Tab("discover", "Discover", Icons.Default.GridView),
     Tab("favorites", "Favourites", Icons.Default.FavoriteBorder),
+    Tab("categories", "Categories", Icons.Default.Category),
     Tab("web", "Search", Icons.Default.TravelExplore),
     Tab("sites", "My sites", Icons.Default.Language),
     Tab("settings", "Settings", Icons.Default.Tune),
@@ -40,7 +41,8 @@ fun MainScaffold(onPanic: () -> Unit) {
                             }
                         },
                         icon = { Icon(t.icon, null) },
-                        label = { Text(t.label) },
+                        label = { Text(t.label, maxLines = 1) },
+                        alwaysShowLabel = false,
                         colors = NavigationBarItemDefaults.colors(indicatorColor = Surface2, selectedIconColor = Accent, selectedTextColor = Accent),
                     )
                 }
@@ -52,6 +54,7 @@ fun MainScaffold(onPanic: () -> Unit) {
             composable("discover") { DiscoverScreen(key = "all", favoritesOnly = false, onOpen = open, onPanic = onPanic, onSettings = { nav.navigate("settings") }) }
             composable("favorites") { DiscoverScreen(key = "fav", favoritesOnly = true, onOpen = open, onPanic = onPanic, onSettings = { nav.navigate("settings") }) }
             composable("web") { WebSearchScreen() }
+            composable("categories") { CategoriesScreen(onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") }) }
             composable("sites") { SitesScreen() }
             composable("settings") { SettingsScreen() }
             composable("performer/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {

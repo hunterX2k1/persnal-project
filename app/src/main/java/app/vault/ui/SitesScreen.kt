@@ -82,7 +82,7 @@ fun SitesScreen() {
     editing?.let { s -> EditSiteDialog(s, onDismiss = { editing = null },
         onSave = { scope.launch { repo.sites.upsert(it) }; editing = null },
         onDelete = { scope.launch { repo.sites.delete(s) }; editing = null }) }
-    if (adding) TextPrompt("Add site", "example.com", onDismiss = { adding = false }) { url ->
+    if (adding) TextPrompt("Add site or exact page", "example.com or a full link (Wayback links work)", onDismiss = { adding = false }) { url ->
         repo.addSite(url.trim(), null)?.let { scope.launch { repo.sites.upsert(it) } }
         adding = false
     }
@@ -105,6 +105,7 @@ fun SitesScreen() {
 @Composable
 private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> Unit, onDelete: () -> Unit) {
     var title by remember { mutableStateOf(site.title) }
+    var address by remember { mutableStateOf(site.url) }
     var tpl by remember { mutableStateOf(site.searchTemplate.orEmpty()) }
     var inSearch by remember { mutableStateOf(site.inVideoSearch) }
     var detecting by remember { mutableStateOf(false) }
@@ -117,6 +118,7 @@ private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(address, { address = it }, label = { Text("Address it opens") }, singleLine = true)
                 OutlinedTextField(tpl, { tpl = it }, label = { Text("Search link (optional)") },
                     placeholder = { Text("https://${site.domain}/search?q={q}") })
                 Text(
@@ -143,7 +145,7 @@ private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> 
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(site.copy(title = title.ifBlank { site.title }, searchTemplate = tpl.trim().takeIf { it.contains("{q") }, inVideoSearch = inSearch, searchCheckedAt = if (tpl.isBlank()) 0 else site.searchCheckedAt))
+                onSave(site.copy(title = title.ifBlank { site.title }, url = address.trim().ifBlank { site.url }, searchTemplate = tpl.trim().takeIf { it.contains("{q") }, inVideoSearch = inSearch, searchCheckedAt = if (tpl.isBlank()) 0 else site.searchCheckedAt))
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) } },

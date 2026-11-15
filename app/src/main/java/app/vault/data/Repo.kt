@@ -150,7 +150,35 @@ class Repo(context: Context, val prefs: Prefs) {
         sites.upsert(site.copy(searchTemplate = template ?: site.searchTemplate, searchCheckedAt = System.currentTimeMillis()))
     }
 
-    suspend fun videoSearchSites(): List<Site> = sites.list().filter { it.inVideoSearch }
+    suspend fun videoSearchSites(): List<Site> = sites.list().filter { it.inVideoSearch && !it.domain.contains('/') }
+
+    /** Category browsing: server-side search, then every chosen term must match title, tags, cast or studio. */
+    suspend fun browseScenes(text: String, terms: List<String>, page: Int): ScenePage? {
+        if (!hasKey) return null
+        val q = text.ifBlank { terms.firstOrNull { !isRelation(it) }.orEmpty().ifBlank { terms.firstOrNull().orEmpty() } }
+        val r = api.searchScenes(q, terms.filter(::isRelation).ifEmpty { terms }, page)
+        val all = (terms + listOf(text).filter { it.isNotBlank() })
+        val kept = r.scenes.filter { s -> all.all { Terms.matchesTerm(s, it) } }
+        kept.forEach { sceneCache[it.id] = it }
+        return r.copy(scenes = kept)
+    }
+
+    fun isRelation(term: String) = Terms.RELATIONS.any { it.equals(term, true) }
+
+    object Terms {
+        /** Adult family-roleplay categories, as studios label them. */
+        val RELATIONS = listOf(
+            "Step Mom", "Step Son", "Step Sister", "Step Brother", "Step Dad", "Step Daughter",
+            "Step Aunt", "Step Niece", "Step Nephew", "Step Grandma", "Cousin",
+            "Mother in Law", "Father in Law", "Sister in Law", "Brother in Law", "Family Roleplay", "Taboo",
+        )
+        private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+        fun matchesTerm(s: Scene, term: String): Boolean {
+            val t = norm(term).takeIf { it.isNotEmpty() } ?: return true
+            return norm(s.title).contains(t) || s.tags.any { norm(it).contains(t) } ||
+                s.performers.any { norm(it.name).contains(t) } || (s.siteName?.let { norm(it).contains(t) } == true)
+        }
+    }
 
     /** Makes sure a performer credited in a scene is in the library (fetching from ThePornDB if needed). */
     suspend fun ensurePerformer(id: String): Performer? =
@@ -202,10 +230,24 @@ class Repo(context: Context, val prefs: Prefs) {
         into[domain] = Site(domain = domain, title = title, url = "https://$domain/")
     }
 
+    /**
+     * A site from a typed/pasted address. The exact address is kept, so it opens that page.
+     * Wayback Machine links become their own entry ("example.com (archived)").
+     */
     fun addSite(rawUrl: String, title: String?): Site? {
-        val url = if (rawUrl.startsWith("http")) rawUrl else "https://$rawUrl"
-        val domain = Uri.parse(url).host?.lowercase()?.removePrefix("www.") ?: return null
-        return Site(domain, title?.takeIf { it.isNotBlank() } ?: prettyDomain(domain), "https://$domain/")
+        val url = rawUrl.trim().let { if (it.startsWith("http")) it else "https://$it" }
+        val host = Uri.parse(url).host?.lowercase()?.removePrefix("www.") ?: return null
+        val archived = Regex("^https?://web\\.archive\\.org/web/[^/]+/(?:https?://)?([^/]+)", RegexOption.IGNORE_CASE).find(url)
+        if (archived != null) {
+            val orig = archived.groupValues[1].lowercase().removePrefix("www.")
+            return Site(
+                domain = "web.archive.org/$orig",
+                title = title?.takeIf { it.isNotBlank() } ?: "${prettyDomain(orig)} (archived)",
+                url = url,
+                inVideoSearch = false, // archived copies have no working search
+            )
+        }
+        return Site(host, title?.takeIf { it.isNotBlank() } ?: prettyDomain(host), url)
     }
 
     fun siteSearchUrl(site: Site, name: String): String {
