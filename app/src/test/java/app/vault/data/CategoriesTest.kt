@@ -19,7 +19,9 @@ class CategoriesTest {
             <a href=3D"/tag/Age-Play">Age Play</a>
             <a href=3D"/tag/Sleeping">Sleeping</a>
         """.trimIndent()
-        val cats = Categories.importFrom(mht)
+        val imp = Categories.importFrom(mht)
+        assertEquals(3, imp.hidden)
+        val cats = imp.found
         println(cats)
         assertEquals(listOf("MS", "FMDD", "Foot-Fetish"), cats.map { it.code })
         val ms = cats.first()
@@ -29,6 +31,23 @@ class CategoriesTest {
         assertEquals("Groups", cats[1].group)
         assertEquals(listOf("dad", "mom", "daughters"), cats[1].words)
         assertEquals("Themes", cats[2].group)
+    }
+
+    @Test
+    fun importsFromOtherSiteLayouts() {
+        val html = """
+            <a href="https://tube.example/categories/foot-fetish/">Foot Fetish (1,234)</a>
+            <a href="/category/pov">POV</a>
+            <a href="/c/milf-12/">MILF 56K</a>
+            <a href="/tags/step-family">Step Family</a>
+            <a href="/tags/teen">Teen (18+)</a>
+            <a href="/categories/123">123</a>
+            <a href="/videos/some-video">Some video</a>
+        """.trimIndent()
+        val imp = Categories.importFrom(html)
+        println(imp)
+        assertEquals(listOf("Foot Fetish", "POV", "MILF", "Step Family"), imp.found.map { it.label })
+        assertEquals(1, imp.hidden)
     }
 
     @Test

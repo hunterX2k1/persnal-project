@@ -75,17 +75,31 @@ object Categories {
         "Quarantine", "POV", "Taboo",
     ).mapNotNull { fromLabel(it.replace(' ', '-'), it, "Themes") }
 
-    /** Reads categories from a saved page (HTML or Chrome .mht): every link to /tag/<name>. */
-    fun importFrom(raw: String): List<Category> {
+    /** Result of reading a saved page: categories found, and how many were left out by the rules above. */
+    data class Imported(val found: List<Category>, val hidden: Int)
+
+    /** Link paths that usually mean "category" on video sites: /tag/x, /tags/x, /category/x, /categories/x, /c/x, /niche/x, /genre/x, /channels/x. */
+    private val CATEGORY_PATH = Regex("/(?:tags?|categor(?:y|ies)|c|niches?|genres?|channels?|kategorie|kategori)/([^/?#]+)", RegexOption.IGNORE_CASE)
+
+    /** Reads every category link from a saved page of any site (HTML or Chrome .mht). */
+    fun importFrom(raw: String): Imported {
         val html = if (raw.contains("Content-Transfer-Encoding: quoted-printable", true)) decodeQuotedPrintable(raw) else raw
-        val doc = Jsoup.parse(html)
-        return doc.select("a[href*=/tag/]").mapNotNull { a ->
-            val slug = a.attr("href").substringAfter("/tag/").substringBefore('/').substringBefore('?').trim()
-            var text = a.text().trim()
-            if (slug.isEmpty() || text.isEmpty()) return@mapNotNull null
-            if (text.startsWith(slug + " ")) text = text.removePrefix(slug).trim() // "MS Mother, Son" → "Mother, Son"
-            fromLabel(slug, text.replace(Regex("^\\W+"), ""), "Themes")
+        var hidden = 0
+        val found = Jsoup.parse(html).select("a[href]").mapNotNull { a ->
+            val href = a.attr("href")
+            // Skip the Wayback Machine's own toolbar links (archived pages keep theirs under /web/<time>/...).
+            if (href.contains("archive.org") && !href.contains("/web/")) return@mapNotNull null
+            val m = CATEGORY_PATH.find(a.attr("href").substringAfter("/web/").let { if (it.contains("://")) it.substringAfter("://") else it }) ?: return@mapNotNull null
+            val slug = java.net.URLDecoder.decode(m.groupValues[1], "UTF-8").trim()
+            if (slug.isEmpty() || slug.all { it.isDigit() }) return@mapNotNull null
+            var text = a.text().trim().replace(Regex("\\s*\\(?[\\d,.]+[kKmM]?\\)?\\s*$"), "") // drop video counts like "(1,234)"
+            if (text.isEmpty()) text = slug.replace('-', ' ').replace('_', ' ')
+            if (text.startsWith("$slug ")) text = text.removePrefix(slug).trim() // "MS Mother, Son" → "Mother, Son"
+            text = text.replace(Regex("^\\W+"), "").take(60)
+            if (text.length < 2) return@mapNotNull null
+            fromLabel(slug, text, "Themes") ?: run { hidden++; null }
         }.distinctBy { it.code.lowercase() }
+        return Imported(found, hidden)
     }
 
     private fun decodeQuotedPrintable(s: String): String {

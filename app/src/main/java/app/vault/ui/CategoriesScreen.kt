@@ -92,12 +92,12 @@ class CategoriesVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun importPage(raw: String): Int {
-        val got = Categories.importFrom(raw)
-        val merged = (all.value + got).distinctBy { it.code.lowercase() }
+    /** Adds the categories the user ticked after importing a saved page. */
+    fun addAll(list: List<Category>): Int {
+        val merged = (all.value + list).distinctBy { it.code.lowercase() }
         val added = merged.size - all.value.size
         all.value = merged; repo.categories.save(merged)
-        AppLog.i("Categories", "Imported ${got.size} categories from a saved page, $added new")
+        AppLog.i("Categories", "Added $added categories from a saved page")
         return added
     }
 
@@ -132,6 +132,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     var showAll by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf<Categories.Imported?>(null) }
     var sort by remember { mutableStateOf(CatSort.LATEST) }
     var length by remember { mutableStateOf(Length.ANY) }
     var refine by remember { mutableStateOf("") }
@@ -144,7 +145,12 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             val raw = withContext(Dispatchers.IO) { runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull() }
-            snack.showSnackbar(if (raw == null) "Couldn't read that file" else "Added ${vm.importPage(raw)} new categories")
+            val got = raw?.let { withContext(Dispatchers.Default) { runCatching { Categories.importFrom(it) }.getOrNull() } }
+            when {
+                got == null -> snack.showSnackbar("Couldn't read that file")
+                got.found.isEmpty() -> snack.showSnackbar("No category links found on that page. Save the site's categories or tags page and try again.")
+                else -> importing = got
+            }
         }
     }
 
@@ -189,7 +195,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                             DropdownMenu(menu, { menu = false }) {
-                                DropdownMenuItem(text = { Text("Import categories from a saved page") }, leadingIcon = { Icon(Icons.Default.UploadFile, null) },
+                                DropdownMenuItem(text = { Text("Import categories from a saved site") }, leadingIcon = { Icon(Icons.Default.UploadFile, null) },
                                     onClick = { menu = false; importer.launch(arrayOf("text/html", "multipart/related", "message/rfc822", "*/*")) })
                                 DropdownMenuItem(text = { Text("Add my own category") }, leadingIcon = { Icon(Icons.Default.Add, null) }, onClick = { menu = false; adding = true })
                                 DropdownMenuItem(text = { Text("Reset category list") }, leadingIcon = { Icon(Icons.Default.Restore, null) }, onClick = { menu = false; vm.resetList() })
@@ -277,6 +283,55 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+
+    importing?.let { imp ->
+        val existing = remember(all) { all.map { it.code.lowercase() }.toSet() }
+        val fresh = imp.found.filter { it.code.lowercase() !in existing }
+        var chosen by remember(imp) { mutableStateOf(fresh.map { it.code }.toSet()) }
+        var q by remember(imp) { mutableStateOf("") }
+        ModalBottomSheet(onDismissRequest = { importing = null }, containerColor = Surface1, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text("Choose categories", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(
+                    "Found ${imp.found.size} on that page" +
+                        (if (imp.found.size > fresh.size) " · ${imp.found.size - fresh.size} you already have" else "") +
+                        (if (imp.hidden > 0) " · ${imp.hidden} not allowed and left out" else ""),
+                    color = Muted, fontSize = 13.sp,
+                )
+                OutlinedTextField(q, { q = it }, placeholder = { Text("Find") }, singleLine = true, leadingIcon = { Icon(Icons.Default.Search, null) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                val list = fresh.filter { q.isBlank() || it.label.contains(q, true) || it.code.contains(q, true) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { chosen = chosen + list.map { it.code } }) { Text("Select all") }
+                    TextButton(onClick = { chosen = chosen - list.map { it.code }.toSet() }) { Text("Select none") }
+                    Spacer(Modifier.weight(1f))
+                    Text("${chosen.size} chosen", color = Muted, fontSize = 12.sp)
+                }
+                Column(Modifier.weight(1f, fill = false).heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    if (fresh.isEmpty()) Text("You already have every category from this page.", color = Muted, modifier = Modifier.padding(vertical = 16.dp))
+                    list.forEach { c ->
+                        Row(Modifier.fillMaxWidth().clickable { chosen = if (c.code in chosen) chosen - c.code else chosen + c.code }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(c.code in chosen, { chosen = if (c.code in chosen) chosen - c.code else chosen + c.code })
+                            Column(Modifier.weight(1f)) {
+                                Text(c.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${c.group} · searches \"${c.queries.last()}\"", color = Muted, fontSize = 11.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+                Button(
+                    enabled = chosen.isNotEmpty(),
+                    onClick = {
+                        val n = vm.addAll(fresh.filter { it.code in chosen })
+                        importing = null
+                        scope.launch { snack.showSnackbar("Added $n categories") }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).height(50.dp),
+                ) { Text("Add ${chosen.size} categories", fontWeight = FontWeight.Bold) }
             }
         }
     }
