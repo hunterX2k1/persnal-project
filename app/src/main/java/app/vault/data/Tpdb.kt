@@ -26,6 +26,10 @@ data class Scene(
     val description: String? = null,
     val performers: List<ScenePerformer> = emptyList(),
     val tags: List<String> = emptyList(),
+    /** Small, fast card image (the database's own resized copy). */
+    val thumb: String? = null,
+    /** Other copies to try if an image fails to load, best first. */
+    val imageFallbacks: List<String> = emptyList(),
 )
 
 /** A performer credited in a scene. [id] is the main profile id when known. */
@@ -195,11 +199,17 @@ class TpdbApi(private val key: () -> String) {
         val tags = o.optJSONArray("tags")?.let { a ->
             (0 until a.length()).mapNotNull { a.optJSONObject(it)?.str("name") ?: a.optString(it).takeIf(String::isNotBlank) }
         }.orEmpty()
+        val posters = o.optJSONObject("posters")
+        // Prefer the database's own resized copies (fast, reliable); studio links are big and often expire.
+        val large = listOfNotNull(bg?.str("large"), bg?.str("full"), o.str("image"), posters?.str("large"), o.str("poster")).distinct()
+        val small = listOfNotNull(bg?.str("small"), bg?.str("medium"), posters?.str("small"), posters?.str("medium")).distinct()
         return Scene(
             id = id,
             title = o.str("title") ?: "Untitled",
             date = o.str("date"),
-            image = o.str("image") ?: bg?.str("large") ?: bg?.str("full") ?: o.str("poster"),
+            image = large.firstOrNull(),
+            thumb = small.firstOrNull() ?: large.firstOrNull(),
+            imageFallbacks = (small.drop(1) + large).distinct().filter { it != small.firstOrNull() },
             trailer = o.str("trailer"),
             url = o.str("url"),
             siteName = site?.str("name"),

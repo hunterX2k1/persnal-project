@@ -190,7 +190,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
 fun SceneCard(s: Scene, modifier: Modifier = Modifier.width(240.dp), onClick: () -> Unit) {
     Column(modifier) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
-            PreviewThumb(s.id, s.image, s.trailer, Modifier.fillMaxSize(), onClick)
+            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), onClick)
             formatDuration(s.durationSec)?.let { Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { Badge(it, dark = true) } }
         }
         Text(s.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp).clickable(onClick = onClick))

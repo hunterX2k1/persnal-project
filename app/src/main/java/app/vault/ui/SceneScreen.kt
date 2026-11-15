@@ -89,7 +89,7 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clickable(enabled = s.trailer != null) { s.trailer?.let { ctx.playVideo(it, s.title) } }) {
-                VImage(s.image, Modifier.fillMaxSize())
+                VImage(listOf(s.image) + s.imageFallbacks + s.thumb, Modifier.fillMaxSize())
                 if (s.trailer != null) Box(Modifier.align(Alignment.Center).size(64.dp).clip(RoundedCornerShape(32.dp)).background(Color(0x99000000)), Alignment.Center) {
                     Icon(Icons.Default.PlayArrow, "Play preview", tint = Color.White, modifier = Modifier.size(40.dp))
                 }

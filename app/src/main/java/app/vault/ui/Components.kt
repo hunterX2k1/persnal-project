@@ -11,7 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -53,17 +53,26 @@ fun Context.shareText(text: String, subject: String) {
 
 /** Remote image that honours the "blur images" privacy setting. */
 @Composable
-fun VImage(url: String?, modifier: Modifier = Modifier, forceReveal: Boolean = false) {
+fun VImage(url: String?, modifier: Modifier = Modifier, forceReveal: Boolean = false) =
+    VImage(listOf(url), modifier, forceReveal)
+
+/** Tries each image address in turn until one loads (studio links often expire). */
+@Composable
+fun VImage(urls: List<String?>, modifier: Modifier = Modifier, forceReveal: Boolean = false) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val blur = ctx.app.prefs.blurImages && !forceReveal
-    SubcomposeAsyncImage(
-        model = url,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = modifier.background(Surface2).then(if (blur) Modifier.blur(28.dp) else Modifier),
-        error = { Placeholder() },
-        loading = { Box(Modifier.fillMaxSize().background(Surface2)) },
-    )
+    val list = remember(urls) { urls.filterNotNull().filter { it.startsWith("http") }.distinct() }
+    var i by remember(list) { mutableIntStateOf(0) }
+    Box(modifier.background(Surface2)) {
+        if (i >= list.size) Placeholder()
+        else coil.compose.AsyncImage(
+            model = coil.request.ImageRequest.Builder(ctx).data(list[i]).crossfade(true).build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { i++ },
+            modifier = Modifier.fillMaxSize().then(if (blur) Modifier.blur(28.dp) else Modifier),
+        )
+    }
 }
 
 @Composable

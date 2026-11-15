@@ -28,7 +28,8 @@ fun MainScaffold(onPanic: () -> Unit) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val previewPlayer = remember { androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build().apply { volume = 0f } }
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val previewPlayer = remember { PreviewEngine.newPlayer(ctx).trackPreviewState() }
     DisposableEffect(Unit) { onDispose { previewPlayer.release() } }
     // Stop any preview when leaving a screen
     LaunchedEffect(route) { previewPlayer.pause(); PreviewState.activeId = null }

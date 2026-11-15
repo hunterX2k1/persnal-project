@@ -10,6 +10,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.vault.data.AdBlock
 import app.vault.data.AppLog
+import app.vault.data.SiteSearch
 import app.vault.data.Prefs
 import app.vault.data.USER_AGENT
 import app.vault.data.Repo
@@ -38,14 +39,26 @@ class App : Application(), coil.ImageLoaderFactory {
         }
     }
 
-    /** Image loader that identifies the app (Wikimedia rejects anonymous image requests). */
+    /**
+     * Image loader tuned for long scrolling grids: 300 MB disk cache that ignores short server cache times,
+     * a browser user agent for studio image servers, and the app's own name for Wikimedia (which requires one).
+     */
     override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this)
         .okHttpClient {
             okhttp3.OkHttpClient.Builder()
-                .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build()) }
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .addInterceptor { chain ->
+                    val req = chain.request()
+                    val ua = if (req.url.host.endsWith("wikimedia.org") || req.url.host.endsWith("wikipedia.org")) USER_AGENT else SiteSearch.BROWSER_UA
+                    chain.proceed(req.newBuilder().header("User-Agent", ua).build())
+                }
                 .build()
         }
-        .crossfade(true)
+        .memoryCache { coil.memory.MemoryCache.Builder(this).maxSizePercent(0.25).build() }
+        .diskCache { coil.disk.DiskCache.Builder().directory(cacheDir.resolve("images")).maxSizeBytes(300L * 1024 * 1024).build() }
+        .respectCacheHeaders(false)
+        .crossfade(120)
         .build()
 }
 

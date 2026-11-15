@@ -394,7 +394,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
 private fun CoverCard(s: Scene, onClick: () -> Unit) {
     Column(Modifier.clip(RoundedCornerShape(10.dp)).background(Surface1)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
-            PreviewThumb(s.id, s.image, s.trailer, Modifier.fillMaxSize(), onClick)
+            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), onClick)
             Box(Modifier.fillMaxWidth().height(56.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
             Text(s.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.BottomStart).padding(start = 26.dp, end = 6.dp, bottom = 6.dp))
