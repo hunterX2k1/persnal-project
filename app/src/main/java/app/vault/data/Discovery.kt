@@ -21,33 +21,61 @@ class Discovery(private val search: SiteSearch) {
         "theporndb.net", "iafd.com", "data18.com", "freeones.", "babepedia.com",
     )
 
-    /** Result links from DuckDuckGo, falling back to Bing if DuckDuckGo shows a bot check. */
-    suspend fun webResults(query: String): List<String> {
-        val q = URLEncoder.encode(query, "UTF-8")
-        val ddg = search.fetch("https://html.duckduckgo.com/html/?q=$q&kp=-2").html?.let { html ->
-            Jsoup.parse(html).select("a.result__a[href]").map { a ->
+    /** Engines tried for finding new sites, in order, until enough results are found. */
+    private fun engines(custom: List<Pair<String, String>>): List<Pair<String, String>> = listOf(
+        "DuckDuckGo" to "https://html.duckduckgo.com/html/?q={q}&kp=-2",
+        "Bing" to "https://www.bing.com/search?q={q}&adlt=off",
+        "Startpage" to "https://www.startpage.com/do/search?query={q}&qadf=none",
+        "Yandex" to "https://yandex.com/search/?text={q}",
+    ) + custom
+
+    /** Result links from several search engines (bot checks / captchas are skipped automatically). */
+    suspend fun webResults(query: String, custom: List<Pair<String, String>> = emptyList(), want: Int = 15): List<String> {
+        val out = LinkedHashSet<String>()
+        for ((name, tpl) in engines(custom)) {
+            if (out.size >= want) break
+            val url = SiteSearch.fill(tpl, query)
+            val page = search.fetch(url)
+            val html = page.html
+            if (html == null || page.blocked || (page.finalUrl ?: "").contains("captcha", true)) {
+                AppLog.i("Discover", "$name: no results (blocked or captcha)"); continue
+            }
+            val links = parse(name, html, url)
+            AppLog.i("Discover", "$name: ${links.size} results")
+            out += links
+        }
+        return out.toList()
+    }
+
+    private fun parse(engine: String, html: String, pageUrl: String): List<String> {
+        val doc = Jsoup.parse(html, pageUrl)
+        val specific = when (engine) {
+            "DuckDuckGo" -> doc.select("a.result__a[href]").map { a ->
                 val h = a.attr("href")
                 Regex("[?&]uddg=([^&]+)").find(h)?.let { URLDecoder.decode(it.groupValues[1], "UTF-8") } ?: h
             }
-        }.orEmpty()
-        if (ddg.isNotEmpty()) return ddg
-        val bing = search.fetch("https://www.bing.com/search?q=$q&adlt=off").html?.let { html ->
-            Jsoup.parse(html).select("li.b_algo").mapNotNull { li ->
+            "Bing" -> doc.select("li.b_algo").mapNotNull { li ->
                 val h = li.selectFirst("h2 a[href], a[href^=http]")?.attr("href") ?: return@mapNotNull null
                 Regex("[?&]u=a1([^&]+)").find(h)?.let { m ->
                     val t = m.groupValues[1].let { it + "=".repeat((4 - it.length % 4) % 4) }
                     attempt { String(java.util.Base64.getUrlDecoder().decode(t)) }.getOrNull()
                 } ?: h
             }
-        }.orEmpty()
-        AppLog.i("Discover", "Web search: ${ddg.size} DuckDuckGo, ${bing.size} Bing results")
-        return bing
+            else -> emptyList()
+        }
+        if (specific.isNotEmpty()) return specific
+        // Any other engine: outbound links that leave the engine's own site.
+        val engineHost = Repo.cleanDomain(attempt { URI(pageUrl).host }.getOrNull()).orEmpty()
+        return doc.select("a[href^=http]").map { it.attr("href") }.filter { h ->
+            val d = Repo.cleanDomain(attempt { URI(h).host }.getOrNull()) ?: return@filter false
+            !d.endsWith(engineHost) && !engineHost.endsWith(d) && !d.contains("yandex") && !d.contains("startpage") && !d.contains("microsoft")
+        }.distinct()
     }
 
     /** New sites (domain → matching video) not in [known]. */
-    suspend fun discover(q: VideoQuery, known: Set<String>, maxSites: Int = 8): List<Hit> = coroutineScope {
+    suspend fun discover(q: VideoQuery, known: Set<String>, custom: List<Pair<String, String>> = emptyList(), maxSites: Int = 8): List<Hit> = coroutineScope {
         val query = (if (q.title != q.names.firstOrNull()) "\"${q.title}\" " else "") + q.names.take(1).joinToString(" ") + " video"
-        val candidates = webResults(query).filter { it.startsWith("http") }.mapNotNull { url ->
+        val candidates = webResults(query, custom).filter { it.startsWith("http") }.mapNotNull { url ->
             val d = Repo.cleanDomain(attempt { URI(url).host }.getOrNull()) ?: return@mapNotNull null
             if (d in known || SKIP.any { d == it || d.endsWith(".$it") || d.startsWith(it) } || SiteSearch.isNonVideo(d) || AdBlock.isUnsafe(d) || AdBlock.isAd(d)) null
             else d to url

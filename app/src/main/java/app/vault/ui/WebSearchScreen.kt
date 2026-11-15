@@ -1,6 +1,8 @@
 package app.vault.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,12 +21,15 @@ import androidx.compose.ui.unit.sp
 import app.vault.app
 import app.vault.data.Prefs
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun WebSearchScreen() {
     val ctx = LocalContext.current
     val prefs = ctx.app.prefs
     val sites by ctx.app.repo.sites.all().collectAsState(initial = emptyList())
     var q by remember { mutableStateOf("") }
+    var addingEngine by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<Prefs.Engine?>(null) }
     fun go() {
         val t = q.trim(); if (t.isEmpty()) return
         val looksLikeUrl = !t.contains(' ') && t.contains('.')
@@ -43,10 +48,15 @@ fun WebSearchScreen() {
             keyboardActions = KeyboardActions(onGo = { go() }),
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Prefs.ENGINES.forEach { (k, label) ->
-                FilterChip(selected = prefs.searchEngine == k, onClick = { prefs.searchEngine = k }, label = { Text(label) })
+        // Search engines: tap to choose, long-press one you added to remove it
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(prefs.engines, key = { it.key }) { e ->
+                Box(Modifier.combinedClickable(onClick = { prefs.searchEngine = e.key }, onLongClick = { if (e.custom) removing = e })) {
+                    FilterChip(selected = prefs.searchEngine == e.key, onClick = { prefs.searchEngine = e.key },
+                        label = { Text(e.label) }, leadingIcon = if (e.custom) ({ Icon(Icons.Default.Star, null, Modifier.size(14.dp)) }) else null)
+                }
             }
+            item { AssistChip(onClick = { addingEngine = true }, label = { Text("Add engine") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) }) }
         }
         if (sites.isNotEmpty()) {
             SectionTitle("Quick open")
@@ -54,5 +64,40 @@ fun WebSearchScreen() {
                 items(sites, key = { it.domain }) { s -> SiteRow(s, false) { ctx.openBrowser(s.url) } }
             }
         }
+    }
+
+    if (addingEngine) {
+        var name by remember { mutableStateOf("") }
+        var link by remember { mutableStateOf("") }
+        var discover by remember { mutableStateOf(true) }
+        AlertDialog(
+            onDismissRequest = { addingEngine = false },
+            title = { Text("Add a search engine") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
+                    OutlinedTextField(link, { link = it }, label = { Text("Search link") }, placeholder = { Text("https://example.com/search?q={q}") }, singleLine = true)
+                    Text("Search for anything on that engine, copy the address of the results page, and replace your words with {q}.", color = Muted, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Also use it to find new sites", Modifier.weight(1f), fontSize = 14.sp)
+                        Switch(discover, { discover = it })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank() && link.contains("{q}") && link.startsWith("http"), onClick = {
+                    prefs.addEngine(name.trim(), link.trim(), discover); prefs.searchEngine = "c:${name.trim()}"; addingEngine = false
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { addingEngine = false }) { Text("Cancel") } },
+        )
+    }
+    removing?.let { e ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove ${e.label}?") },
+            confirmButton = { TextButton(onClick = { prefs.removeEngine(e); removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+        )
     }
 }

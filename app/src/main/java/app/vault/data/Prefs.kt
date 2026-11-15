@@ -70,16 +70,43 @@ class Prefs(context: Context) {
         MessageDigest.getInstance("SHA-256").digest("vault:$pin".toByteArray())
             .joinToString("") { "%02x".format(it) }
 
-    fun webSearchUrl(query: String): String {
-        val q = java.net.URLEncoder.encode(query, "UTF-8")
-        return when (searchEngine) {
-            "google" -> "https://www.google.com/search?safe=off&q=$q"
-            "bing" -> "https://www.bing.com/search?adlt=off&q=$q"
-            else -> "https://duckduckgo.com/?kp=-2&q=$q"
-        }
+    /** A search engine: [template] has {q} where the search words go. [discover] = also used to find new sites. */
+    data class Engine(val key: String, val label: String, val template: String, val custom: Boolean = false, val discover: Boolean = true)
+
+    private var customEnginesRaw by str("custom_engines", "[]")
+
+    val customEngines: List<Engine>
+        get() = attempt {
+            val a = org.json.JSONArray(customEnginesRaw)
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> Engine("c:" + o.getString("n"), o.getString("n"), o.getString("t"), true, o.optBoolean("d", true)) } }
+        }.getOrDefault(emptyList())
+
+    val engines: List<Engine> get() = BUILT_IN + customEngines
+
+    fun addEngine(name: String, template: String, discover: Boolean) {
+        val list = customEngines.filterNot { it.label.equals(name, true) } + Engine("c:$name", name, template, true, discover)
+        customEnginesRaw = org.json.JSONArray(list.map { org.json.JSONObject().put("n", it.label).put("t", it.template).put("d", it.discover) }).toString()
+    }
+
+    fun removeEngine(e: Engine) {
+        val list = customEngines.filterNot { it.key == e.key }
+        customEnginesRaw = org.json.JSONArray(list.map { org.json.JSONObject().put("n", it.label).put("t", it.template).put("d", it.discover) }).toString()
+        if (searchEngine == e.key) searchEngine = "duckduckgo"
+    }
+
+    fun webSearchUrl(query: String, engineKey: String = searchEngine): String {
+        val e = engines.firstOrNull { it.key == engineKey } ?: BUILT_IN.first()
+        return SiteSearch.fill(e.template, query)
     }
 
     companion object {
-        val ENGINES = listOf("duckduckgo" to "DuckDuckGo", "google" to "Google", "bing" to "Bing")
+        val BUILT_IN = listOf(
+            Engine("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/?kp=-2&q={q}"),
+            Engine("google", "Google", "https://www.google.com/search?safe=off&q={q}"),
+            Engine("bing", "Bing", "https://www.bing.com/search?adlt=off&q={q}"),
+            Engine("yandex", "Yandex", "https://yandex.com/search/?text={q}"),
+            Engine("brave", "Brave", "https://search.brave.com/search?q={q}&safesearch=off"),
+            Engine("startpage", "Startpage", "https://www.startpage.com/do/search?query={q}&qadf=none"),
+        )
     }
 }

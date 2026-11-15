@@ -230,7 +230,8 @@ class Repo(private val context: Context, val prefs: Prefs) {
     suspend fun discover(q: VideoQuery): List<SiteProgress> {
         if (!prefs.discoverSites) return emptyList()
         val known = sites.list().map { it.domain }.toSet()
-        val hits = attempt { discovery.discover(q, known) }.getOrDefault(emptyList())
+        val custom = prefs.customEngines.filter { it.discover }.map { it.label to it.template }
+        val hits = attempt { discovery.discover(q, known, custom) }.getOrDefault(emptyList())
         return hits.groupBy { it.domain }.map { (domain, hs) ->
             val site = Site(domain, "${prettyDomain(domain)} (new)", "https://$domain/", kind = SiteKind.VIDEO, discovered = true)
             if (prefs.autoAddDiscovered && sites.get(domain) == null) {
