@@ -15,6 +15,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -67,6 +71,32 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
     ) { a -> FilterOptions(a[0], a[1], a[2], a[3], a[4], a[5].sortedBy { c -> CUP_ORDER.indexOf(c).let { if (it < 0) 99 else it } }, a[6], a[7]) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FilterOptions())
 
+    // ---- typing suggestions ----
+    private var nameIndex: List<NameRow>? = null
+    private var indexSize = -1
+    val suggestions = MutableStateFlow<List<Suggestion>>(emptyList())
+    val online = MutableStateFlow<List<Performer>>(emptyList())
+    private var suggestJob: kotlinx.coroutines.Job? = null
+
+    fun suggest(q: String) {
+        suggestJob?.cancel()
+        if (q.isBlank()) { suggestions.value = emptyList(); online.value = emptyList(); return }
+        suggestJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(120)
+            val idx = nameIndex?.takeIf { indexSize == total.value } ?: repo.performers.nameIndex().also { nameIndex = it; indexSize = total.value }
+            val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { NameSuggest.suggest(idx, q) }
+            suggestions.value = local
+            // Online: only when the library doesn't already have a strong match
+            if (repo.hasKey && q.trim().length >= 3 && local.none { it.rank <= 2 }) {
+                kotlinx.coroutines.delay(450)
+                val have = local.map { it.row.id }.toSet()
+                online.value = runCatching { repo.onlineSuggestions(q) }.getOrDefault(emptyList()).filter { it.id !in have }
+            } else online.value = emptyList()
+        }
+    }
+
+    fun openOnline(p: Performer, then: (String) -> Unit) = viewModelScope.launch { repo.saveFromOnline(p); nameIndex = null; then(p.id) }
+
     private val localBusy = MutableStateFlow(false)
     val busy = combine(localBusy, repo.syncing) { a, b -> a || b }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -116,6 +146,11 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
     var showSort by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
     val focus = LocalFocusManager.current
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
+    val online by vm.online.collectAsStateWithLifecycle()
+    var searchFocused by remember { mutableStateOf(false) }
+    var fieldWidth by remember { mutableIntStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val grid = rememberLazyGridState()
 
     // First run: fill the library straight away from the free database.
@@ -132,10 +167,11 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
                 if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 IconButton(onClick = onPanic) { Icon(Icons.Default.VisibilityOff, "Quick hide", tint = Muted) }
             }
-            // Search
+            // Search, with name suggestions as you type
+            Box {
             OutlinedTextField(
                 value = filter.text,
-                onValueChange = { vm.update(filter.copy(text = it)) },
+                onValueChange = { vm.update(filter.copy(text = it)); vm.suggest(it) },
                 placeholder = { Text("Search by name") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
@@ -146,8 +182,41 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); vm.searchOnline(filter.text) }),
                 colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = Surface1, focusedContainerColor = Surface1, unfocusedBorderColor = Surface1),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    .onFocusChanged { searchFocused = it.isFocused; if (it.isFocused) vm.suggest(filter.text) }
+                    .onSizeChanged { fieldWidth = it.width },
             )
+            DropdownMenu(
+                expanded = searchFocused && filter.text.isNotBlank() && (suggestions.isNotEmpty() || online.isNotEmpty()),
+                onDismissRequest = { searchFocused = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                offset = androidx.compose.ui.unit.DpOffset(16.dp, 0.dp),
+                modifier = Modifier.width(with(density) { fieldWidth.toDp() } - 32.dp).heightIn(max = 420.dp),
+            ) {
+                suggestions.forEach { s ->
+                    SuggestionRow(
+                        name = s.row.name, typed = filter.text, image = s.row.thumb ?: s.row.image,
+                        hint = when {
+                            s.matchedAlias != null -> "aka ${s.matchedAlias}"
+                            s.rank >= 5 -> "Did you mean?"
+                            else -> null
+                        },
+                        onOpen = { focus.clearFocus(); searchFocused = false; onOpen(s.row.id) },
+                        onComplete = { vm.update(filter.copy(text = s.row.name)); vm.suggest(s.row.name) },
+                    )
+                }
+                if (online.isNotEmpty()) {
+                    Text("From ThePornDB", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    online.forEach { p ->
+                        SuggestionRow(
+                            name = p.name, typed = filter.text, image = p.thumb ?: p.image, hint = "Not in your library yet",
+                            onOpen = { focus.clearFocus(); searchFocused = false; vm.openOnline(p) { id -> onOpen(id) } },
+                            onComplete = { vm.update(filter.copy(text = p.name)); vm.suggest(p.name) },
+                        )
+                    }
+                }
+            }
+            }
             // Filter + sort bar and quick chips
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
@@ -219,6 +288,31 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
     }
 
     if (showFilters) FilterSheet(filter, options, onApply = { vm.update(it); showFilters = false }, onDismiss = { showFilters = false })
+}
+
+/** One suggestion: photo, name with the typed part in bold, and a button that fills in the full name. */
+@Composable
+private fun SuggestionRow(name: String, typed: String, image: String?, hint: String?, onOpen: () -> Unit, onComplete: () -> Unit) {
+    val t = typed.trim()
+    val start = if (t.isEmpty()) -1 else name.indexOf(t, ignoreCase = true)
+    val label = androidx.compose.ui.text.buildAnnotatedString {
+        if (start < 0) append(name) else {
+            append(name.substring(0, start))
+            withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Accent)) { append(name.substring(start, start + t.length)) }
+            append(name.substring(start + t.length))
+        }
+    }
+    DropdownMenuItem(
+        text = {
+            Column {
+                Text(label, maxLines = 1)
+                if (hint != null) Text(hint, color = Muted, fontSize = 11.sp)
+            }
+        },
+        leadingIcon = { VImage(image, Modifier.size(34.dp).clip(androidx.compose.foundation.shape.CircleShape)) },
+        trailingIcon = { IconButton(onClick = onComplete) { Icon(Icons.Default.NorthWest, "Fill in name", tint = Muted) } },
+        onClick = onOpen,
+    )
 }
 
 @Composable

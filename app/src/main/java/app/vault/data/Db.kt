@@ -83,6 +83,7 @@ interface PerformerDao {
     fun query(q: SupportSQLiteQuery): Flow<List<Performer>>
 
     @Query("SELECT COUNT(*) FROM performers") fun count(): Flow<Int>
+    @Query("SELECT id, name, aliases, thumb, image FROM performers WHERE birthday IS NULL OR birthday <= date('now', '-18 years')") suspend fun nameIndex(): List<NameRow>
     @Query("SELECT name FROM performers WHERE name LIKE :prefix || '%' ORDER BY name COLLATE NOCASE LIMIT 8") suspend fun namesStarting(prefix: String): List<String>
 
     @Query("SELECT DISTINCT gender FROM performers WHERE gender IS NOT NULL AND gender <> '' ORDER BY gender") fun genders(): Flow<List<String>>

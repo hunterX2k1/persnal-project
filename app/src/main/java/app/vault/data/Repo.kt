@@ -176,6 +176,14 @@ class Repo(private val context: Context, val prefs: Prefs) {
         return r.copy(scenes = kept)
     }
 
+    /** Saves a performer picked from online suggestions. */
+    suspend fun saveFromOnline(p: Performer) = upsertTpdb(listOf(p))
+
+    /** Online name suggestions (ThePornDB) for people not in the library yet. */
+    suspend fun onlineSuggestions(q: String): List<Performer> =
+        if (!hasKey || q.trim().length < 3) emptyList()
+        else api.performers(1, q.trim()).items.filter { p -> p.age()?.let { it >= 18 } != false }.take(6)
+
     /** Makes sure a performer credited in a scene is in the library (fetching from ThePornDB if needed). */
     suspend fun ensurePerformer(id: String): Performer? =
         performers.get(id) ?: if (hasKey) runCatching { api.performer(id) }.getOrNull()?.also { upsertTpdb(listOf(it)) } else null
