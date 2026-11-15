@@ -169,6 +169,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val grid = rememberLazyGridState()
+    val cols = vm.repo.prefs.colsCategories
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -212,7 +213,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
-            state = grid, columns = GridCells.Adaptive(170.dp),
+            state = grid, columns = GridCells.Fixed(cols),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxSize().statusBarsPadding(),
@@ -303,7 +304,11 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                             item { FilterChip(previewOnly, { previewOnly = !previewOnly }, label = { Text("Has preview") }) }
                             items(Length.entries) { l -> FilterChip(length == l, { length = l }, label = { Text(l.label) }) }
                         }
-                        Text((if (picked.isEmpty() && text.isBlank()) "Latest videos · " else "") + "${shown.size}${if (vm.hasMore) "+" else ""} · swipe a thumbnail to preview", color = Muted, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text((if (picked.isEmpty() && text.isBlank()) "Latest videos · " else "") + "${shown.size}${if (vm.hasMore) "+" else ""} · swipe a thumbnail to preview",
+                                color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            ColumnPicker(cols) { vm.repo.prefs.colsCategories = it }
+                        }
                     }
                 }
             }

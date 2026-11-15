@@ -8,6 +8,13 @@ import org.junit.Test
 class WikidataSourceTest {
     @Test
     fun fetchesAndParsesProfiles() = runBlocking {
+        try { check() } catch (e: ApiException) {
+            // Live service: skip (not fail) when Wikidata rate-limits this machine.
+            org.junit.Assume.assumeTrue("Wikidata busy: ${e.message}", false)
+        }
+    }
+
+    private suspend fun check() {
         val src = WikidataSource()
         val ids = src.allIds()
         println("ids: ${ids.size}")

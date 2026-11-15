@@ -47,6 +47,10 @@ class Prefs(context: Context) {
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
     var adblock by bool("adblock", true)
+    /** Grid columns chosen on each video screen (1 = list). */
+    var colsFind by int("cols_find", 1)
+    var colsVideos by int("cols_videos", 2)
+    var colsCategories by int("cols_categories", 2)
     var discoverSites by bool("discover_sites", true)
     var autoAddDiscovered by bool("auto_add_discovered", true)
     var sitesTidied by bool("sites_tidied_v1", false)

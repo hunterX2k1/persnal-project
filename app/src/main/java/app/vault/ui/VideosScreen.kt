@@ -25,6 +25,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.vault.App
+import app.vault.app
 import app.vault.data.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -77,6 +78,8 @@ fun VideosScreen(performerId: String, onBack: () -> Unit, onScene: (String) -> U
     var previewOnly by rememberSaveable { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
+    val prefs = LocalContext.current.app.prefs
+    val cols = prefs.colsVideos
 
     val topTags = remember(all) { all.flatMap { it.tags }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(25).map { it.key } }
     val shown = remember(all, q, tag, sort, previewOnly) {
@@ -102,6 +105,7 @@ fun VideosScreen(performerId: String, onBack: () -> Unit, onScene: (String) -> U
                 Text(p?.name ?: "Videos", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1)
                 Text("${all.size}${total?.let { " of $it" } ?: if (vm.hasMore) "+" else ""} videos", color = Muted, fontSize = 12.sp)
             }
+            ColumnPicker(cols) { prefs.colsVideos = it }
             Box {
                 TextButton(onClick = { sortMenu = true }) { Icon(Icons.Default.SwapVert, null); Text(sort.label) }
                 DropdownMenu(sortMenu, { sortMenu = false }) {
@@ -123,8 +127,9 @@ fun VideosScreen(performerId: String, onBack: () -> Unit, onScene: (String) -> U
             all.isEmpty() && error != null -> EmptyState("No videos", error!!)
             shown.isEmpty() && !loading -> EmptyState("No matches", "Try another word or tag.")
             else -> LazyVerticalGrid(
-                state = grid, columns = GridCells.Adaptive(170.dp),
-                contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+                state = grid, columns = GridCells.Fixed(cols),
+                contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(if (cols >= 3) 6.dp else 10.dp),
+                verticalArrangement = Arrangement.spacedBy(if (cols >= 3) 8.dp else 12.dp),
             ) {
                 items(shown, key = { it.id }) { s -> SceneCard(s, Modifier.fillMaxWidth()) { onScene(s.id) } }
                 if (loading) item(span = { GridItemSpan(maxLineSpan) }) { LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp)) }

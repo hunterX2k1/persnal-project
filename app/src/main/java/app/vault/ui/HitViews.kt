@@ -76,3 +76,58 @@ fun GroupCard(g: HitGroup) {
         }
     }
 }
+
+
+/** "1 2 3 4" switch for how many columns a video grid shows. */
+@Composable
+fun ColumnPicker(cols: Int, onChange: (Int) -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(8.dp)).background(Surface1)) {
+        (1..4).forEach { n ->
+            Text(
+                "$n", fontSize = 13.sp, fontWeight = if (n == cols) FontWeight.Bold else FontWeight.Normal,
+                color = if (n == cols) Color.Black else Muted,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (n == cols) Accent else Color.Transparent)
+                    .clickable { onChange(n) }.padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
+    }
+}
+
+/** Compact grid card for a found video (2–4 columns): tap opens the best copy, "+N" lists the others. */
+@Composable
+fun HitTile(g: HitGroup, cols: Int) {
+    val ctx = LocalContext.current
+    var copies by remember { mutableStateOf(false) }
+    val h = g.best
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Surface1).clickable { ctx.openBrowser(h.url) }) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+            VImage(listOf(h.thumb) + g.others.map { it.thumb }, Modifier.fillMaxSize())
+            Box(Modifier.align(Alignment.TopStart).padding(4.dp)) { FullBadge(h) }
+            h.duration?.let { Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) { Badge(it, dark = true) } }
+        }
+        if (cols <= 3) Text(h.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = if (cols == 2) 12.sp else 11.sp,
+            fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+        Row(Modifier.padding(start = 6.dp, end = 6.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(h.siteTitle, color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (g.others.isNotEmpty()) Text("+${g.others.size}", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { copies = true }.padding(start = 4.dp))
+        }
+    }
+    if (copies) AlertDialog(
+        onDismissRequest = { copies = false },
+        title = { Text("${g.all.size} copies") },
+        text = {
+            Column {
+                g.all.forEach { o ->
+                    Row(Modifier.fillMaxWidth().clickable { copies = false; ctx.openBrowser(o.url) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FullBadge(o)
+                        Text(o.siteTitle, modifier = Modifier.weight(1f), maxLines = 1)
+                        o.duration?.let { Text(it, color = Muted, fontSize = 12.sp) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { copies = false }) { Text("Close") } },
+    )
+}
