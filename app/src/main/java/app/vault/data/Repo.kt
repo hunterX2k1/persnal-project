@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -155,8 +156,15 @@ class Repo(private val context: Context, val prefs: Prefs) {
         ))
     }
 
-    suspend fun videoSearchSites(): List<Site> =
-        sites.list().filter { it.inVideoSearch && !it.domain.contains('/') && !SiteSearch.isNonVideo(it.domain) }
+    suspend fun videoSearchSites(): List<Site> {
+        val month = 30L * 24 * 60 * 60 * 1000
+        val now = System.currentTimeMillis()
+        return sites.list().filter {
+            it.inVideoSearch && !it.domain.contains('/') && !SiteSearch.isNonVideo(it.domain) &&
+                // already checked, no search page found: skip for a month
+                !(it.searchTemplate.isNullOrBlank() && it.searchCheckedAt > 0 && now - it.searchCheckedAt < month)
+        }.sortedByDescending { !it.searchTemplate.isNullOrBlank() } // working sites first
+    }
 
     /** One-time tidy-up of imported sites: fix "site.com)" style names, drop .onion and dot-less hosts, switch off non-video sites. */
     suspend fun tidySites() {
@@ -183,6 +191,34 @@ class Repo(private val context: Context, val prefs: Prefs) {
 
     val categories = CategoryStore(context)
     val saved = SavedSearches(context)
+    val taste = Taste(context)
+
+    /** "For you": searches your favourite tags in turn and ranks results by how well they fit your taste. */
+    suspend fun forYou(page: Int): ScenePage? {
+        if (!hasKey) return null
+        val tags = taste.topTags(4)
+        if (tags.isEmpty()) return ScenePage(emptyList(), page, 0, 0)
+        val tag = tags[(page - 1) % tags.size]
+        val apiPage = (page - 1) / tags.size + 1
+        val r = api.searchScenes(tag, apiPage)
+        val kept = r.scenes.filterNot { Categories.isExcluded(*it.tags.toTypedArray()) }.sortedByDescending { taste.score(it) }
+        kept.forEach { sceneCache[it.id] = it }
+        AppLog.i("ForYou", "Page $page (tag ${tags.indexOf(tag) + 1}/${tags.size}): ${kept.size}")
+        return r.copy(scenes = kept, page = page, lastPage = r.lastPage * tags.size)
+    }
+
+    /** Performers who look like [p]: same gender/ethnicity/hair where known, similar age and height. */
+    suspend fun similar(p: Performer): List<Performer> {
+        val w = mutableListOf("p.id <> ?", "(p.birthday IS NULL OR p.birthday <= date('now','-18 years'))", "COALESCE(p.thumb, p.image) IS NOT NULL")
+        val a = mutableListOf<Any>(p.id)
+        p.gender?.let { w += "p.gender = ?"; a += it }
+        p.ethnicity?.let { w += "p.ethnicity = ?"; a += it }
+        p.hair?.let { w += "p.hair = ?"; a += it }
+        p.heightCm?.let { w += "p.heightCm BETWEEN ? AND ?"; a += it - 6; a += it + 6 }
+        p.birthday?.take(4)?.toIntOrNull()?.let { y -> w += "CAST(substr(p.birthday,1,4) AS INTEGER) BETWEEN ? AND ?"; a += y - 4; a += y + 4 }
+        val q = androidx.sqlite.db.SimpleSQLiteQuery("SELECT p.* FROM performers p WHERE ${w.joinToString(" AND ")} ORDER BY (p.sceneCount IS NULL), p.sceneCount DESC LIMIT 15", a.toTypedArray())
+        return performers.query(q).first()
+    }
 
     /**
      * Category browsing from the database (professional studio scenes, adult performers only).
@@ -191,10 +227,11 @@ class Repo(private val context: Context, val prefs: Prefs) {
      */
     suspend fun browseCategory(main: Category?, extra: List<Category>, text: String, page: Int): ScenePage? {
         if (!hasKey) return null
+        if (main?.code == Categories.FOR_YOU && text.isBlank()) return forYou(page)
         val need = listOfNotNull(main) + extra
         fun keep(r: ScenePage) = r.scenes.filter { s ->
             val hay = s.title + " " + s.tags.joinToString(" ") + " " + s.performers.joinToString(" ") { it.name }
-            need.all { c -> Categories.score(hay, c.words) >= (if (c.words.size >= 3) 66 else 100) } &&
+            need.all { c -> c.words.isEmpty() || Categories.score(hay, c.words) >= (if (c.words.size >= 3) 66 else 100) } &&
                 (text.isBlank() || main == null || SiteSearch.tokens(text).all { hay.lowercase().contains(it) }) &&
                 (need.isEmpty() || !Categories.isExcluded(*s.tags.toTypedArray()))
         }

@@ -64,7 +64,7 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, onAllVideos: () -> Unit) {
+fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, onAllVideos: () -> Unit, onFind: () -> Unit, onPerformer: (String) -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.applicationContext as Application
     val vm: PerformerVm = viewModel(key = "p:$id", factory = viewModelFactory { initializer { PerformerVm(app, id) } })
@@ -76,6 +76,8 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
     val scenesError by vm.scenesError.collectAsStateWithLifecycle()
     val noKey by vm.noKey.collectAsStateWithLifecycle()
     val sceneTotal by vm.sceneTotal.collectAsStateWithLifecycle()
+    var similar by remember { mutableStateOf<List<Performer>>(emptyList()) }
+    LaunchedEffect(p?.id) { p?.let { similar = attempt { vm.repo.similar(it) }.getOrDefault(emptyList()) } }
     var showSites by remember { mutableStateOf(false) }
     var showTag by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
@@ -106,13 +108,14 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
             Column(Modifier.padding(horizontal = 16.dp)) {
                 // Actions
                 Button(
-                    onClick = { showSites = true },
+                    onClick = onFind,
                     modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 4.dp),
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Icon(Icons.Default.TravelExplore, null); Spacer(Modifier.width(8.dp))
-                    Text("Find on my sites", fontWeight = FontWeight.Bold)
+                    Text("Find all videos on my sites", fontWeight = FontWeight.Bold)
                 }
+                TextButton(onClick = { showSites = true }) { Text("Or open one of my sites yourself") }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { vm.toggleFavorite() }, modifier = Modifier.weight(1f)) {
                         Icon(if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = Accent)
@@ -169,6 +172,12 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
                 scenes!!.isEmpty() -> Text(if (noKey) "Scene lists and ✓ site matches need the optional ThePornDB key (Settings)." else scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(scenes!!.take(15), key = { it.id }) { s -> SceneCard(s) { onScene(s.id) } }
+                }
+            }
+            if (similar.isNotEmpty()) {
+                SectionTitle("Similar performers", Modifier.padding(start = 16.dp))
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(similar, key = { it.id }) { sp -> Box(Modifier.width(130.dp)) { PerformerCard(sp, false) { onPerformer(sp.id) } } }
                 }
             }
             Spacer(Modifier.height(40.dp))

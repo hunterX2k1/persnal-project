@@ -37,7 +37,7 @@ fun MainScaffold(onPanic: () -> Unit) {
     Scaffold(
         containerColor = Bg,
         bottomBar = {
-            if (route?.let { r -> r.startsWith("performer") || r.startsWith("videos") || r.startsWith("scene") } != true) NavigationBar(containerColor = Surface1) {
+            if (route?.let { r -> r.startsWith("performer") || r.startsWith("videos") || r.startsWith("scene") || r.startsWith("find") } != true) NavigationBar(containerColor = Surface1) {
                 tabs.forEach { t ->
                     NavigationBarItem(
                         selected = route == t.route,
@@ -70,7 +70,12 @@ fun MainScaffold(onPanic: () -> Unit) {
                     id = pid, onBack = { nav.popBackStack() },
                     onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") },
                     onAllVideos = { nav.navigate("videos/${android.net.Uri.encode(pid)}") },
+                    onFind = { nav.navigate("find/${android.net.Uri.encode(pid)}") },
+                    onPerformer = open,
                 )
+            }
+            composable("find/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                FindVideosScreen(performerId = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
             }
             composable("videos/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 VideosScreen(

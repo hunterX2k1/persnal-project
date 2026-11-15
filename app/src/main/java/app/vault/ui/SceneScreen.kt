@@ -83,7 +83,9 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
         }
         return
     }
-    val hits = remember(progress) { progress.values.flatMap { it.hits }.sortedByDescending { it.score } }
+    val groups = remember(progress) { HitGroups.group(progress.values.flatMap { it.hits }) }
+    val later by vm.repo.taste.later.collectAsStateWithLifecycle()
+    LaunchedEffect(s.id) { vm.repo.taste.viewed(s) }
     val done = progress.values.count { it.status !is SiteStatus.Searching }
 
     Box(Modifier.fillMaxSize()) {
@@ -99,7 +101,12 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
                 Text(s.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
                 Text(listOfNotNull(s.siteName, s.date, formatDuration(s.durationSec)).joinToString(" • "), color = Muted, fontSize = 13.sp)
 
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val isLater = later.any { it.id == s.id }
+                FilledTonalButton(onClick = { vm.repo.taste.toggleLater(s) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Icon(if (isLater) Icons.Default.BookmarkAdded else Icons.Default.BookmarkAdd, null); Spacer(Modifier.width(6.dp))
+                    Text(if (isLater) "In Watch later" else "Watch later")
+                }
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (s.url != null) OutlinedButton(onClick = { ctx.openBrowser(s.url) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("Official page") }
                     OutlinedButton(onClick = {
                         ctx.openBrowser(vm.repo.prefs.webSearchUrl("\"${s.title}\" " + s.performers.take(2).joinToString(" ") { it.name }))
@@ -142,7 +149,7 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
                 if (running) LinearProgressIndicator(progress = { if (siteCount == 0) 0f else done / siteCount.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                 if (progress.isNotEmpty()) {
                     Text(
-                        "${hits.size} matching videos on ${progress.values.count { it.hits.isNotEmpty() }} of ${progress.size} sites",
+                        "${groups.size} matching videos on ${progress.values.count { it.hits.isNotEmpty() }} of ${progress.size} sites (copies grouped, full versions first)",
                         color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp),
                     )
                 }
@@ -150,7 +157,7 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
             if (siteCount == 0 && !running) Text("No sites to search. Import your sites in My sites first (and keep \"Include in video search\" on).", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
             // Results, best matches first
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                hits.forEach { h -> HitRow(h) { ctx.openBrowser(h.url) } }
+                groups.forEach { g -> GroupCard(g) }
             }
             if (progress.isNotEmpty()) {
                 TextButton(onClick = { showSites = !showSites }, modifier = Modifier.padding(horizontal = 8.dp)) {
@@ -180,31 +187,5 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
             }
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter))
-    }
-}
-
-private fun statusText(s: SiteStatus) = when (s) {
-    SiteStatus.Searching -> "Searching…"
-    is SiteStatus.Found -> "${s.count} match${if (s.count == 1) "" else "es"}"
-    SiteStatus.Nothing -> "No matching videos"
-    is SiteStatus.Blocked -> "Site blocks app searches — tap Open"
-    SiteStatus.NoSearchLink -> "No search link found — tap Open, or set one in My sites"
-    is SiteStatus.Failed -> "Couldn't search (${s.reason})"
-}
-
-@Composable
-private fun HitRow(h: Hit, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Surface1).clickable(onClick = onClick)) {
-        Box(Modifier.width(150.dp).aspectRatio(16f / 9f)) {
-            VImage(h.thumb, Modifier.fillMaxSize())
-            h.duration?.let { Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) { Badge(it, dark = true) } }
-        }
-        Column(Modifier.weight(1f).padding(10.dp)) {
-            Text(h.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Badge("${h.score}% match", dark = h.score < 70)
-                Text(h.siteTitle, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
     }
 }

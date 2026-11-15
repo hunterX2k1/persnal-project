@@ -104,7 +104,7 @@ class CategoriesVm(app: Application) : AndroidViewModel(app) {
     fun saveSearch(name: String) = repo.saved.save(SavedSearch(name.trim(), "categories", categorySearchJson(picked.value.map { it.code }, text.value)))
     fun applySaved(s: SavedSearch) {
         val (codes, t) = categorySearchFrom(s.data)
-        picked.value = codes.mapNotNull { c -> all.value.firstOrNull { it.code == c } }
+        picked.value = codes.mapNotNull { c -> (Categories.MOODS + all.value).firstOrNull { it.code == c } }
         text.value = t
         reload()
     }
@@ -155,6 +155,9 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     var importing by remember { mutableStateOf<Categories.Imported?>(null) }
     val savedAll by vm.saved.collectAsStateWithLifecycle()
     val savedSearches = savedAll.filter { it.kind == "categories" }
+    val recent by vm.repo.taste.recent.collectAsStateWithLifecycle()
+    val later by vm.repo.taste.later.collectAsStateWithLifecycle()
+    fun openSaved(s: Scene) { vm.repo.sceneCache[s.id] = s; onScene(s.id) }
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedSearch?>(null) }
     var sort by remember { mutableStateOf(CatSort.LATEST) }
@@ -259,6 +262,28 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                     }
                     if (savedSearches.isNotEmpty()) LazyRow(contentPadding = PaddingValues(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(savedSearches, key = { it.name }) { s -> SavedChip(s.name, onApply = { vm.applySaved(s) }, onLongPress = { deleting = s }) }
+                    }
+                    // Moods, recently viewed and watch later (home view)
+                    if (picked.isEmpty() && text.isBlank()) {
+                        Text("Moods", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(Categories.MOODS, key = { it.code }) { m ->
+                                val forYou = m.code == Categories.FOR_YOU
+                                Column(
+                                    Modifier.width(150.dp).clip(RoundedCornerShape(12.dp))
+                                        .background(if (forYou) MaterialTheme.colorScheme.primaryContainer else Surface1)
+                                        .clickable {
+                                            if (forYou && !vm.repo.taste.hasTaste) scope.launch { snack.showSnackbar("Open a few videos first — For you learns from what you watch") }
+                                            else vm.toggle(m)
+                                        }.padding(12.dp),
+                                ) {
+                                    Text(if (forYou) "✨" else moodEmoji(m.code), fontSize = 22.sp)
+                                    Text(m.label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2, minLines = 2)
+                                }
+                            }
+                        }
+                        if (later.isNotEmpty()) SceneRow("Watch later", later) { openSaved(it) }
+                        if (recent.isNotEmpty()) SceneRow("Recently viewed", recent) { openSaved(it) }
                     }
                     // Popular pairs, one tap
                     if (picked.isEmpty() && text.isBlank()) {
@@ -386,6 +411,19 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
             confirmButton = { TextButton(onClick = { if (Categories.isExcluded(label, words)) { scope.launch { snack.showSnackbar("That category isn't allowed") } } else vm.add(label, words); adding = false }) { Text("Add") } },
             dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } },
         )
+    }
+}
+
+private fun moodEmoji(code: String) = when (code) {
+    "mood-mature-younger" -> "🍷"; "mood-gilf" -> "🌹"; "mood-cougar" -> "🐆"; "mood-stepmom" -> "🏠"
+    "mood-romantic" -> "💞"; "mood-intimate" -> "🕯️"; "mood-sensual" -> "🌙"; "mood-fetish" -> "⛓️"; else -> "🎬"
+}
+
+@Composable
+private fun SceneRow(title: String, scenes: List<Scene>, onOpen: (Scene) -> Unit) {
+    Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(scenes.take(20), key = { title + it.id }) { s -> Box(Modifier.width(200.dp)) { CoverCard(s) { onOpen(s) } } }
     }
 }
 

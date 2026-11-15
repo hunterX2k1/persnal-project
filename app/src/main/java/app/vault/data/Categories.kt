@@ -75,6 +75,22 @@ object Categories {
         "Quarantine", "POV", "Taboo",
     ).mapNotNull { fromLabel(it.replace(' ', '-'), it, "Themes") }
 
+    /** Special category: videos ranked by the tags you watch most. */
+    const val FOR_YOU = "__foryou"
+
+    /** Mood mixes: broader searches with no strict word matching. Adults only, like everything else. */
+    val MOODS: List<Category> = listOf(
+        Category(FOR_YOU, "For you", "Moods", emptyList(), emptyList()),
+        Category("mood-mature-younger", "Mature women & younger men", "Moods", listOf("milf", "older woman younger man"), emptyList()),
+        Category("mood-gilf", "GILF", "Moods", listOf("granny", "gilf"), emptyList()),
+        Category("mood-cougar", "Cougar", "Moods", listOf("mature", "cougar"), emptyList()),
+        Category("mood-stepmom", "Stepmom & stepson", "Moods", listOf("mom son", "stepmom stepson"), listOf("mom", "son")),
+        Category("mood-romantic", "Romantic & passionate", "Moods", listOf("romantic", "passionate"), emptyList()),
+        Category("mood-intimate", "Intimate", "Moods", listOf("lovemaking", "intimate"), emptyList()),
+        Category("mood-sensual", "Sensual", "Moods", listOf("erotic", "sensual"), emptyList()),
+        Category("mood-fetish", "Fetish", "Moods", listOf("kink", "fetish"), emptyList()),
+    )
+
     /** Result of reading a saved page: categories found, and how many were left out by the rules above. */
     data class Imported(val found: List<Category>, val hidden: Int)
 

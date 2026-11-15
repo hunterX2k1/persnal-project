@@ -18,7 +18,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /** One video found on one of my sites. [score] is 0–100 similarity to what was searched for. */
-data class Hit(val domain: String, val siteTitle: String, val title: String, val url: String, val thumb: String?, val duration: String?, val score: Int)
+data class Hit(val domain: String, val siteTitle: String, val title: String, val url: String, val thumb: String?, val duration: String?, val score: Int, val ms: Long = 0)
 
 sealed interface SiteStatus {
     data object Searching : SiteStatus
@@ -86,10 +86,12 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
     /** Returns (blocking status or null, hits). */
     private suspend fun fetchHits(site: Site, template: String, term: String, q: VideoQuery): Pair<SiteStatus?, List<Hit>> {
         val url = fill(template, term)
+        val t0 = System.currentTimeMillis()
         val page = fetch(url)
+        val ms = System.currentTimeMillis() - t0
         if (page.blocked) return SiteStatus.Blocked(page.code) to emptyList()
         if (page.html == null) return SiteStatus.Failed("HTTP ${page.code}") to emptyList()
-        return null to extract(page.html, url, site, q)
+        return null to extract(page.html, url, site, q).map { it.copy(ms = ms) }
     }
 
     /**
