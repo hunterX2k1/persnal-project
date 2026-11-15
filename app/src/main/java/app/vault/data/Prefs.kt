@@ -46,6 +46,14 @@ class Prefs(context: Context) {
     var freeCursor by int("free_cursor", 0)
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
+    var adblock by bool("adblock", true)
+    var blockRedirects by bool("block_redirects", true)
+    var warnUnsafe by bool("warn_unsafe", true)
+    private var allowAdsRaw by str("allow_ads", "")
+    val allowAds: Set<String> get() = allowAdsRaw.split('\n').filter { it.isNotBlank() }.toSet()
+    fun toggleAllowAds(site: String) {
+        allowAdsRaw = (if (site in allowAds) allowAds - site else allowAds + site).joinToString("\n")
+    }
 
     val hasPin get() = pinHash.isNotEmpty()
 

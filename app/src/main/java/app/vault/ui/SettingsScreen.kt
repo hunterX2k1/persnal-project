@@ -74,6 +74,17 @@ fun SettingsScreen() {
         ToggleRow("Hide from Recent apps & block screenshots", "Shows a blank card in the app switcher", prefs.hideInRecents) { prefs.hideInRecents = it }
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }
         ToggleRow("Clear browser data on close", "Cookies, history and cache are wiped each time", prefs.clearBrowserOnExit) { prefs.clearBrowserOnExit = it }
+
+        SectionTitle("Ad blocker")
+        ToggleRow("Block ads & trackers", "${app.vault.data.AdBlock.adHostCount} ad, tracker and malware hosts, including the pop-up networks adult sites use", prefs.adblock) { prefs.adblock = it }
+        ToggleRow("Block pop-ups & redirects", "Stops sites jumping to other sites unless you tap something; you can still open them from the message", prefs.blockRedirects) { prefs.blockRedirects = it }
+        ToggleRow("Warn about malware sites", "${app.vault.data.AdBlock.unsafeCount} known scam / malware sites show a warning first", prefs.warnUnsafe) { prefs.warnUnsafe = it }
+        if (prefs.allowAds.isNotEmpty()) Text("Ads allowed on: ${prefs.allowAds.sorted().joinToString(", ")}", color = Muted, fontSize = 12.sp)
+        var updatingLists by remember { mutableStateOf(false) }
+        OutlinedButton(enabled = !updatingLists, onClick = {
+            updatingLists = true
+            scope.launch { app.vault.data.AdBlock.load(java.io.File(ctx.filesDir, "blocklists"), force = true); updatingLists = false }
+        }) { Text(if (updatingLists) "Updating lists…" else "Update block lists") }
         ToggleRow("PIN lock", "Asks for a PIN whenever the app is reopened", prefs.hasPin) { on ->
             if (on) pinStep = 1 else prefs.setPin(null)
         }

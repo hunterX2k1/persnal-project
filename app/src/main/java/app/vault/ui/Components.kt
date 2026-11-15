@@ -39,6 +39,17 @@ fun Context.playVideo(url: String, title: String) =
             .putExtra(PlayerActivity.EXTRA_TITLE, title)
     )
 
+fun Context.copy(text: String, label: String = "Copied") {
+    getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+    android.widget.Toast.makeText(this, label, android.widget.Toast.LENGTH_SHORT).show()
+}
+
+fun Context.openExternal(url: String) = runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+
+fun Context.shareText(text: String, subject: String) {
+    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, subject).putExtra(Intent.EXTRA_TEXT, text), "Share"))
+}
+
 /** Remote image that honours the "blur images" privacy setting. */
 @Composable
 fun VImage(url: String?, modifier: Modifier = Modifier, forceReveal: Boolean = false) {

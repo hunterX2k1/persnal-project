@@ -8,11 +8,13 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.vault.data.AdBlock
 import app.vault.data.AppLog
 import app.vault.data.Prefs
 import app.vault.data.USER_AGENT
 import app.vault.data.Repo
 import app.vault.sync.SyncWorker
+import kotlinx.coroutines.launch
 
 class App : Application(), coil.ImageLoaderFactory {
     lateinit var prefs: Prefs
@@ -30,6 +32,9 @@ class App : Application(), coil.ImageLoaderFactory {
             }
         })
         SyncWorker.schedule(this)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            AdBlock.load(java.io.File(filesDir, "blocklists"))
+        }
     }
 
     /** Image loader that identifies the app (Wikimedia rejects anonymous image requests). */
