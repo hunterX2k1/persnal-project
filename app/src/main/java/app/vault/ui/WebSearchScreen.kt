@@ -28,7 +28,8 @@ fun WebSearchScreen() {
     fun go() {
         val t = q.trim(); if (t.isEmpty()) return
         val looksLikeUrl = !t.contains(' ') && t.contains('.')
-        ctx.openBrowser(if (looksLikeUrl) (if (t.startsWith("http")) t else "https://$t") else prefs.webSearchUrl(t))
+        if (looksLikeUrl) ctx.openBrowser(if (t.startsWith("http")) t else "https://$t", fallback = prefs.webSearchUrl(t))
+        else ctx.openBrowser(prefs.webSearchUrl(t))
     }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Text("Search the web", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))

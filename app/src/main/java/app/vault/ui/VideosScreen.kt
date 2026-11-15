@@ -48,7 +48,7 @@ class VideosVm(app: Application, val performerId: String) : AndroidViewModel(app
         if (loading.value || !hasMore) return
         viewModelScope.launch {
             loading.value = true
-            runCatching { repo.scenes(p, nextPage) }
+            attempt { repo.scenes(p, nextPage) }
                 .onSuccess { r ->
                     if (r == null) { error.value = "Video lists need the optional ThePornDB key (Settings)."; lastPage = 0; return@onSuccess }
                     scenes.value = (scenes.value + r.scenes).distinctBy { it.id }

@@ -34,6 +34,7 @@ class App : Application(), coil.ImageLoaderFactory {
         SyncWorker.schedule(this)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             AdBlock.load(java.io.File(filesDir, "blocklists"))
+            runCatching { repo.tidySites() }
         }
     }
 

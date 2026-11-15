@@ -1,6 +1,8 @@
 package app.vault.ui
 
 import android.app.Application
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.*
@@ -97,6 +99,12 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
 
     fun openOnline(p: Performer, then: (String) -> Unit) = viewModelScope.launch { repo.saveFromOnline(p); nameIndex = null; then(p.id) }
 
+    val saved = repo.saved.all.map { l -> l.filter { it.kind == "discover" } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun saveFilter(name: String) = repo.saved.save(SavedSearch(name.trim(), "discover", filter.value.toJson()))
+    fun applySaved(s: SavedSearch) = update(filterFromJson(s.data, Filter(favoritesOnly = filter.value.favoritesOnly)))
+    fun deleteSaved(s: SavedSearch) = repo.saved.remove(s)
+
     private val localBusy = MutableStateFlow(false)
     val busy = combine(localBusy, repo.syncing) { a, b -> a || b }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -116,7 +124,7 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
         if (localBusy.value) return
         viewModelScope.launch {
             localBusy.value = true
-            message.value = runCatching { block() }.getOrElse {
+            message.value = attempt { block() }.getOrElse {
                 AppLog.e("Discover", "Action failed", it)
                 it.message ?: "Something went wrong"
             }
@@ -144,6 +152,9 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
     val message by vm.message.collectAsStateWithLifecycle()
     var showFilters by remember { mutableStateOf(false) }
     var showSort by remember { mutableStateOf(false) }
+    val savedFilters by vm.saved.collectAsStateWithLifecycle()
+    var naming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<SavedSearch?>(null) }
     val snack = remember { SnackbarHostState() }
     val focus = LocalFocusManager.current
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
@@ -241,6 +252,10 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
                         }
                     }
                 }
+                if (filter.activeCount > 0 || filter.sort != Sort.NAME) item {
+                    AssistChip(onClick = { naming = true }, label = { Text("Save filter") }, leadingIcon = { Icon(Icons.Default.BookmarkAdd, null, Modifier.size(18.dp)) })
+                }
+                items(savedFilters, key = { "saved:" + it.name }) { s -> SavedChip(s.name, onApply = { vm.applySaved(s) }, onLongPress = { deleting = s }) }
                 item { QuickChip("Active", filter.status == Status.ACTIVE) { vm.update(filter.copy(status = if (filter.status == Status.ACTIVE) Status.ANY else Status.ACTIVE)) } }
                 item { QuickChip("Retired", filter.status == Status.RETIRED) { vm.update(filter.copy(status = if (filter.status == Status.RETIRED) Status.ANY else Status.RETIRED)) } }
                 items(listOf(18 to 25, 26 to 35, 36 to MAX_AGE)) { (a, b) ->
@@ -287,6 +302,18 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter))
     }
 
+    if (naming) TextPrompt("Save filter", "e.g. Tall redheads", onDismiss = { naming = false }) { name ->
+        if (name.isNotBlank()) vm.saveFilter(name); naming = false
+    }
+    deleting?.let { s ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete \"${s.name}\"?") },
+            confirmButton = { TextButton(onClick = { vm.deleteSaved(s); deleting = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
+    }
+
     if (showFilters) FilterSheet(filter, options, onApply = { vm.update(it); showFilters = false }, onDismiss = { showFilters = false })
 }
 
@@ -313,6 +340,20 @@ private fun SuggestionRow(name: String, typed: String, image: String?, hint: Str
         trailingIcon = { IconButton(onClick = onComplete) { Icon(Icons.Default.NorthWest, "Fill in name", tint = Muted) } },
         onClick = onOpen,
     )
+}
+
+/** A saved filter: tap to apply, long-press to delete. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun SavedChip(name: String, onApply: () -> Unit, onLongPress: () -> Unit) {
+    Row(
+        Modifier.height(32.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primaryContainer)
+            .combinedClickable(onClick = onApply, onLongClick = onLongPress).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Bookmark, null, tint = Accent, modifier = Modifier.size(16.dp))
+        Text(name, color = Accent, fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+    }
 }
 
 @Composable

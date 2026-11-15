@@ -29,8 +29,9 @@ import app.vault.data.age
 import app.vault.data.isActive
 import coil.compose.SubcomposeAsyncImage
 
-fun Context.openBrowser(url: String) =
-    startActivity(Intent(this, BrowserActivity::class.java).putExtra(BrowserActivity.EXTRA_URL, url))
+/** Opens the private browser. [fallback] is loaded instead if a typed address doesn't exist. */
+fun Context.openBrowser(url: String, fallback: String? = null) =
+    startActivity(Intent(this, BrowserActivity::class.java).putExtra(BrowserActivity.EXTRA_URL, url).putExtra(BrowserActivity.EXTRA_FALLBACK, fallback))
 
 fun Context.playVideo(url: String, title: String) =
     startActivity(

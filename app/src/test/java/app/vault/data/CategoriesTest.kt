@@ -69,3 +69,19 @@ class CategoriesTest {
         assertEquals(50, Categories.score("Stepmom cooking show", words))
     }
 }
+
+class SavedSearchesTest {
+    @Test
+    fun filterRoundTrip() {
+        val f = Filter(
+            text = "jane", ageFrom = 25, ageTo = 40, status = Status.ACTIVE, genders = setOf("Female"),
+            cups = setOf("D", "DD"), tattoos = TriState.NO, breasts = Breasts.NATURAL, zodiacs = setOf("Leo"),
+            birthplace = "Texas", yearsActiveMin = 5, hasPhoto = true, sort = Sort.TALLEST, weightTo = 60,
+        )
+        val back = filterFromJson(f.toJson())
+        assertEquals(f, back)
+        // favourites screen keeps its own "favourites only" flag
+        assertTrue(filterFromJson(f.toJson(), Filter(favoritesOnly = true)).favoritesOnly)
+        assertEquals(Filter(), filterFromJson("not json"))
+    }
+}

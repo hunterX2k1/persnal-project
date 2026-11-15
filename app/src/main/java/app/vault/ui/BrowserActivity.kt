@@ -71,6 +71,7 @@ class BrowserActivity : ComponentActivity() {
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
     private var defaultUa: String? = null
+    private var usedFallback = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -152,6 +153,9 @@ class BrowserActivity : ComponentActivity() {
 
             override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
                 if (req.isForMainFrame) AppLog.w("Browser", "Page error ${err.errorCode} (${err.description}) on ${req.url.host}")
+                // A typed address that doesn't exist (e.g. "web.arch") → search for it instead.
+                val fb = intent.getStringExtra(EXTRA_FALLBACK)
+                if (req.isForMainFrame && err.errorCode == ERROR_HOST_LOOKUP && fb != null && !usedFallback) { usedFallback = true; view.loadUrl(fb) }
             }
 
             override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, res: WebResourceResponse) {
@@ -387,6 +391,7 @@ class BrowserActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        const val EXTRA_FALLBACK = "fallback"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     }
 }

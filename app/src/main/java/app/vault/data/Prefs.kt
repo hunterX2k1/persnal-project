@@ -47,6 +47,7 @@ class Prefs(context: Context) {
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
     var adblock by bool("adblock", true)
+    var sitesTidied by bool("sites_tidied_v1", false)
     var blockRedirects by bool("block_redirects", true)
     var warnUnsafe by bool("warn_unsafe", true)
     private var allowAdsRaw by str("allow_ads", "")

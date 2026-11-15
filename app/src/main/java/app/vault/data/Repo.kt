@@ -147,12 +147,42 @@ class Repo(private val context: Context, val prefs: Prefs) {
     // ---------------- Search my sites for a video ----------------
 
     val siteSearch = SiteSearch { site, template ->
-        sites.upsert(site.copy(searchTemplate = template ?: site.searchTemplate, searchCheckedAt = System.currentTimeMillis()))
+        // No search page found → leave the site out of video searches (the user can switch it back on).
+        sites.upsert(site.copy(
+            searchTemplate = template ?: site.searchTemplate,
+            searchCheckedAt = System.currentTimeMillis(),
+            inVideoSearch = template != null || site.searchTemplate != null,
+        ))
     }
 
-    suspend fun videoSearchSites(): List<Site> = sites.list().filter { it.inVideoSearch && !it.domain.contains('/') }
+    suspend fun videoSearchSites(): List<Site> =
+        sites.list().filter { it.inVideoSearch && !it.domain.contains('/') && !SiteSearch.isNonVideo(it.domain) }
+
+    /** One-time tidy-up of imported sites: fix "site.com)" style names, drop .onion and dot-less hosts, switch off non-video sites. */
+    suspend fun tidySites() {
+        if (prefs.sitesTidied) return
+        var fixed = 0; var removed = 0; var off = 0
+        val existing = sites.list()
+        val have = existing.map { it.domain }.toMutableSet()
+        for (s in existing) {
+            if (s.domain.contains('/')) continue // archived copies
+            val clean = cleanDomain(s.domain)
+            when {
+                clean == null -> { sites.delete(s); removed++ }
+                clean != s.domain -> {
+                    sites.delete(s); have -= s.domain
+                    if (clean !in have) { sites.upsert(s.copy(domain = clean, url = s.url.replace(s.domain, clean))); have += clean }
+                    fixed++
+                }
+                SiteSearch.isNonVideo(clean) && s.inVideoSearch -> { sites.upsert(s.copy(inVideoSearch = false)); off++ }
+            }
+        }
+        prefs.sitesTidied = true
+        AppLog.i("Sites", "Tidy-up: $fixed fixed, $removed removed, $off non-video sites left out of video search")
+    }
 
     val categories = CategoryStore(context)
+    val saved = SavedSearches(context)
 
     /**
      * Category browsing from the database (professional studio scenes, adult performers only).
@@ -161,15 +191,21 @@ class Repo(private val context: Context, val prefs: Prefs) {
      */
     suspend fun browseCategory(main: Category?, extra: List<Category>, text: String, page: Int): ScenePage? {
         if (!hasKey) return null
-        val query = text.ifBlank { main?.queries?.last().orEmpty() }
-        if (query.isBlank()) return ScenePage(emptyList(), page, 0, 0)
-        val r = api.searchScenes(query, page)
         val need = listOfNotNull(main) + extra
-        val kept = r.scenes.filter { s ->
+        fun keep(r: ScenePage) = r.scenes.filter { s ->
             val hay = s.title + " " + s.tags.joinToString(" ") + " " + s.performers.joinToString(" ") { it.name }
-            need.all { Categories.score(hay, it.words) >= 100 } &&
+            need.all { c -> Categories.score(hay, c.words) >= (if (c.words.size >= 3) 66 else 100) } &&
                 (text.isBlank() || main == null || SiteSearch.tokens(text).all { hay.lowercase().contains(it) }) &&
-                !Categories.isExcluded(*s.tags.toTypedArray())
+                (need.isEmpty() || !Categories.isExcluded(*s.tags.toTypedArray()))
+        }
+        // Nothing chosen = latest videos feed.
+        val primary = text.ifBlank { main?.queries?.last().orEmpty() }
+        var r = api.searchScenes(primary, page)
+        var kept = keep(r)
+        // "stepmom stepson" found nothing usable? try the plain wording ("mom son").
+        if (kept.isEmpty() && text.isBlank() && main != null && main.queries.size > 1) {
+            r = api.searchScenes(main.queries.first(), page)
+            kept = keep(r)
         }
         kept.forEach { sceneCache[it.id] = it }
         AppLog.i("Categories", "Page $page: ${r.scenes.size} from server, ${kept.size} kept")
@@ -226,9 +262,9 @@ class Repo(private val context: Context, val prefs: Prefs) {
     }
 
     private fun addLink(into: MutableMap<String, Site>, href: String, text: String) {
-        val uri = runCatching { Uri.parse(href.trim()) }.getOrNull() ?: return
+        val uri = runCatching { Uri.parse(href.trim().trimEnd(')', ']', '.', ',', ';', '>', '"', '\'')) }.getOrNull() ?: return
         if (uri.scheme != "http" && uri.scheme != "https") return
-        val domain = uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.") ?: return
+        val domain = cleanDomain(uri.host) ?: return
         if (domain in into) return
         val title = text.trim().takeIf { it.isNotEmpty() && it.length < 60 } ?: prettyDomain(domain)
         into[domain] = Site(domain = domain, title = title, url = "https://$domain/")
@@ -284,6 +320,13 @@ class Repo(private val context: Context, val prefs: Prefs) {
     private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
     companion object {
+        /** "WWW.Site.com)" → "site.com"; null for things that aren't usable web domains. */
+        fun cleanDomain(host: String?): String? {
+            val h = host?.lowercase()?.trim()?.trimEnd(')', ']', '.', ',', ';', '>', '"', '\'')
+                ?.removePrefix("www.")?.removePrefix("m.") ?: return null
+            if (!h.contains('.') || h.endsWith(".onion") || !Regex("^[a-z0-9.-]+$").matches(h)) return null
+            return h
+        }
         const val FREE_BATCH = 400
         fun prettyDomain(d: String) = d.substringBeforeLast('.').replaceFirstChar(Char::uppercase)
     }

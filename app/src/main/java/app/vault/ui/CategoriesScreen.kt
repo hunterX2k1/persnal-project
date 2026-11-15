@@ -61,36 +61,56 @@ class CategoriesVm(app: Application) : AndroidViewModel(app) {
         reload()
     }
     fun setText(t: String) { text.value = t.trim(); reload() }
-    fun clear() { job?.cancel(); picked.value = emptyList(); text.value = ""; scenes.value = emptyList(); message.value = null; loading.value = false }
+    fun clear() { picked.value = emptyList(); text.value = ""; reload() }
+
+    private var generation = 0
 
     fun reload() {
-        job?.cancel(); loading.value = false
+        job?.cancel()
+        generation++
+        loading.value = false
         page = 1; lastPage = 1; scenes.value = emptyList(); message.value = null
-        if (picked.value.isEmpty() && text.value.isBlank()) return
         loadMore()
     }
 
-    /** Fetches pages until a screenful of matches is found (filtering drops many per page). */
+    /** Fetches pages until a screenful of matches is found. Nothing picked = latest videos. */
     fun loadMore() {
         if (loading.value || !hasMore) return
+        val gen = generation
         job = viewModelScope.launch {
             loading.value = true
-            var found = 0; var tries = 0
-            while (hasMore && found < 18 && tries < 6) {
-                tries++
-                val main = picked.value.firstOrNull()
-                val r = runCatching { repo.browseCategory(main, picked.value.drop(1), text.value, page) }
-                    .onFailure { AppLog.e("Categories", "Browse failed", it); message.value = it.message; lastPage = 0 }
-                    .getOrNull()
-                if (r == null) { if (!repo.hasKey) message.value = "Categories use the ThePornDB key — add it in Settings."; lastPage = 0; break }
-                scenes.value = (scenes.value + r.scenes).distinctBy { it.id }
-                found += r.scenes.size
-                lastPage = r.lastPage; page++
+            try {
+                var found = 0; var tries = 0
+                while (hasMore && found < 18 && tries < 6 && gen == generation) {
+                    tries++
+                    val main = picked.value.firstOrNull()
+                    val r = attempt { repo.browseCategory(main, picked.value.drop(1), text.value, page) }
+                        .onFailure { AppLog.e("Categories", "Browse failed", it); if (gen == generation) message.value = it.message }
+                        .getOrNull()
+                    if (gen != generation) return@launch
+                    if (r == null) { if (!repo.hasKey) message.value = "Categories use the ThePornDB key — add it in Settings."; lastPage = 0; break }
+                    scenes.value = (scenes.value + r.scenes).distinctBy { it.id }
+                    found += r.scenes.size
+                    lastPage = r.lastPage; page++
+                }
+                if (gen == generation && scenes.value.isEmpty() && message.value == null) message.value = "No videos matched. Remove a category or try other words."
+            } finally {
+                if (gen == generation) loading.value = false
             }
-            if (scenes.value.isEmpty() && message.value == null) message.value = "No videos matched. Remove a category or try other words."
-            loading.value = false
         }
     }
+
+    val saved = repo.saved.all
+    fun saveSearch(name: String) = repo.saved.save(SavedSearch(name.trim(), "categories", categorySearchJson(picked.value.map { it.code }, text.value)))
+    fun applySaved(s: SavedSearch) {
+        val (codes, t) = categorySearchFrom(s.data)
+        picked.value = codes.mapNotNull { c -> all.value.firstOrNull { it.code == c } }
+        text.value = t
+        reload()
+    }
+    fun deleteSaved(s: SavedSearch) = repo.saved.remove(s)
+
+    init { reload() } // start with the latest videos
 
     /** Adds the categories the user ticked after importing a saved page. */
     fun addAll(list: List<Category>): Int {
@@ -133,6 +153,10 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf<Categories.Imported?>(null) }
+    val savedAll by vm.saved.collectAsStateWithLifecycle()
+    val savedSearches = savedAll.filter { it.kind == "categories" }
+    var naming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<SavedSearch?>(null) }
     var sort by remember { mutableStateOf(CatSort.LATEST) }
     var length by remember { mutableStateOf(Length.ANY) }
     var refine by remember { mutableStateOf("") }
@@ -228,9 +252,13 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                     }
                     // What's applied (stackable)
                     if (picked.isNotEmpty() || text.isNotBlank()) FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = { naming = true }, label = { Text("Save") }, leadingIcon = { Icon(Icons.Default.BookmarkAdd, null, Modifier.size(16.dp)) })
                         if (text.isNotBlank()) InputChip(true, { vm.setText("") }, label = { Text("“$text”") }, trailingIcon = { Icon(Icons.Default.Close, null, Modifier.size(16.dp)) })
                         picked.forEachIndexed { i, c -> InputChip(true, { vm.toggle(c) }, label = { Text((if (i == 0) "" else "+ ") + c.label) }, trailingIcon = { Icon(Icons.Default.Close, null, Modifier.size(16.dp)) }) }
                         TextButton(onClick = { vm.clear() }) { Text("Clear") }
+                    }
+                    if (savedSearches.isNotEmpty()) LazyRow(contentPadding = PaddingValues(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(savedSearches, key = { it.name }) { s -> SavedChip(s.name, onApply = { vm.applySaved(s) }, onLongPress = { deleting = s }) }
                     }
                     // Popular pairs, one tap
                     if (picked.isEmpty() && text.isBlank()) {
@@ -247,14 +275,11 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                             items(CatSort.entries) { s -> FilterChip(sort == s, { sort = s }, label = { Text(s.label) }) }
                             items(Length.entries) { l -> FilterChip(length == l, { length = l }, label = { Text(l.label) }) }
                         }
-                        Text("${shown.size} videos${if (vm.hasMore) " so far" else ""} · swipe a thumbnail to preview", color = Muted, fontSize = 12.sp)
+                        Text((if (picked.isEmpty() && text.isBlank()) "Latest videos · " else "") + "${shown.size}${if (vm.hasMore) "+" else ""} · swipe a thumbnail to preview", color = Muted, fontSize = 12.sp)
                     }
                 }
             }
             when {
-                picked.isEmpty() && text.isBlank() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    EmptyState("Pick a category", "Tap one above, open All categories, or type any words. Add more categories to narrow it down.")
-                }
                 scenes.isEmpty() && loading -> item(span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) { CircularProgressIndicator() } }
                 scenes.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) { EmptyState("Nothing yet", message ?: "") }
                 else -> {
@@ -285,6 +310,16 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                 Spacer(Modifier.height(24.dp))
             }
         }
+    }
+
+    if (naming) TextPrompt("Save this search", "e.g. My favourites", onDismiss = { naming = false }) { n -> if (n.isNotBlank()) vm.saveSearch(n); naming = false }
+    deleting?.let { s ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete \"${s.name}\"?") },
+            confirmButton = { TextButton(onClick = { vm.deleteSaved(s); deleting = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
     }
 
     importing?.let { imp ->

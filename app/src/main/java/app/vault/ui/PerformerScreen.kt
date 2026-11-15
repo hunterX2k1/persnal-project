@@ -50,10 +50,10 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             val p = performer.filterNotNull().first()
-            runCatching { repo.scenes(p) }
+            attempt { repo.scenes(p) }
                 .onSuccess { if (it == null) { noKey.value = true; scenes.value = emptyList() } else { scenes.value = it.scenes; sceneTotal.value = it.total ?: if (it.lastPage > 1) null else it.scenes.size } }
                 .onFailure { AppLog.e("Profile", "Loading scenes failed", it); scenes.value = emptyList(); scenesError.value = it.message }
-            runCatching { repo.refresh(id) }.onFailure { AppLog.w("Profile", "Refresh failed: ${it.message}") }
+            attempt { repo.refresh(id) }.onFailure { AppLog.w("Profile", "Refresh failed: ${it.message}") }
         }
     }
 

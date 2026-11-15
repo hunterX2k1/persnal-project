@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
@@ -51,7 +52,10 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
         val gate = Semaphore(parallel)
         for (site in sites) launch(Dispatchers.IO) {
             send(SiteProgress(site, SiteStatus.Searching))
-            val result = gate.withPermit { runCatching { searchSite(site, q) }.getOrElse { SiteProgress(site, SiteStatus.Failed(it.message ?: "error")) } }
+            val result = gate.withPermit {
+                attempt { withTimeoutOrNull(35_000) { searchSite(site, q) } ?: SiteProgress(site, SiteStatus.Failed("too slow")) }
+                    .getOrElse { SiteProgress(site, SiteStatus.Failed(it.message ?: "error")) }
+            }
             AppLog.i("SiteSearch", "${site.domain}: ${result.status::class.simpleName} ${result.hits.size}")
             send(result)
         }
@@ -88,21 +92,55 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
         return null to extract(page.html, url, site, q)
     }
 
-    /** Tries common search URL patterns and keeps the first that returns matching videos. */
+    /**
+     * Finds a site's search link, most reliable first:
+     *  1. the site's OpenSearch description (what browsers use for "search this site"),
+     *  2. the search box on its home page (form action + field name),
+     *  3. a few common URL patterns.
+     * A candidate counts only if its result page actually comes back and mentions what we searched for.
+     */
     suspend fun detectTemplate(site: Site, sample: String): String? {
-        for (pattern in PATTERNS) {
-            val tpl = "https://${site.domain}$pattern"
-            val page = fetch(fill(tpl, sample))
-            if (page.blocked) return null
-            val html = page.html ?: continue
-            val hits = extract(html, fill(tpl, sample), site, VideoQuery(sample, listOf(sample)))
-            if (hits.count { it.score >= 40 } >= 2) {
-                AppLog.i("SiteSearch", "Detected search link for ${site.domain}: $pattern")
-                return tpl
+        val home = "https://${site.domain}/"
+        val page = fetch(home)
+        if (page.blocked) return null
+        page.html?.let { html ->
+            val doc = Jsoup.parse(html, home)
+            doc.selectFirst("link[rel=search][type*=opensearch]")?.absUrl("href")?.takeIf { it.isNotEmpty() }?.let { osd ->
+                fetch(osd).html?.let { xml ->
+                    Regex("template=\"([^\"]*\\{searchTerms\\}[^\"]*)\"").findAll(xml)
+                        .map { it.groupValues[1].replace("&amp;", "&").replace("{searchTerms}", "{q}").replace(Regex("\\{[^}]*\\?\\}"), "") }
+                        .firstOrNull { !it.contains("suggest", true) && !it.contains("json", true) }
+                        ?.let { if (verify(it, sample, site)) return it.also { _ -> AppLog.i("SiteSearch", "Search link for ${site.domain} from OpenSearch") } }
+                }
             }
+            for (form in doc.select("form")) {
+                if (form.attr("method").equals("post", true)) continue
+                val input = form.selectFirst("input[type=search], input[name=q], input[name=s], input[name=search], input[name=query], input[name=k], input[name=keyword], input[name=search_query], input[name=term]") ?: continue
+                val name = input.attr("name")
+                if (name.isBlank()) continue
+                val action = form.absUrl("action").ifBlank { home }
+                val hidden = form.select("input[type=hidden][name]").joinToString("") { "&" + it.attr("name") + "=" + URLEncoder.encode(it.attr("value"), "UTF-8") }
+                val tpl = action + (if ('?' in action) "&" else "?") + name + "={q}" + hidden
+                if (verify(tpl, sample, site)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain} from its search box") }
+            }
+        }
+        for (pattern in PATTERNS.take(5)) {
+            val tpl = "https://${site.domain}$pattern"
+            if (verify(tpl, sample, site)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain}: $pattern") }
         }
         AppLog.i("SiteSearch", "No search link found for ${site.domain}")
         return null
+    }
+
+    /** A search link works if its page loads and either echoes the term or lists matching videos. */
+    private suspend fun verify(tpl: String, sample: String, site: Site): Boolean {
+        val url = fill(tpl, sample)
+        val p = fetch(url)
+        val html = p.html ?: return false
+        if (p.blocked) return false
+        val echoes = sample.split(' ').filter { it.length >= 3 }.all { html.contains(it, ignoreCase = true) }
+        val hits = extract(html, url, site, VideoQuery(sample, listOf(sample))).count { it.score >= 40 }
+        return hits >= 2 || (echoes && extract(html, url, site, VideoQuery(sample, emptyList())).size + hits >= 1)
     }
 
     private class Page(val code: Int, val html: String?, val blocked: Boolean)
@@ -138,6 +176,15 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
             "/search?q={q}", "/search/{q-}/", "/search/{q-}", "/?s={q}", "/search?search={q}",
             "/search?query={q}", "/videos/search?q={q}", "/search/videos?q={q}", "/search?k={q}", "/s/{q-}/",
         )
+
+        /** Social, code and reference sites never have videos to find. */
+        private val NON_VIDEO_SITES = listOf(
+            "reddit.com", "redd.it", "discord.com", "discord.gg", "github.com", "gitlab.com", "codeberg.org", "gitgud.io",
+            "twitter.com", "x.com", "t.me", "telegram.org", "wikipedia.org", "imgur.com", "ibb.co", "archive.org",
+            "pixiv.net", "saucenao.com", "wordpress.com", "stashapp.cc", "iafd.com", "data18.com", "adultfilmdatabase.com",
+        )
+        fun isNonVideo(domain: String) = NON_VIDEO_SITES.any { domain == it || domain.endsWith(".$it") } ||
+            Regex("(^|\\.)git\\.|booru|\\.onion$").containsMatchIn(domain)
 
         fun fill(template: String, term: String): String {
             val enc = URLEncoder.encode(term.trim(), "UTF-8")

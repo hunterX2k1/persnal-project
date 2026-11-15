@@ -38,8 +38,11 @@ class TpdbApi(private val key: () -> String) {
     private val base = "https://api.theporndb.net"
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .build()
+    private val cache = object : LinkedHashMap<String, Pair<Long, JSONObject>>(64, 0.75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Pair<Long, JSONObject>>?) = size > 60
+    }
 
     private suspend fun get(path: String): JSONObject = withContext(Dispatchers.IO) {
         val k = key().trim()
@@ -48,8 +51,10 @@ class TpdbApi(private val key: () -> String) {
             .header("Authorization", "Bearer $k")
             .header("Accept", "application/json")
             .build()
+        synchronized(cache) { cache[path]?.takeIf { System.currentTimeMillis() - it.first < 15 * 60_000 }?.let { return@withContext it.second } }
         val started = System.currentTimeMillis()
         val r0 = runCatching { client.newCall(req).execute() }
+            .recoverCatching { if (it is java.net.SocketTimeoutException) { AppLog.w("API", "Timeout on $path, retrying once"); client.newCall(req).execute() } else throw it }
             .onFailure { AppLog.e("API", "GET $path failed: ${it.javaClass.simpleName}: ${it.message}") }
             .getOrElse { throw ApiException("Network error: ${it.message}") }
         r0.use { r ->
@@ -60,10 +65,12 @@ class TpdbApi(private val key: () -> String) {
                 !r.isSuccessful -> throw ApiException("Server error (HTTP ${r.code})")
             }
             val body = r.body?.string().orEmpty()
-            runCatching { JSONObject(body) }.getOrElse {
+            val json = runCatching { JSONObject(body) }.getOrElse {
                 AppLog.e("API", "Bad JSON from $path: ${body.take(300)}")
                 throw ApiException("Unexpected response from server")
             }
+            synchronized(cache) { cache[path] = System.currentTimeMillis() to json }
+            json
         }
     }
 
@@ -109,7 +116,7 @@ class TpdbApi(private val key: () -> String) {
     /** Scene search across the whole database. [tags] are also sent as tag filters (ignored by the server if unsupported). */
     suspend fun searchScenes(q: String, page: Int): ScenePage {
         // Only documented parameters: unknown ones (tag filters, sort names) can make the server reject the request.
-        val params = "/scenes?per_page=40&page=$page&q=" + URLEncoder.encode(q.trim(), "UTF-8")
+        val params = "/scenes?per_page=40&page=$page" + (if (q.isBlank()) "" else "&q=" + URLEncoder.encode(q.trim(), "UTF-8"))
         val json = get(params)
         val data = json.optJSONArray("data")
         val scenes = (0 until (data?.length() ?: 0)).mapNotNull { data?.optJSONObject(it)?.let(::parseScene) }
