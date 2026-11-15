@@ -229,7 +229,7 @@ class Repo(private val context: Context, val prefs: Prefs) {
     private val discovery = Discovery(siteSearch)
 
     /** Web-searches for a video and returns matches on sites not in my list (adding those sites if enabled). */
-    suspend fun discover(q: VideoQuery): List<SiteProgress> = kotlinx.coroutines.coroutineScope {
+    suspend fun discover(q: VideoQuery, broad: Boolean = true): List<SiteProgress> = kotlinx.coroutines.coroutineScope {
         val all = sites.list()
         val byDomain = all.associateBy { it.domain }
         val custom = prefs.customEngines.filter { it.discover }.map { it.label to it.template }
@@ -237,12 +237,12 @@ class Repo(private val context: Context, val prefs: Prefs) {
         val webOnly = all.filter { it.kind == SiteKind.VIDEO && it.inVideoSearch && it.searchTemplate.isNullOrBlank() && !it.domain.contains('/') }
             .shuffled().take(8)
         val targeted = webOnly.map { s -> async { s to attempt { discovery.siteResults(s.domain, q, custom) }.getOrDefault(emptyList()) } }
-        val broad = async { attempt { discovery.discover(q, byDomain.keys, custom) }.getOrDefault(emptyList()) }
-        val hits = broad.await() + targeted.awaitAll().flatMap { it.second }
+        val broadHits = async { if (broad) attempt { discovery.discover(q, byDomain.keys, custom) }.getOrDefault(emptyList()) else emptyList() }
+        val hits = broadHits.await() + targeted.awaitAll().flatMap { it.second }
         AppLog.i("Discover", "Web search: ${webOnly.size} sites searched via engines, ${hits.size} matches")
         val (mine, fresh) = hits.partition { it.domain in byDomain }
         val ownResults = mine.groupBy { it.domain }.map { (d, hs) -> SiteProgress(byDomain.getValue(d), SiteStatus.Found(hs.size), hs.distinctBy { it.url }) }
-        if (!prefs.discoverSites) return@coroutineScope ownResults
+        if (!prefs.discoverSites || !broad) return@coroutineScope ownResults
         ownResults + fresh.groupBy { it.domain }.map { (domain, hs) ->
             val site = Site(domain, "${prettyDomain(domain)} (new)", "https://$domain/", kind = SiteKind.VIDEO, discovered = true)
             if (prefs.autoAddDiscovered && sites.get(domain) == null) {

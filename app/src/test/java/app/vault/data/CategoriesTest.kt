@@ -85,3 +85,25 @@ class SavedSearchesTest {
         assertEquals(Filter(), filterFromJson("not json"))
     }
 }
+
+class SiteSearchRulesTest {
+    @Test
+    fun onlyThemesAndMoodsGoToMySites() {
+        val byCode = (Categories.DEFAULTS + Categories.MOODS).associateBy { it.code }
+        assertTrue(Categories.allowedOnSites(byCode.getValue("mood-romantic")))
+        assertTrue(Categories.allowedOnSites(byCode.getValue("mood-mature-younger")))
+        assertTrue(Categories.allowedOnSites(byCode.getValue("Foot-Fetish")))
+        assertFalse(Categories.allowedOnSites(byCode.getValue("MS")))
+        assertFalse(Categories.allowedOnSites(byCode.getValue("mood-stepmom")))
+        assertFalse(Categories.allowedOnSites(byCode.getValue("Taboo")))
+        assertFalse(Categories.allowedOnSites(byCode.getValue("Interracial-Family")))
+        assertFalse(Categories.allowedOnSites(byCode.getValue(Categories.FOR_YOU)))
+        assertTrue(Categories.allowedText("passionate massage"))
+        assertFalse(Categories.allowedText("step sister"))
+        assertTrue(Categories.unsafeTitle("Stepmom and son"))
+        assertFalse(Categories.unsafeTitle("Cougar seduces a younger guy"))
+        assertTrue(Categories.unsafeTitle("young boy"))
+        assertTrue(Categories.isExcluded("young girl"))
+        assertFalse(Categories.unsafeTitle("Romantic evening with Jane"))
+    }
+}

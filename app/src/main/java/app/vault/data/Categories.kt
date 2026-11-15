@@ -18,7 +18,26 @@ object Categories {
         "voyeur", "hiddencam", "spycam", "teen", "school", "barely", "young", "underage", "minor", "child", "kid", "loli", "preteen",
     )
 
-    fun isExcluded(vararg text: String) = text.any { t -> val n = t.lowercase().filter(Char::isLetterOrDigit); EXCLUDED.any { n.contains(it) } }
+    /** Family-relation words: these categories and searches stay on the database (studio scenes, verified adults). */
+    private val RELATION = Regex("(?i)\\b(step|mom|mother|mum|dad|father|son|sons|daughters?|sisters?|brothers?|siblings?|aunts?|uncles?|nieces?|nephews?|cousins?|grand\\w*|granny|family|families|incest|taboo|in[- ]?laws?)\\b|step(mom|dad|son|daughter|sister|brother|mother|father)")
+
+    /** May this search run on my own sites? Not for family-relation, youth or non-consent terms. */
+    fun allowedOnSites(c: Category): Boolean = c.code != FOR_YOU &&
+        !isExcluded(c.label, *c.queries.toTypedArray()) &&
+        (c.queries + c.words + c.label).none { RELATION.containsMatchIn(it) }
+
+    fun allowedText(t: String) = t.isBlank() || (!isExcluded(t) && !RELATION.containsMatchIn(t))
+
+    /** Results from my sites are dropped if their titles mention relation, youth or non-consent terms. */
+    fun unsafeTitle(t: String) = isExcluded(t) || RELATION.containsMatchIn(t)
+
+    /** Adult-man phrases that contain "young" but aren't about minors ("younger man", "young guy"…). */
+    private val ADULT_YOUNG = Regex("(?i)\\byoung(er)?\\s+(man|men|guy|guys|stud|studs|lover|lovers|husband|neighbou?r)\\b")
+
+    fun isExcluded(vararg text: String) = text.any { t ->
+        val n = t.replace(ADULT_YOUNG, " ").lowercase().filter(Char::isLetterOrDigit)
+        EXCLUDED.any { n.contains(it) }
+    }
 
     private val WORD = mapOf(
         "father" to "dad", "mother" to "mom", "grandmother" to "grandma", "grandfather" to "grandpa",

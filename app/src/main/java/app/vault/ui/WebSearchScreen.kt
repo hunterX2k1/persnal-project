@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -21,9 +22,24 @@ import androidx.compose.ui.unit.sp
 import app.vault.app
 import app.vault.data.Prefs
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** Search tab: My sites (search my own list, with categories) or Web (search engines). */
 @Composable
 fun WebSearchScreen() {
+    var mode by rememberSaveable { mutableStateOf("sites") }
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Search", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            FilterChip(mode == "sites", { mode = "sites" }, label = { Text("My sites") }, leadingIcon = { Icon(Icons.Default.Language, null, Modifier.size(16.dp)) })
+            Spacer(Modifier.width(6.dp))
+            FilterChip(mode == "web", { mode = "web" }, label = { Text("Web") }, leadingIcon = { Icon(Icons.Default.TravelExplore, null, Modifier.size(16.dp)) })
+        }
+        if (mode == "sites") MySitesSearch() else WebEnginesPane()
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun WebEnginesPane() {
     val ctx = LocalContext.current
     val prefs = ctx.app.prefs
     val sites by ctx.app.repo.sites.all().collectAsState(initial = emptyList())
@@ -36,9 +52,8 @@ fun WebSearchScreen() {
         if (looksLikeUrl) ctx.openBrowser(if (t.startsWith("http")) t else "https://$t", fallback = prefs.webSearchUrl(t))
         else ctx.openBrowser(prefs.webSearchUrl(t))
     }
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-        Text("Search the web", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
-        Text("Opens in the private in-app browser.", color = Muted, fontSize = 13.sp)
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Text("Search engines · opens in the private in-app browser.", color = Muted, fontSize = 13.sp)
         OutlinedTextField(
             q, { q = it }, placeholder = { Text("Search or type a web address") }, singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, null) },

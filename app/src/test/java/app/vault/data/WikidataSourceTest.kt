@@ -8,7 +8,8 @@ import org.junit.Test
 class WikidataSourceTest {
     @Test
     fun fetchesAndParsesProfiles() = runBlocking {
-        try { check() } catch (e: ApiException) {
+        try { check() } catch (e: Exception) {
+            if (e !is ApiException && e !is java.io.IOException) throw e
             // Live service: skip (not fail) when Wikidata rate-limits this machine.
             org.junit.Assume.assumeTrue("Wikidata busy: ${e.message}", false)
         }

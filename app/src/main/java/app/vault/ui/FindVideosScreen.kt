@@ -59,9 +59,6 @@ class FindVideosVm(app: Application, val performerId: String) : AndroidViewModel
     }
 }
 
-private enum class FindSort(val label: String) { BEST("Best match"), LONGEST("Longest"), SHORTEST("Shortest"), FASTEST("Fastest site"), MOST_COPIES("Most copies"), SITE("Site A–Z") }
-private enum class FindLength(val label: String, val range: IntRange) { ANY("Any length", 0..Int.MAX_VALUE), SHORT("< 10 min", 1..599), MID("10–30 min", 600..1800), LONG("30 min +", 1801..Int.MAX_VALUE) }
-
 @Composable
 fun FindVideosScreen(performerId: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
@@ -73,106 +70,17 @@ fun FindVideosScreen(performerId: String, onBack: () -> Unit) {
     val running by vm.running.collectAsStateWithLifecycle()
     val siteCount by vm.siteCount.collectAsStateWithLifecycle()
 
-    var q by rememberSaveable { mutableStateOf("") }
-    var fullOnly by rememberSaveable { mutableStateOf(false) }
-    var length by rememberSaveable { mutableStateOf(FindLength.ANY) }
-    var sort by rememberSaveable { mutableStateOf(FindSort.BEST) }
-    var site by rememberSaveable { mutableStateOf<String?>(null) }
-    var sortMenu by remember { mutableStateOf(false) }
-    var details by remember { mutableStateOf(false) }
-    val cols = prefs.colsFind
-
-    val allGroups = remember(progress) { HitGroups.group(progress.values.flatMap { it.hits }) }
-    val sitesWithResults = remember(allGroups) {
-        allGroups.flatMap { g -> g.all.map { it.siteTitle } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }
-    }
-    val groups = remember(allGroups, q, fullOnly, length, sort, site) {
-        fun secs(g: HitGroup) = g.all.maxOf { HitGroups.seconds(it.duration) ?: 0 }
-        allGroups.filter { g ->
-            (q.isBlank() || SiteSearch.tokens(q).all { w -> g.all.any { it.title.lowercase().contains(w) } }) &&
-                (!fullOnly || g.all.any { HitGroups.isFull(it) == true }) &&
-                (length == FindLength.ANY || secs(g) in length.range) &&
-                (site == null || g.all.any { it.siteTitle == site })
-        }.let { l ->
-            when (sort) {
-                FindSort.BEST -> l
-                FindSort.LONGEST -> l.sortedByDescending { secs(it) }
-                FindSort.SHORTEST -> l.sortedBy { secs(it).takeIf { s -> s > 0 } ?: Int.MAX_VALUE }
-                FindSort.FASTEST -> l.sortedBy { g -> g.all.minOf { if (it.ms > 0) it.ms else Long.MAX_VALUE } }
-                FindSort.MOST_COPIES -> l.sortedByDescending { it.all.size }
-                FindSort.SITE -> l.sortedBy { it.best.siteTitle.lowercase() }
-            }
-        }
-    }
-    val done = progress.values.count { it.status !is SiteStatus.Searching }
-
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Column(Modifier.weight(1f)) {
-                Text(p?.name ?: "", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1)
-                Text(
-                    when {
-                        siteCount == 0 -> "No searchable sites yet"
-                        running -> "Searching $done / $siteCount sites…"
-                        else -> "${groups.size} of ${allGroups.size} videos · ${progress.values.count { it.hits.isNotEmpty() }} sites"
-                    },
-                    color = Muted, fontSize = 12.sp,
-                )
-            }
-            Box {
-                TextButton(onClick = { sortMenu = true }) { Icon(Icons.Default.SwapVert, null); Text(sort.label) }
-                DropdownMenu(sortMenu, { sortMenu = false }) {
-                    FindSort.entries.forEach { s -> DropdownMenuItem(text = { Text(s.label) }, onClick = { sort = s; sortMenu = false }) }
-                }
-            }
+            Text(p?.name ?: "", fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, modifier = Modifier.weight(1f))
             IconButton(onClick = { vm.search() }, enabled = !running) { Icon(Icons.Default.Refresh, "Search again") }
         }
-        if (running && siteCount > 0) LinearProgressIndicator(progress = { done / siteCount.toFloat() }, modifier = Modifier.fillMaxWidth())
-
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                q, { q = it }, placeholder = { Text("Search these results") }, singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = { if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Default.Close, null) } },
-                shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f),
-            )
-            ColumnPicker(cols) { prefs.colsFind = it }
-        }
-        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            item { FilterChip(fullOnly, { fullOnly = !fullOnly }, label = { Text("Full only") }) }
-            items(FindLength.entries.drop(1)) { l -> FilterChip(length == l, { length = if (length == l) FindLength.ANY else l }, label = { Text(l.label) }) }
-            items(sitesWithResults) { s -> FilterChip(site == s, { site = if (site == s) null else s }, label = { Text(s) }) }
-        }
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(cols),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (cols >= 3) 6.dp else 10.dp),
-            verticalArrangement = Arrangement.spacedBy(if (cols >= 3) 6.dp else 10.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            val full = GridItemSpan(cols)
-            if (siteCount == 0) item(span = { full }) {
-                EmptyState("No searchable sites", "Add video sites in My sites and scan them.")
-            }
-            if (!running && allGroups.isEmpty() && siteCount > 0 && progress.isNotEmpty()) item(span = { full }) {
-                EmptyState("Nothing found", "None of your sites had videos for this name.")
-            }
-            if (allGroups.isNotEmpty() && groups.isEmpty()) item(span = { full }) { EmptyState("No matches", "Loosen the filters or search words.") }
-            items(groups, key = { it.best.url }) { g -> if (cols == 1) GroupCard(g) else HitTile(g, cols) }
-            if (progress.isNotEmpty()) item(span = { full }) {
-                TextButton(onClick = { details = !details }) { Text(if (details) "Hide site details" else "Show each site's result") }
-            }
-            if (details) items(progress.values.sortedBy { it.site.title.lowercase() }, key = { "s:" + it.site.domain }, span = { full }) { pr ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(pr.site.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Text(statusText(pr.status), color = if (pr.status is SiteStatus.Found) Accent else Muted, fontSize = 12.sp)
-                    }
-                    TextButton(onClick = { ctx.openBrowser(vm.repo.siteSearchUrl(pr.site, p?.name.orEmpty())) }) { Text("Open") }
-                }
-            }
-        }
+        SiteResultsPane(
+            progress = progress, running = running, siteCount = siteCount,
+            cols = prefs.colsFind, onCols = { prefs.colsFind = it },
+            openTerm = p?.name.orEmpty(),
+            emptyTitle = "Nothing found", emptyBody = "None of your sites had videos for this name.",
+        )
     }
 }
