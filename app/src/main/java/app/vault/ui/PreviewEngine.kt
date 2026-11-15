@@ -48,7 +48,14 @@ object PreviewEngine {
             .setUserAgent(SiteSearch.BROWSER_UA)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(8_000).setReadTimeoutMs(10_000)
-        dataSource = CacheDataSource.Factory().setCache(cache!!).setUpstreamDataSourceFactory(http)
+        // Some studios refuse trailer requests that don't say which site they came from.
+        val withReferer = androidx.media3.datasource.ResolvingDataSource.Factory(http) { spec ->
+            val u = spec.uri
+            if (u.scheme?.startsWith("http") == true && u.host != null)
+                spec.withAdditionalHeaders(mapOf("Referer" to "${u.scheme}://${u.host}/"))
+            else spec
+        }
+        dataSource = CacheDataSource.Factory().setCache(cache!!).setUpstreamDataSourceFactory(withReferer)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 

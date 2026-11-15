@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -148,7 +149,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     val message by vm.message.collectAsStateWithLifecycle()
     val sites by vm.repo.sites.all().collectAsState(initial = emptyList())
     val archived = sites.filter { it.domain.startsWith("web.archive.org/") }
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var showAll by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
@@ -160,9 +161,10 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     fun openSaved(s: Scene) { vm.repo.sceneCache[s.id] = s; onScene(s.id) }
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedSearch?>(null) }
-    var sort by remember { mutableStateOf(CatSort.LATEST) }
-    var length by remember { mutableStateOf(Length.ANY) }
-    var refine by remember { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(CatSort.LATEST) }
+    var length by rememberSaveable { mutableStateOf(Length.ANY) }
+    var refine by rememberSaveable { mutableStateOf("") }
+    var previewOnly by rememberSaveable { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
@@ -185,9 +187,9 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
         val q = input.trim().lowercase()
         if (q.length < 2) emptyList() else all.filter { it.label.lowercase().contains(q) || it.code.lowercase() == q }.take(8)
     }
-    val shown = remember(scenes, sort, length, refine) {
+    val shown = remember(scenes, sort, length, refine, previewOnly) {
         scenes.filter { s ->
-            (length == Length.ANY || (s.durationSec ?: 0) in length.range) &&
+            (length == Length.ANY || (s.durationSec ?: 0) in length.range) && (!previewOnly || s.trailer != null) &&
                 (refine.isBlank() || SiteSearch.tokens(refine).all { w -> (s.title + " " + s.performers.joinToString(" ") { it.name } + " " + s.siteName).lowercase().contains(w) })
         }.let { l ->
             when (sort) {
@@ -298,6 +300,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                             leadingIcon = { Icon(Icons.Default.FilterList, null) }, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                         LazyRow(contentPadding = PaddingValues(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(CatSort.entries) { s -> FilterChip(sort == s, { sort = s }, label = { Text(s.label) }) }
+                            item { FilterChip(previewOnly, { previewOnly = !previewOnly }, label = { Text("Has preview") }) }
                             items(Length.entries) { l -> FilterChip(length == l, { length = l }, label = { Text(l.label) }) }
                         }
                         Text((if (picked.isEmpty() && text.isBlank()) "Latest videos · " else "") + "${shown.size}${if (vm.hasMore) "+" else ""} · swipe a thumbnail to preview", color = Muted, fontSize = 12.sp)
@@ -423,16 +426,16 @@ private fun moodEmoji(code: String) = when (code) {
 private fun SceneRow(title: String, scenes: List<Scene>, onOpen: (Scene) -> Unit) {
     Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(scenes.take(20), key = { title + it.id }) { s -> Box(Modifier.width(200.dp)) { CoverCard(s) { onOpen(s) } } }
+        items(scenes.take(20), key = { title + it.id }) { s -> Box(Modifier.width(200.dp)) { CoverCard(s, scrub = false) { onOpen(s) } } }
     }
 }
 
 /** Old-site style card: cover (swipe to preview) with the title over it. */
 @Composable
-private fun CoverCard(s: Scene, onClick: () -> Unit) {
+private fun CoverCard(s: Scene, scrub: Boolean = true, onClick: () -> Unit) {
     Column(Modifier.clip(RoundedCornerShape(10.dp)).background(Surface1)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
-            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), onClick)
+            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), scrub = scrub, onClick = onClick)
             Box(Modifier.fillMaxWidth().height(56.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
             Text(s.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.BottomStart).padding(start = 26.dp, end = 6.dp, bottom = 6.dp))

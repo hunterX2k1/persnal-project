@@ -171,7 +171,7 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
                 scenes == null -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
                 scenes!!.isEmpty() -> Text(if (noKey) "Scene lists and ✓ site matches need the optional ThePornDB key (Settings)." else scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(scenes!!.take(15), key = { it.id }) { s -> SceneCard(s) { onScene(s.id) } }
+                    items(scenes!!.take(15), key = { it.id }) { s -> SceneCard(s, scrub = false) { onScene(s.id) } }
                 }
             }
             if (similar.isNotEmpty()) {
@@ -196,10 +196,10 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
 }
 
 @Composable
-fun SceneCard(s: Scene, modifier: Modifier = Modifier.width(240.dp), onClick: () -> Unit) {
+fun SceneCard(s: Scene, modifier: Modifier = Modifier.width(240.dp), scrub: Boolean = true, onClick: () -> Unit) {
     Column(modifier) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
-            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), onClick)
+            PreviewThumb(s.id, listOf(s.thumb) + s.imageFallbacks, s.trailer, Modifier.fillMaxSize(), scrub = scrub, onClick = onClick)
             formatDuration(s.durationSec)?.let { Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { Badge(it, dark = true) } }
         }
         Text(s.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp).clickable(onClick = onClick))

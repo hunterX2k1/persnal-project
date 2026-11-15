@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SwipeRight
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
@@ -52,7 +53,7 @@ object PreviewState {
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: Modifier = Modifier, scrub: Boolean = true, onClick: () -> Unit) {
     val ctx = LocalContext.current
     val player = LocalPreviewPlayer.current
     val active = PreviewState.activeId == id && preview != null && player != null
@@ -60,6 +61,8 @@ fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: 
     var width by remember { mutableIntStateOf(1) }
     val slop = LocalViewConfiguration.current.touchSlop
     val scope = rememberCoroutineScope()
+    var noPreviewHint by remember { mutableStateOf(false) }
+    LaunchedEffect(noPreviewHint) { if (noPreviewHint) { delay(1500); noPreviewHint = false } }
 
     // Warm the first part of the preview while the card is on screen (Wi-Fi only).
     LaunchedEffect(preview) { delay(400); PreviewEngine.prefetch(ctx, preview) }
@@ -80,13 +83,14 @@ fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: 
     }
 
     Box(
-        modifier.onSizeChanged { width = it.width.coerceAtLeast(1) }.pointerInput(id, preview) {
+        modifier.onSizeChanged { width = it.width.coerceAtLeast(1) }.pointerInput(id, preview, scrub) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 load() // start fetching the moment the finger lands
                 var scrubbing = false
                 var held = false
                 var cancelled = false
+                var moved = false
                 val holdJob: Job = scope.launch { delay(300); held = true; play() }
                 while (true) {
                     val ev = awaitPointerEvent()
@@ -94,7 +98,10 @@ fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: 
                     if (!c.pressed) break
                     val dx = c.position.x - down.position.x
                     val dy = c.position.y - down.position.y
+                    if (abs(dx) > slop || abs(dy) > slop) moved = true
                     if (!scrubbing && !held && abs(dy) > slop && abs(dy) > abs(dx)) { cancelled = true; break } // let the list scroll
+                    if (!scrubbing && !held && abs(dx) > slop && !scrub) { cancelled = true; break } // side-scrolling row: let it scroll
+                    if (!scrubbing && !held && abs(dx) > slop && preview == null) { cancelled = true; noPreviewHint = true; break }
                     if (!scrubbing && abs(dx) > slop && abs(dx) > abs(dy) && preview != null) { scrubbing = true; holdJob.cancel(); play() }
                     if (scrubbing) {
                         fraction = (c.position.x / width).coerceIn(0f, 1f)
@@ -103,8 +110,10 @@ fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: 
                     }
                 }
                 holdJob.cancel()
-                if (!scrubbing && !held && !cancelled) onClick()
-                if (scrubbing || held) {
+                // Only a clean tap opens the video; any swipe or hold never does.
+                if (!scrubbing && !held && !cancelled && !moved) onClick()
+                if (held && preview == null) noPreviewHint = true
+                if (preview != null && (scrubbing || held)) {
                     // keep playing briefly from where the finger stopped, then back to the cover
                     scope.launch { delay(3000); if (PreviewState.activeId == id) { player?.pause(); PreviewState.activeId = null } }
                 } else if (PreviewState.activeId == id) {
@@ -134,9 +143,13 @@ fun PreviewThumb(id: String, images: List<String?>, preview: String?, modifier: 
             )
             if (fraction >= 0f) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(fraction).height(3.dp).background(Accent))
         } else if (preview != null) {
-            Icon(Icons.Default.SwipeRight, "Swipe to preview", tint = Color(0xCCFFFFFF),
+            Icon(if (scrub) Icons.Default.SwipeRight else Icons.Default.TouchApp, if (scrub) "Swipe to preview" else "Hold to preview", tint = Color(0xCCFFFFFF),
                 modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).size(16.dp))
         }
+        if (noPreviewHint) androidx.compose.material3.Text(
+            "No preview for this video", color = Color.White, fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+            modifier = Modifier.align(Alignment.Center).background(Color(0xB3000000), androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 

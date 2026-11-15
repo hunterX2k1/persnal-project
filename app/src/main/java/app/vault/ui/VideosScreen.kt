@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -70,17 +71,18 @@ fun VideosScreen(performerId: String, onBack: () -> Unit, onScene: (String) -> U
     val loading by vm.loading.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val total by vm.total.collectAsStateWithLifecycle()
-    var q by remember { mutableStateOf("") }
-    var tag by remember { mutableStateOf<String?>(null) }
-    var sort by remember { mutableStateOf(VideoSort.NEWEST) }
+    var q by rememberSaveable { mutableStateOf("") }
+    var tag by rememberSaveable { mutableStateOf<String?>(null) }
+    var sort by rememberSaveable { mutableStateOf(VideoSort.NEWEST) }
+    var previewOnly by rememberSaveable { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
 
     val topTags = remember(all) { all.flatMap { it.tags }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(25).map { it.key } }
-    val shown = remember(all, q, tag, sort) {
+    val shown = remember(all, q, tag, sort, previewOnly) {
         all.filter { s ->
             (q.isBlank() || s.title.contains(q, true) || s.siteName?.contains(q, true) == true || s.performers.any { it.name.contains(q, true) }) &&
-                (tag == null || tag in s.tags)
+                (tag == null || tag in s.tags) && (!previewOnly || s.trailer != null)
         }.let { l ->
             when (sort) {
                 VideoSort.NEWEST -> l.sortedByDescending { it.date.orEmpty() }
@@ -112,7 +114,8 @@ fun VideosScreen(performerId: String, onBack: () -> Unit, onScene: (String) -> U
             leadingIcon = { Icon(Icons.Default.Search, null) }, shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
         )
-        if (topTags.isNotEmpty()) LazyRow(contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { FilterChip(previewOnly, { previewOnly = !previewOnly }, label = { Text("Has preview") }) }
             items(topTags) { t -> FilterChip(tag == t, { tag = if (tag == t) null else t }, label = { Text(t) }) }
         }
         when {
