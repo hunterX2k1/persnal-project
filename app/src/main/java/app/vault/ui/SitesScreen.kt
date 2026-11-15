@@ -106,6 +106,11 @@ fun SitesScreen() {
 private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> Unit, onDelete: () -> Unit) {
     var title by remember { mutableStateOf(site.title) }
     var tpl by remember { mutableStateOf(site.searchTemplate.orEmpty()) }
+    var inSearch by remember { mutableStateOf(site.inVideoSearch) }
+    var detecting by remember { mutableStateOf(false) }
+    var detectMsg by remember { mutableStateOf<String?>(null) }
+    val repo = LocalContext.current.app.repo
+    val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(site.domain) },
@@ -115,15 +120,30 @@ private fun EditSiteDialog(site: Site, onDismiss: () -> Unit, onSave: (Site) -> 
                 OutlinedTextField(tpl, { tpl = it }, label = { Text("Search link (optional)") },
                     placeholder = { Text("https://${site.domain}/search?q={q}") })
                 Text(
-                    "Search for any name on the site, copy the address from the result page and replace the name with {q}. " +
-                        "Leave empty to use a web search limited to this site.",
+                    "Search for any name on the site, copy the address from the result page and replace the name with {q} " +
+                        "(or {q-} if the site joins words with hyphens). Leave empty to detect it automatically.",
                     color = Muted, fontSize = 12.sp,
                 )
+                OutlinedButton(enabled = !detecting, onClick = {
+                    detecting = true; detectMsg = null
+                    scope.launch {
+                        val sample = repo.performers.favoriteIds().firstOrNull()?.let { repo.performers.get(it)?.name } ?: "Jane Doe"
+                        val found = runCatching { repo.siteSearch.detectTemplate(site, sample) }.getOrNull()
+                        if (found != null) tpl = found
+                        detectMsg = if (found != null) "Found it." else "Couldn't detect — the site may block apps or use an unusual search page."
+                        detecting = false
+                    }
+                }) { Text(if (detecting) "Detecting…" else "Detect search link") }
+                detectMsg?.let { Text(it, color = Muted, fontSize = 12.sp) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Include in video search", Modifier.weight(1f))
+                    Switch(inSearch, { inSearch = it })
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(site.copy(title = title.ifBlank { site.title }, searchTemplate = tpl.trim().takeIf { it.contains("{q}") }))
+                onSave(site.copy(title = title.ifBlank { site.title }, searchTemplate = tpl.trim().takeIf { it.contains("{q") }, inVideoSearch = inSearch, searchCheckedAt = if (tpl.isBlank()) 0 else site.searchCheckedAt))
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) } },

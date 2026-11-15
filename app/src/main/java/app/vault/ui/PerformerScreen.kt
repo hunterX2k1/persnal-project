@@ -43,6 +43,7 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
     val tags = repo.performers.tagsFor(id).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val sites = repo.sites.all().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val scenes = MutableStateFlow<List<Scene>?>(null)
+    val sceneTotal = MutableStateFlow<Int?>(null)
     val noKey = MutableStateFlow(false)
     val scenesError = MutableStateFlow<String?>(null)
 
@@ -50,7 +51,7 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
         viewModelScope.launch {
             val p = performer.filterNotNull().first()
             runCatching { repo.scenes(p) }
-                .onSuccess { if (it == null) { noKey.value = true; scenes.value = emptyList() } else scenes.value = it }
+                .onSuccess { if (it == null) { noKey.value = true; scenes.value = emptyList() } else { scenes.value = it.scenes; sceneTotal.value = it.total ?: if (it.lastPage > 1) null else it.scenes.size } }
                 .onFailure { AppLog.e("Profile", "Loading scenes failed", it); scenes.value = emptyList(); scenesError.value = it.message }
             runCatching { repo.refresh(id) }.onFailure { AppLog.w("Profile", "Refresh failed: ${it.message}") }
         }
@@ -63,7 +64,7 @@ class PerformerVm(app: Application, val id: String) : AndroidViewModel(app) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PerformerScreen(id: String, onBack: () -> Unit) {
+fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, onAllVideos: () -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.applicationContext as Application
     val vm: PerformerVm = viewModel(key = "p:$id", factory = viewModelFactory { initializer { PerformerVm(app, id) } })
@@ -74,11 +75,11 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
     val sites by vm.sites.collectAsStateWithLifecycle()
     val scenesError by vm.scenesError.collectAsStateWithLifecycle()
     val noKey by vm.noKey.collectAsStateWithLifecycle()
+    val sceneTotal by vm.sceneTotal.collectAsStateWithLifecycle()
     var showSites by remember { mutableStateOf(false) }
     var showTag by remember { mutableStateOf(false) }
     var reveal by remember { mutableStateOf(false) }
     var bioOpen by remember { mutableStateOf(false) }
-    var sceneMenu by remember { mutableStateOf<Scene?>(null) }
 
     val perf = p ?: run {
         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
@@ -138,7 +139,9 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
                     "Born" to perf.birthdayText(), "Age" to perf.age()?.toString(), "Gender" to perf.gender,
                     "Nationality" to perf.nationality, "Ethnicity" to perf.ethnicity, "Career" to perf.careerText(),
                     "Height" to perf.heightText(), "Weight" to perf.weightText(), "Hair" to perf.hair, "Eyes" to perf.eyes,
-                    "Measurements" to perf.measurements, "Cup" to perf.cup, "Tattoos" to perf.tattoos, "Piercings" to perf.piercings,
+                    "Measurements" to perf.measurementsText(), "Cup" to listOfNotNull(perf.bust?.toString(), perf.cup).joinToString("").ifEmpty { null },
+                    "Breasts" to perf.natural?.let { if (it == 1) "Natural" else "Enhanced" },
+                    "Birthplace" to perf.birthplace, "Zodiac" to perf.zodiac, "Debut age" to perf.debutAge()?.toString(), "Tattoos" to perf.tattoos, "Piercings" to perf.piercings,
                     "Scenes" to perf.sceneCount?.toString(),
                 ).filter { it.second != null }
                 Column(Modifier.clip(RoundedCornerShape(12.dp)).background(Surface1).padding(vertical = 4.dp)) {
@@ -156,13 +159,16 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
                         modifier = Modifier.clickable { bioOpen = !bioOpen })
                 }
 
-                SectionTitle("Scenes")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("Videos" + (sceneTotal?.let { " ($it)" } ?: ""), Modifier.weight(1f))
+                    if (!scenes.isNullOrEmpty()) TextButton(onClick = onAllVideos) { Text("See all") }
+                }
             }
             when {
                 scenes == null -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
                 scenes!!.isEmpty() -> Text(if (noKey) "Scene lists and ✓ site matches need the optional ThePornDB key (Settings)." else scenesError?.let { "Couldn't load scenes: $it" } ?: "No scenes listed.", color = Muted, modifier = Modifier.padding(horizontal = 16.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(scenes!!, key = { it.id }) { s -> SceneCard(s) { sceneMenu = s } }
+                    items(scenes!!.take(15), key = { it.id }) { s -> SceneCard(s) { onScene(s.id) } }
                 }
             }
             Spacer(Modifier.height(40.dp))
@@ -178,24 +184,11 @@ fun PerformerScreen(id: String, onBack: () -> Unit) {
 
     if (showSites) FindOnSitesSheet(perf, scenes.orEmpty(), sites, vm.repo, onDismiss = { showSites = false })
     if (showTag) TextPrompt("Add tag", "e.g. top10, watch-later", onDismiss = { showTag = false }) { vm.addTag(it); showTag = false }
-    sceneMenu?.let { s ->
-        AlertDialog(
-            onDismissRequest = { sceneMenu = null },
-            title = { Text(s.title) },
-            text = { Text(listOfNotNull(s.siteName, s.date, formatDuration(s.durationSec)).joinToString(" • ")) },
-            confirmButton = {
-                if (s.trailer != null) TextButton(onClick = { ctx.playVideo(s.trailer, s.title); sceneMenu = null }) { Text("Play preview") }
-            },
-            dismissButton = {
-                if (s.url != null) TextButton(onClick = { ctx.openBrowser(s.url); sceneMenu = null }) { Text("Open on site") }
-            },
-        )
-    }
 }
 
 @Composable
-private fun SceneCard(s: Scene, onClick: () -> Unit) {
-    Column(Modifier.width(240.dp).clickable(onClick = onClick)) {
+fun SceneCard(s: Scene, modifier: Modifier = Modifier.width(240.dp), onClick: () -> Unit) {
+    Column(modifier.clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
             VImage(s.image, Modifier.fillMaxSize())
             formatDuration(s.durationSec)?.let { Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { Badge(it, dark = true) } }

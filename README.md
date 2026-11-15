@@ -42,7 +42,15 @@ opens from the original sites.
 - **Filters & sorting**: age range, active/retired, debut year, height, gender, ethnicity,
   nationality, hair, eyes, cup size, tattoos, piercings and your own tags. Sort by name, age,
   debut, career length, scene count or recently updated.
-- **Profiles** with full stats, bio, scene list with previews, favourites and custom tags.
+- **More filters**: weight, bust, waist, hips, natural/enhanced, cup size, zodiac, birthplace,
+  age at debut, years active and "has photo".
+- **Profiles** with full stats, bio, favourites and custom tags.
+- **Videos**: a performer's full video list (with a ThePornDB key), searchable, filterable by tag
+  and sortable.
+- **Video page** with preview, cast, tags and **Find on my sites**: it searches each of your sites
+  and shows matching videos in one ranked list (thumbnail, title, duration, % match), like a tube
+  aggregator. It detects each site's search link automatically, or you can set it yourself.
+  Sites that block apps can still be opened by hand.
 - **Find on my sites**: import your list of websites by uploading an HTML file (e.g. a bookmarks export) or pasting HTML, links or domains.
   On any profile, tap *Find on my sites*. Sites where the database confirms the performer appeared
   are marked ✓ at the top. Tapping a site opens it searching for that performer's name.

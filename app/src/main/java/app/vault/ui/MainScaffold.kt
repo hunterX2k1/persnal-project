@@ -29,7 +29,7 @@ fun MainScaffold(onPanic: () -> Unit) {
     Scaffold(
         containerColor = Bg,
         bottomBar = {
-            if (route?.startsWith("performer") != true) NavigationBar(containerColor = Surface1) {
+            if (route?.let { r -> r.startsWith("performer") || r.startsWith("videos") || r.startsWith("scene") } != true) NavigationBar(containerColor = Surface1) {
                 tabs.forEach { t ->
                     NavigationBarItem(
                         selected = route == t.route,
@@ -55,7 +55,24 @@ fun MainScaffold(onPanic: () -> Unit) {
             composable("sites") { SitesScreen() }
             composable("settings") { SettingsScreen() }
             composable("performer/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                PerformerScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
+                val pid = it.arguments?.getString("id").orEmpty()
+                PerformerScreen(
+                    id = pid, onBack = { nav.popBackStack() },
+                    onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") },
+                    onAllVideos = { nav.navigate("videos/${android.net.Uri.encode(pid)}") },
+                )
+            }
+            composable("videos/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                VideosScreen(
+                    performerId = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() },
+                    onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") },
+                )
+            }
+            composable("scene/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                SceneScreen(
+                    sceneId = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() },
+                    onPerformer = open,
+                )
             }
         }
     }

@@ -16,7 +16,7 @@ import java.net.URLEncoder
 
 class Repo(context: Context, val prefs: Prefs) {
     private val db = Room.databaseBuilder(context, AppDb::class.java, "vault.db")
-        .addMigrations(AppDb.MIGRATION_1_2)
+        .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3)
         .fallbackToDestructiveMigration()
         .build()
     val performers = db.performers()
@@ -133,8 +133,28 @@ class Repo(context: Context, val prefs: Prefs) {
         }
     }
 
-    /** Scene lists come from ThePornDB only. Returns null when there is no key. */
-    suspend fun scenes(p: Performer): List<Scene>? = if (hasKey) api.scenes(p) else null
+    // ---------------- Scenes ----------------
+
+    /** Scenes seen this session, so the video screen can open by id. */
+    val sceneCache = java.util.concurrent.ConcurrentHashMap<String, Scene>()
+
+    /** One page of a performer's videos (ThePornDB only). Null when there is no key. */
+    suspend fun scenes(p: Performer, page: Int = 1): ScenePage? {
+        if (!hasKey) return null
+        return api.scenes(p, page).also { r -> r.scenes.forEach { sceneCache[it.id] = it } }
+    }
+
+    // ---------------- Search my sites for a video ----------------
+
+    val siteSearch = SiteSearch { site, template ->
+        sites.upsert(site.copy(searchTemplate = template ?: site.searchTemplate, searchCheckedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun videoSearchSites(): List<Site> = sites.list().filter { it.inVideoSearch }
+
+    /** Makes sure a performer credited in a scene is in the library (fetching from ThePornDB if needed). */
+    suspend fun ensurePerformer(id: String): Performer? =
+        performers.get(id) ?: if (hasKey) runCatching { api.performer(id) }.getOrNull()?.also { upsertTpdb(listOf(it)) } else null
 
     suspend fun toggleFavorite(id: String, fav: Boolean) =
         if (fav) performers.removeFavorite(id) else performers.addFavorite(Favorite(id))
@@ -190,8 +210,8 @@ class Repo(context: Context, val prefs: Prefs) {
 
     fun siteSearchUrl(site: Site, name: String): String {
         val tpl = site.searchTemplate
-        return if (!tpl.isNullOrBlank() && tpl.contains("{q}")) {
-            tpl.replace("{q}", URLEncoder.encode(name, "UTF-8"))
+        return if (!tpl.isNullOrBlank() && tpl.contains("{q")) {
+            SiteSearch.fill(tpl, name)
         } else {
             prefs.webSearchUrl("site:${site.domain} \"$name\"")
         }

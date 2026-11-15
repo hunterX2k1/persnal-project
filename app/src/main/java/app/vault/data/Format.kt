@@ -27,6 +27,34 @@ fun Performer.birthdayText(): String? = birthday?.let {
     runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM yyyy")) }.getOrNull()
 }
 
+/** Western zodiac sign for a yyyy-MM-dd birthday. */
+fun zodiacOf(birthday: String?): String? {
+    val d = birthday?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+    val md = d.monthValue * 100 + d.dayOfMonth
+    return when {
+        md >= 1222 || md <= 119 -> "Capricorn"
+        md <= 218 -> "Aquarius"
+        md <= 320 -> "Pisces"
+        md <= 419 -> "Aries"
+        md <= 520 -> "Taurus"
+        md <= 620 -> "Gemini"
+        md <= 722 -> "Cancer"
+        md <= 822 -> "Leo"
+        md <= 922 -> "Virgo"
+        md <= 1022 -> "Libra"
+        md <= 1121 -> "Scorpio"
+        else -> "Sagittarius"
+    }
+}
+
+fun Performer.debutAge(): Int? {
+    val by = birthday?.take(4)?.toIntOrNull() ?: return null
+    return careerStart?.let { it - by }?.takeIf { it in 18..80 }
+}
+
+fun Performer.measurementsText(): String? = measurements ?: if (bust != null || waist != null || hips != null)
+    "${bust ?: "?"}${cup.orEmpty()}-${waist ?: "?"}-${hips ?: "?"}" else null
+
 fun formatDuration(sec: Int?): String? = sec?.takeIf { it > 0 }?.let {
     if (it >= 3600) "%d:%02d:%02d".format(it / 3600, it / 60 % 60, it % 60) else "%d:%02d".format(it / 60, it % 60)
 }

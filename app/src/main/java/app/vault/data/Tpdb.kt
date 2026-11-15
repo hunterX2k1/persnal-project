@@ -23,7 +23,15 @@ data class Scene(
     val siteName: String?,
     val siteUrl: String?,
     val durationSec: Int?,
+    val description: String? = null,
+    val performers: List<ScenePerformer> = emptyList(),
+    val tags: List<String> = emptyList(),
 )
+
+/** A performer credited in a scene. [id] is the main profile id when known. */
+data class ScenePerformer(val id: String?, val name: String)
+
+data class ScenePage(val scenes: List<Scene>, val page: Int, val lastPage: Int, val total: Int?)
 
 /** Client for the ThePornDB API (https://api.theporndb.net). Parsing is lenient on purpose. */
 class TpdbApi(private val key: () -> String) {
@@ -75,13 +83,27 @@ class TpdbApi(private val key: () -> String) {
         return (json.optJSONObject("data") ?: json).let(::parsePerformer)
     }
 
-    suspend fun scenes(p: Performer): List<Scene> {
-        val byId = runCatching { get("/performers/${URLEncoder.encode(p.id, "UTF-8")}/scenes?per_page=50") }.getOrNull()
-        val json = byId ?: get("/scenes?per_page=50&q=" + URLEncoder.encode(p.name, "UTF-8"))
-        val data = json.optJSONArray("data") ?: return emptyList<Scene>().also { AppLog.w("API", "Scenes response had no data array") }
-        val scenes = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parseScene) }
-        AppLog.i("API", "Scenes for performer: ${scenes.size} (via ${if (byId != null) "performer endpoint" else "search fallback"}), with site: ${scenes.count { it.siteName != null }}, with trailer: ${scenes.count { it.trailer != null }}")
-        return scenes
+    /**
+     * One page of a performer's scenes, newest first. Uses the performer's own scene list,
+     * falling back to a name search for profiles that didn't come from ThePornDB.
+     */
+    suspend fun scenes(p: Performer, page: Int = 1): ScenePage {
+        val enc = URLEncoder.encode(p.id, "UTF-8")
+        val byId = if (p.id.startsWith("wd:")) null
+            else runCatching { get("/performers/$enc/scenes?per_page=40&page=$page&orderBy=recently_released") }.getOrNull()
+        val json = byId ?: get("/scenes?per_page=40&page=$page&q=" + URLEncoder.encode(p.name, "UTF-8"))
+        val data = json.optJSONArray("data") ?: return ScenePage(emptyList(), page, page, 0).also { AppLog.w("API", "Scenes response had no data array") }
+        var scenes = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parseScene) }
+        if (byId == null) {
+            // Name search can match other people: keep scenes that credit this name.
+            val n = p.name.lowercase()
+            scenes = scenes.filter { s -> s.performers.isEmpty() || s.performers.any { it.name.lowercase() == n } }
+        }
+        val meta = json.optJSONObject("meta")
+        val last = meta?.optInt("last_page", page)?.takeIf { it > 0 } ?: page
+        val total = meta?.optInt("total", -1)?.takeIf { it >= 0 }
+        AppLog.i("API", "Scenes page $page/$last: ${scenes.size} (via ${if (byId != null) "performer endpoint" else "search fallback"}), with site: ${scenes.count { it.siteName != null }}, with trailer: ${scenes.count { it.trailer != null }}")
+        return ScenePage(scenes, page, last, total)
     }
 
     // ---- parsing ----
@@ -106,6 +128,7 @@ class TpdbApi(private val key: () -> String) {
             (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotBlank) }.joinToString(", ")
         }?.takeIf { it.isNotBlank() }
         val birthday = x.str("birthday")?.let { Regex("\\d{4}-\\d{2}-\\d{2}").find(it)?.value }
+        val m = parseMeasurements(x.str("measurements"))
         return Performer(
             id = id,
             name = name,
@@ -121,7 +144,14 @@ class TpdbApi(private val key: () -> String) {
             heightCm = parseHeight(x.str("height")),
             weightKg = parseWeight(x.str("weight")),
             measurements = x.str("measurements"),
-            cup = x.str("cupsize")?.uppercase(),
+            cup = cupLetters(x.str("cupsize")) ?: m?.cup,
+            bust = cupBand(x.str("cupsize")) ?: m?.bust,
+            waist = x.intOrNull("waist") ?: m?.waist,
+            hips = x.intOrNull("hips") ?: m?.hips,
+            natural = (x.opt("fake_boobs").takeIf { it is Boolean } ?: x.opt("fakeboobs").takeIf { it is Boolean })
+                ?.let { if (it == true) 0 else 1 },
+            zodiac = x.str("astrology")?.cap() ?: zodiacOf(birthday),
+            birthplace = x.str("birthplace"),
             tattoos = x.str("tattoos"),
             piercings = x.str("piercings"),
             bio = o.str("bio"),
@@ -135,6 +165,16 @@ class TpdbApi(private val key: () -> String) {
         val id = o.str("id") ?: o.str("_id") ?: return null
         val site = o.optJSONObject("site")
         val bg = o.optJSONObject("background")
+        val perfs = o.optJSONArray("performers")?.let { a ->
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.mapNotNull { p ->
+                val parent = p.optJSONObject("parent")
+                val name = parent?.str("name") ?: p.str("name") ?: return@mapNotNull null
+                ScenePerformer(parent?.str("id") ?: p.str("id"), name)
+            }
+        }.orEmpty()
+        val tags = o.optJSONArray("tags")?.let { a ->
+            (0 until a.length()).mapNotNull { a.optJSONObject(it)?.str("name") ?: a.optString(it).takeIf(String::isNotBlank) }
+        }.orEmpty()
         return Scene(
             id = id,
             title = o.str("title") ?: "Untitled",
@@ -145,8 +185,23 @@ class TpdbApi(private val key: () -> String) {
             siteName = site?.str("name"),
             siteUrl = site?.str("url"),
             durationSec = o.intOrNull("duration"),
+            description = o.str("description"),
+            performers = perfs,
+            tags = tags,
         )
     }
+
+    private data class Meas(val bust: Int?, val cup: String?, val waist: Int?, val hips: Int?)
+
+    /** "34D-24-36" → bust 34, cup D, waist 24, hips 36. */
+    private fun parseMeasurements(s: String?): Meas? {
+        val m = Regex("(\\d{2})\\s*([A-Za-z]{1,4})?\\s*-\\s*(\\d{2})\\s*-\\s*(\\d{2})").find(s ?: return null) ?: return null
+        return Meas(m.groupValues[1].toIntOrNull(), m.groupValues[2].uppercase().ifEmpty { null }, m.groupValues[3].toIntOrNull(), m.groupValues[4].toIntOrNull())
+    }
+
+    private fun cupLetters(s: String?) = s?.let { Regex("[A-Za-z]{1,4}").find(it)?.value?.uppercase() }
+    private fun cupBand(s: String?) = s?.let { Regex("\\d{2}").find(it)?.value?.toIntOrNull() }
+
 
     private fun String.cap() = lowercase().split(" ").joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
 

@@ -97,6 +97,7 @@ class WikidataSource {
                 image = image?.let { "$it?width=900" },
                 thumb = image?.let { "$it?width=400" },
                 wiki = first("article"),
+                zodiac = zodiacOf(first("birth")?.let { Regex("^\\d{4}-\\d{2}-\\d{2}").find(it)?.value }),
             )
         }
     }

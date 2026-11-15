@@ -20,7 +20,15 @@ data class Performer(
     val heightCm: Int? = null,
     val weightKg: Int? = null,
     val measurements: String? = null,
+    /** Cup letters only, e.g. "DD". */
     val cup: String? = null,
+    val bust: Int? = null,
+    val waist: Int? = null,
+    val hips: Int? = null,
+    /** 1 = natural, 0 = enhanced, null = unknown. */
+    val natural: Int? = null,
+    val zodiac: String? = null,
+    val birthplace: String? = null,
     val tattoos: String? = null,
     val piercings: String? = null,
     val bio: String? = null,
@@ -46,6 +54,10 @@ data class Site(
     /** Custom search link, with {q} where the name goes. Null = search engine "site:" search. */
     val searchTemplate: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
+    /** Searched when looking for a video across my sites. */
+    @ColumnInfo(defaultValue = "1") val inVideoSearch: Boolean = true,
+    /** When automatic search-link detection last ran (0 = never). */
+    @ColumnInfo(defaultValue = "0") val searchCheckedAt: Long = 0,
 )
 
 @Dao
@@ -79,6 +91,7 @@ interface PerformerDao {
     @Query("SELECT DISTINCT eyes FROM performers WHERE eyes IS NOT NULL AND eyes <> '' ORDER BY eyes") fun eyeColors(): Flow<List<String>>
     @Query("SELECT DISTINCT cup FROM performers WHERE cup IS NOT NULL AND cup <> '' ORDER BY cup") fun cups(): Flow<List<String>>
     @Query("SELECT DISTINCT tag FROM tags ORDER BY tag COLLATE NOCASE") fun allTags(): Flow<List<String>>
+    @Query("SELECT DISTINCT zodiac FROM performers WHERE zodiac IS NOT NULL AND zodiac <> '' ORDER BY zodiac") fun zodiacs(): Flow<List<String>>
 
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE performerId = :id)") fun isFavorite(id: String): Flow<Boolean>
     @Query("SELECT performerId FROM favorites") fun favoriteIdsFlow(): Flow<List<String>>
@@ -101,7 +114,7 @@ interface SiteDao {
     @Query("DELETE FROM sites") suspend fun clear()
 }
 
-@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 2, exportSchema = false)
+@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 3, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun performers(): PerformerDao
     abstract fun sites(): SiteDao
@@ -110,6 +123,15 @@ abstract class AppDb : RoomDatabase() {
         val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE performers ADD COLUMN wiki TEXT")
+            }
+        }
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                for (col in listOf("bust INTEGER", "waist INTEGER", "hips INTEGER", "natural INTEGER", "zodiac TEXT", "birthplace TEXT"))
+                    db.execSQL("ALTER TABLE performers ADD COLUMN $col")
+                db.execSQL("ALTER TABLE sites ADD COLUMN inVideoSearch INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE sites ADD COLUMN searchCheckedAt INTEGER NOT NULL DEFAULT 0")
+                // Old rows stored "35DD"-style cup sizes; they are rewritten on the next sync.
             }
         }
     }

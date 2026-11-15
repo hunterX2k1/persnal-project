@@ -38,6 +38,7 @@ data class FilterOptions(
     val eyes: List<String> = emptyList(),
     val cups: List<String> = emptyList(),
     val tags: List<String> = emptyList(),
+    val zodiacs: List<String> = emptyList(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -61,8 +62,9 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
         listOf(
             repo.performers.genders(), repo.performers.ethnicities(), repo.performers.nationalities(),
             repo.performers.hairColors(), repo.performers.eyeColors(), repo.performers.cups(), repo.performers.allTags(),
+            repo.performers.zodiacs(),
         )
-    ) { a -> FilterOptions(a[0], a[1], a[2], a[3], a[4], a[5], a[6]) }
+    ) { a -> FilterOptions(a[0], a[1], a[2], a[3], a[4], a[5].sortedBy { c -> CUP_ORDER.indexOf(c).let { if (it < 0) 99 else it } }, a[6], a[7]) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), FilterOptions())
 
     private val localBusy = MutableStateFlow(false)
