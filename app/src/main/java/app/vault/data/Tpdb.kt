@@ -90,7 +90,7 @@ class TpdbApi(private val key: () -> String) {
     suspend fun scenes(p: Performer, page: Int = 1): ScenePage {
         val enc = URLEncoder.encode(p.id, "UTF-8")
         val byId = if (p.id.startsWith("wd:")) null
-            else runCatching { get("/performers/$enc/scenes?per_page=40&page=$page&orderBy=recently_released") }.getOrNull()
+            else runCatching { get("/performers/$enc/scenes?per_page=40&page=$page") }.getOrNull()
         val json = byId ?: get("/scenes?per_page=40&page=$page&q=" + URLEncoder.encode(p.name, "UTF-8"))
         val data = json.optJSONArray("data") ?: return ScenePage(emptyList(), page, page, 0).also { AppLog.w("API", "Scenes response had no data array") }
         var scenes = (0 until data.length()).mapNotNull { data.optJSONObject(it)?.let(::parseScene) }
@@ -107,18 +107,15 @@ class TpdbApi(private val key: () -> String) {
     }
 
     /** Scene search across the whole database. [tags] are also sent as tag filters (ignored by the server if unsupported). */
-    suspend fun searchScenes(q: String, tags: List<String>, page: Int): ScenePage {
-        val params = buildString {
-            append("/scenes?per_page=40&page=$page&orderBy=recently_released")
-            if (q.isNotBlank()) append("&q=").append(URLEncoder.encode(q.trim(), "UTF-8"))
-            tags.forEach { append("&tags[]=").append(URLEncoder.encode(it, "UTF-8")) }
-        }
+    suspend fun searchScenes(q: String, page: Int): ScenePage {
+        // Only documented parameters: unknown ones (tag filters, sort names) can make the server reject the request.
+        val params = "/scenes?per_page=40&page=$page&q=" + URLEncoder.encode(q.trim(), "UTF-8")
         val json = get(params)
         val data = json.optJSONArray("data")
         val scenes = (0 until (data?.length() ?: 0)).mapNotNull { data?.optJSONObject(it)?.let(::parseScene) }
         val meta = json.optJSONObject("meta")
         val last = meta?.optInt("last_page", page)?.takeIf { it > 0 } ?: page
-        AppLog.i("API", "Scene search page $page/$last: ${scenes.size} results (${tags.size} tags, text ${q.isNotBlank()})")
+        AppLog.i("API", "Scene search page $page/$last: ${scenes.size} results")
         return ScenePage(scenes, page, last, meta?.optInt("total", -1)?.takeIf { it >= 0 })
     }
 

@@ -27,6 +27,12 @@ fun MainScaffold(onPanic: () -> Unit) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val previewPlayer = remember { androidx.media3.exoplayer.ExoPlayer.Builder(ctx).build().apply { volume = 0f } }
+    DisposableEffect(Unit) { onDispose { previewPlayer.release() } }
+    // Stop any preview when leaving a screen
+    LaunchedEffect(route) { previewPlayer.pause(); PreviewState.activeId = null }
+    CompositionLocalProvider(LocalPreviewPlayer provides previewPlayer) {
     Scaffold(
         containerColor = Bg,
         bottomBar = {
@@ -78,5 +84,6 @@ fun MainScaffold(onPanic: () -> Unit) {
                 )
             }
         }
+    }
     }
 }

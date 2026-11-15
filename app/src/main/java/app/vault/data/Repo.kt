@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import java.net.URLEncoder
 
-class Repo(context: Context, val prefs: Prefs) {
+class Repo(private val context: Context, val prefs: Prefs) {
     private val db = Room.databaseBuilder(context, AppDb::class.java, "vault.db")
         .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3)
         .fallbackToDestructiveMigration()
@@ -152,32 +152,28 @@ class Repo(context: Context, val prefs: Prefs) {
 
     suspend fun videoSearchSites(): List<Site> = sites.list().filter { it.inVideoSearch && !it.domain.contains('/') }
 
-    /** Category browsing: server-side search, then every chosen term must match title, tags, cast or studio. */
-    suspend fun browseScenes(text: String, terms: List<String>, page: Int): ScenePage? {
+    val categories = CategoryStore(context)
+
+    /**
+     * Category browsing from the database (professional studio scenes, adult performers only).
+     * Searches with the category's phrasing, then keeps scenes whose title or tags mention every word,
+     * plus any extra categories / words the user stacked on top.
+     */
+    suspend fun browseCategory(main: Category?, extra: List<Category>, text: String, page: Int): ScenePage? {
         if (!hasKey) return null
-        val q = text.ifBlank { terms.firstOrNull { !isRelation(it) }.orEmpty().ifBlank { terms.firstOrNull().orEmpty() } }
-        val r = api.searchScenes(q, terms.filter(::isRelation).ifEmpty { terms }, page)
-        val all = (terms + listOf(text).filter { it.isNotBlank() })
-        val kept = r.scenes.filter { s -> all.all { Terms.matchesTerm(s, it) } }
-        kept.forEach { sceneCache[it.id] = it }
-        return r.copy(scenes = kept)
-    }
-
-    fun isRelation(term: String) = Terms.RELATIONS.any { it.equals(term, true) }
-
-    object Terms {
-        /** Adult family-roleplay categories, as studios label them. */
-        val RELATIONS = listOf(
-            "Step Mom", "Step Son", "Step Sister", "Step Brother", "Step Dad", "Step Daughter",
-            "Step Aunt", "Step Niece", "Step Nephew", "Step Grandma", "Cousin",
-            "Mother in Law", "Father in Law", "Sister in Law", "Brother in Law", "Family Roleplay", "Taboo",
-        )
-        private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
-        fun matchesTerm(s: Scene, term: String): Boolean {
-            val t = norm(term).takeIf { it.isNotEmpty() } ?: return true
-            return norm(s.title).contains(t) || s.tags.any { norm(it).contains(t) } ||
-                s.performers.any { norm(it.name).contains(t) } || (s.siteName?.let { norm(it).contains(t) } == true)
+        val query = text.ifBlank { main?.queries?.last().orEmpty() }
+        if (query.isBlank()) return ScenePage(emptyList(), page, 0, 0)
+        val r = api.searchScenes(query, page)
+        val need = listOfNotNull(main) + extra
+        val kept = r.scenes.filter { s ->
+            val hay = s.title + " " + s.tags.joinToString(" ") + " " + s.performers.joinToString(" ") { it.name }
+            need.all { Categories.score(hay, it.words) >= 100 } &&
+                (text.isBlank() || main == null || SiteSearch.tokens(text).all { hay.lowercase().contains(it) }) &&
+                !Categories.isExcluded(*s.tags.toTypedArray())
         }
+        kept.forEach { sceneCache[it.id] = it }
+        AppLog.i("Categories", "Page $page: ${r.scenes.size} from server, ${kept.size} kept")
+        return r.copy(scenes = kept)
     }
 
     /** Makes sure a performer credited in a scene is in the library (fetching from ThePornDB if needed). */

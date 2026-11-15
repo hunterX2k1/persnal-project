@@ -188,13 +188,12 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
 
 @Composable
 fun SceneCard(s: Scene, modifier: Modifier = Modifier.width(240.dp), onClick: () -> Unit) {
-    Column(modifier.clickable(onClick = onClick)) {
+    Column(modifier) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))) {
-            VImage(s.image, Modifier.fillMaxSize())
+            PreviewThumb(s.id, s.image, s.trailer, Modifier.fillMaxSize(), onClick)
             formatDuration(s.durationSec)?.let { Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { Badge(it, dark = true) } }
-            if (s.trailer != null) Icon(Icons.Default.PlayCircle, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(40.dp))
         }
-        Text(s.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Text(s.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp).clickable(onClick = onClick))
         Text(listOfNotNull(s.siteName, s.date).joinToString(" • "), color = Muted, fontSize = 12.sp, maxLines = 1)
     }
 }
