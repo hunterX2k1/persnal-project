@@ -32,6 +32,18 @@ sealed interface SiteStatus {
 
 data class SiteProgress(val site: Site, val status: SiteStatus, val hits: List<Hit> = emptyList())
 
+/** Adds a site's result to the map, combining it with an earlier result for the same site (e.g. its own search + web search). */
+fun Map<String, SiteProgress>.merged(p: SiteProgress): Map<String, SiteProgress> {
+    val old = this[p.site.domain] ?: return this + (p.site.domain to p)
+    val hits = (old.hits + p.hits).distinctBy { it.url }
+    val status = when {
+        hits.isNotEmpty() -> SiteStatus.Found(hits.size)
+        old.status is SiteStatus.Searching -> p.status
+        else -> old.status
+    }
+    return this + (p.site.domain to old.copy(status = status, hits = hits))
+}
+
 /** What we're looking for: a scene title plus the people in it. */
 data class VideoQuery(val title: String, val names: List<String>)
 
@@ -102,6 +114,7 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
      * A candidate counts only if its result page actually comes back and mentions what we searched for.
      */
     suspend fun detectTemplate(site: Site, sample: String): String? {
+        val lenient = site.kind == SiteKind.VIDEO
         val home = "https://${site.domain}/"
         val page = fetch(home)
         if (page.blocked) return null
@@ -112,7 +125,7 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
                     Regex("template=\"([^\"]*\\{searchTerms\\}[^\"]*)\"").findAll(xml)
                         .map { it.groupValues[1].replace("&amp;", "&").replace("{searchTerms}", "{q}").replace(Regex("\\{[^}]*\\?\\}"), "") }
                         .firstOrNull { !it.contains("suggest", true) && !it.contains("json", true) }
-                        ?.let { if (verify(it, sample, site)) return it.also { _ -> AppLog.i("SiteSearch", "Search link for ${site.domain} from OpenSearch") } }
+                        ?.let { if (verify(it, sample, site, lenient)) return it.also { _ -> AppLog.i("SiteSearch", "Search link for ${site.domain} from OpenSearch") } }
                 }
             }
             for (form in doc.select("form")) {
@@ -123,23 +136,25 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
                 val action = form.absUrl("action").ifBlank { home }
                 val hidden = form.select("input[type=hidden][name]").joinToString("") { "&" + it.attr("name") + "=" + URLEncoder.encode(it.attr("value"), "UTF-8") }
                 val tpl = action + (if ('?' in action) "&" else "?") + name + "={q}" + hidden
-                if (verify(tpl, sample, site)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain} from its search box") }
+                if (verify(tpl, sample, site, lenient)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain} from its search box") }
             }
         }
-        for (pattern in PATTERNS.take(5)) {
+        for (pattern in if (lenient) PATTERNS else PATTERNS.take(5)) {
             val tpl = "https://${site.domain}$pattern"
-            if (verify(tpl, sample, site)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain}: $pattern") }
+            if (verify(tpl, sample, site, lenient)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain}: $pattern") }
         }
         AppLog.i("SiteSearch", "No search link found for ${site.domain}")
         return null
     }
 
     /** A search link works if its page loads and either echoes the term or lists matching videos. */
-    private suspend fun verify(tpl: String, sample: String, site: Site): Boolean {
+    private suspend fun verify(tpl: String, sample: String, site: Site, lenient: Boolean = false): Boolean {
         val url = fill(tpl, sample)
         val p = fetch(url)
         val html = p.html ?: return false
         if (p.blocked) return false
+        // A known video site's result page counts if it lists several videos, even if this performer isn't on it.
+        if (lenient && videoLinkCount(html, url, site) >= 4 && fill(tpl, "x") != "https://${site.domain}/") return true
         val echoes = sample.split(' ').filter { it.length >= 3 }.all { html.contains(it, ignoreCase = true) }
         val hits = extract(html, url, site, VideoQuery(sample, listOf(sample))).count { it.score >= 40 }
         return hits >= 2 || (echoes && extract(html, url, site, VideoQuery(sample, emptyList())).size + hits >= 1)
@@ -177,7 +192,17 @@ class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = 
         val PATTERNS = listOf(
             "/search?q={q}", "/search/{q-}/", "/search/{q-}", "/?s={q}", "/search?search={q}",
             "/search?query={q}", "/videos/search?q={q}", "/search/videos?q={q}", "/search?k={q}", "/s/{q-}/",
+            "/search/videos/{q-}/", "/videos/{q-}/", "/?search={q}", "/search.php?q={q}", "/search?search_query={q}",
+            "/en/search/{q-}/", "/find/{q-}/", "/search/?q={q}", "/q/{q-}/", "/?k={q}",
         )
+
+        /** Links on a page that look like individual videos (thumbnail + video-style address). */
+        fun videoLinkCount(html: String, pageUrl: String, site: Site): Int =
+            Jsoup.parse(html, pageUrl).select("a[href]:has(img)").map { it.absUrl("href") }.distinct().count { h ->
+                val host = runCatching { URI(h).host }.getOrNull()?.lowercase()?.removePrefix("www.") ?: return@count false
+                (host == site.domain || host.endsWith("." + site.domain)) &&
+                    Regex("/(video|videos|watch|v|view|embed|movie)s?/|/\\d{4,}/|watch\\?|view_video").containsMatchIn(h)
+            }
 
         /** Social, code and reference sites never have videos to find. */
         private val NON_VIDEO_SITES = listOf(

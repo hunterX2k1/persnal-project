@@ -48,8 +48,8 @@ class FindVideosVm(app: Application, val performerId: String) : AndroidViewModel
             AppLog.i("FindVideos", "Searching ${sites.size} sites for a performer")
             val names = listOf(p.name) + p.aliases?.split(',')?.map { it.trim() }?.filter { it.length >= 4 }.orEmpty().take(2)
             val q = VideoQuery(p.name, names)
-            launch { repo.discover(q).forEach { pr -> progress.value = progress.value + (pr.site.domain to pr) } }
-            repo.siteSearch.searchAll(sites, q).collect { pr -> progress.value = progress.value + (pr.site.domain to pr) }
+            launch { repo.discover(q).forEach { pr -> progress.value = progress.value.merged(pr) } }
+            repo.siteSearch.searchAll(sites, q).collect { pr -> progress.value = progress.value.merged(pr) }
         }
         job?.invokeOnCompletion { running.value = false }
     }

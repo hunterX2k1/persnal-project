@@ -6,6 +6,8 @@ import androidx.room.Room
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -163,8 +165,8 @@ class Repo(private val context: Context, val prefs: Prefs) {
         return sites.list().filter {
             it.inVideoSearch && !it.domain.contains('/') && !SiteSearch.isNonVideo(it.domain) &&
                 (it.kind == null || it.kind == SiteKind.VIDEO) &&
-                // already checked, no search page found: skip for a month
-                !(it.searchTemplate.isNullOrBlank() && it.searchCheckedAt > 0 && now - it.searchCheckedAt < month)
+                // unknown sites already checked with no search page: skip for a month (video sites go through web search instead)
+                !(it.kind != SiteKind.VIDEO && it.searchTemplate.isNullOrBlank() && it.searchCheckedAt > 0 && now - it.searchCheckedAt < month)
         }.sortedByDescending { !it.searchTemplate.isNullOrBlank() } // working sites first
     }
 
@@ -195,10 +197,10 @@ class Repo(private val context: Context, val prefs: Prefs) {
                                     ?: SiteScanner.Result(SiteKind.UNREACHABLE, null)
                                 val tpl = r.template ?: s.searchTemplate
                                 sites.upsert(s.copy(kind = r.kind, searchTemplate = tpl, searchCheckedAt = System.currentTimeMillis(),
-                                    inVideoSearch = r.kind == SiteKind.VIDEO && !tpl.isNullOrBlank()))
+                                    inVideoSearch = r.kind == SiteKind.VIDEO))
                                 synchronized(this@Repo) {
                                     done++; if (r.kind == SiteKind.VIDEO) video++; if (r.kind == SiteKind.VIDEO && !tpl.isNullOrBlank()) searchable++
-                                    scanStatus.value = "Scanned $done / ${todo.size} · $video video sites · $searchable searchable"
+                                    scanStatus.value = "Scanned $done / ${todo.size} · $video video sites ($searchable with their own search, the rest via web search)"
                                 }
                             }
                         }
@@ -217,7 +219,7 @@ class Repo(private val context: Context, val prefs: Prefs) {
         sites.upsert(site)
         bg.launch {
             val r = attempt { scanner.scan(site, sampleName()) }.getOrNull() ?: return@launch
-            sites.upsert(site.copy(kind = r.kind, searchTemplate = r.template, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = r.kind == SiteKind.VIDEO && r.template != null))
+            sites.upsert(site.copy(kind = r.kind, searchTemplate = r.template, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = r.kind == SiteKind.VIDEO))
         }
         return "Added ${prettyDomain(host)} — checking what kind of site it is"
     }
@@ -227,23 +229,41 @@ class Repo(private val context: Context, val prefs: Prefs) {
     private val discovery = Discovery(siteSearch)
 
     /** Web-searches for a video and returns matches on sites not in my list (adding those sites if enabled). */
-    suspend fun discover(q: VideoQuery): List<SiteProgress> {
-        if (!prefs.discoverSites) return emptyList()
-        val known = sites.list().map { it.domain }.toSet()
+    suspend fun discover(q: VideoQuery): List<SiteProgress> = kotlinx.coroutines.coroutineScope {
+        val all = sites.list()
+        val byDomain = all.associateBy { it.domain }
         val custom = prefs.customEngines.filter { it.discover }.map { it.label to it.template }
-        val hits = attempt { discovery.discover(q, known, custom) }.getOrDefault(emptyList())
-        return hits.groupBy { it.domain }.map { (domain, hs) ->
+        // Video sites with no search page of their own: search them through web engines ("site:domain …").
+        val webOnly = all.filter { it.kind == SiteKind.VIDEO && it.inVideoSearch && it.searchTemplate.isNullOrBlank() && !it.domain.contains('/') }
+            .shuffled().take(8)
+        val targeted = webOnly.map { s -> async { s to attempt { discovery.siteResults(s.domain, q, custom) }.getOrDefault(emptyList()) } }
+        val broad = async { attempt { discovery.discover(q, byDomain.keys, custom) }.getOrDefault(emptyList()) }
+        val hits = broad.await() + targeted.awaitAll().flatMap { it.second }
+        AppLog.i("Discover", "Web search: ${webOnly.size} sites searched via engines, ${hits.size} matches")
+        val (mine, fresh) = hits.partition { it.domain in byDomain }
+        val ownResults = mine.groupBy { it.domain }.map { (d, hs) -> SiteProgress(byDomain.getValue(d), SiteStatus.Found(hs.size), hs.distinctBy { it.url }) }
+        if (!prefs.discoverSites) return@coroutineScope ownResults
+        ownResults + fresh.groupBy { it.domain }.map { (domain, hs) ->
             val site = Site(domain, "${prettyDomain(domain)} (new)", "https://$domain/", kind = SiteKind.VIDEO, discovered = true)
             if (prefs.autoAddDiscovered && sites.get(domain) == null) {
                 sites.upsert(site.copy(title = prettyDomain(domain)))
                 AppLog.i("Discover", "Added new site $domain")
                 bg.launch {
                     val tpl = attempt { siteSearch.detectTemplate(site, sampleName()) }.getOrNull()
-                    sites.get(domain)?.let { sites.upsert(it.copy(searchTemplate = tpl, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = tpl != null)) }
+                    sites.get(domain)?.let { sites.upsert(it.copy(searchTemplate = tpl, searchCheckedAt = System.currentTimeMillis(), inVideoSearch = true)) }
                 }
             }
             SiteProgress(site, SiteStatus.Found(hs.size), hs)
         }
+    }
+
+    /** One-time: every site already found to be a video site becomes searchable (web search if needed). */
+    suspend fun makeVideoSitesSearchable() {
+        if (prefs.videoSitesSearchable) return
+        var n = 0
+        sites.list().filter { it.kind == SiteKind.VIDEO && !it.inVideoSearch }.forEach { sites.upsert(it.copy(inVideoSearch = true)); n++ }
+        prefs.videoSitesSearchable = true
+        AppLog.i("Sites", "$n video sites made searchable")
     }
 
     /** One-time tidy-up of imported sites: fix "site.com)" style names, drop .onion and dot-less hosts, switch off non-video sites. */

@@ -50,6 +50,7 @@ class Prefs(context: Context) {
     var discoverSites by bool("discover_sites", true)
     var autoAddDiscovered by bool("auto_add_discovered", true)
     var sitesTidied by bool("sites_tidied_v1", false)
+    var videoSitesSearchable by bool("video_sites_searchable_v1", false)
     var blockRedirects by bool("block_redirects", true)
     var warnUnsafe by bool("warn_unsafe", true)
     private var allowAdsRaw by str("allow_ads", "")

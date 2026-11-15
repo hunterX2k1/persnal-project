@@ -36,6 +36,7 @@ class App : Application(), coil.ImageLoaderFactory {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             AdBlock.load(java.io.File(filesDir, "blocklists"))
             runCatching { repo.tidySites() }
+            runCatching { repo.makeVideoSitesSearchable() }
         }
     }
 

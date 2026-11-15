@@ -48,3 +48,25 @@ class SiteSearchTest {
         assertEquals("https://a.com/search/jane-example/", SiteSearch.fill("https://a.com/search/{q-}/", "Jane Example!"))
     }
 }
+
+class MergeTest {
+    @Test
+    fun ownSearchAndWebSearchCombine() {
+        val site = Site("tube.example", "Tube", "https://tube.example/", kind = SiteKind.VIDEO)
+        fun hit(u: String) = Hit(site.domain, "Tube", "Title $u", "https://tube.example/v/$u", null, "20:00", 80)
+        var m = emptyMap<String, SiteProgress>()
+        m = m.merged(SiteProgress(site, SiteStatus.NoSearchLink))
+        m = m.merged(SiteProgress(site, SiteStatus.Found(2), listOf(hit("1"), hit("2"))))
+        m = m.merged(SiteProgress(site, SiteStatus.Found(1), listOf(hit("2"))))
+        val p = m.getValue(site.domain)
+        assertEquals(2, p.hits.size)
+        assertEquals(SiteStatus.Found(2), p.status)
+    }
+
+    @Test
+    fun countsVideoLinks() {
+        val site = Site("tube.example", "Tube", "https://tube.example/")
+        val html = (1..5).joinToString("") { """<a href="/video/$it/title"><img src="t.jpg"></a>""" } + """<a href="/tags/x"><img src="t.jpg"></a>"""
+        assertEquals(5, SiteSearch.videoLinkCount(html, "https://tube.example/search?q=x", site))
+    }
+}

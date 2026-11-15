@@ -28,7 +28,7 @@ fun statusText(s: SiteStatus) = when (s) {
     is SiteStatus.Found -> "${s.count} match${if (s.count == 1) "" else "es"}"
     SiteStatus.Nothing -> "No matching videos"
     is SiteStatus.Blocked -> "Site blocks app searches — tap Open"
-    SiteStatus.NoSearchLink -> "No search page found — tap Open, or set one in My sites"
+    SiteStatus.NoSearchLink -> "No search page of its own — searched through web search instead"
     is SiteStatus.Failed -> "Couldn't search (${s.reason})"
 }
 

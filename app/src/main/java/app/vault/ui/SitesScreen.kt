@@ -84,7 +84,7 @@ fun SitesScreen() {
                     when {
                         scanning -> scanStatus ?: "Scanning…"
                         unscanned > 0 -> "$unscanned sites not checked yet. Scan them to find which ones have videos and a search page."
-                        else -> "${sites.count { it.kind == SiteKind.VIDEO }} video sites · ${sites.count { it.inVideoSearch && it.kind == SiteKind.VIDEO }} searchable · ${sites.count { it.discovered }} found automatically"
+                        else -> "${sites.count { it.kind == SiteKind.VIDEO }} video sites, all searchable (${sites.count { it.kind == SiteKind.VIDEO && !it.searchTemplate.isNullOrBlank() }} with their own search, the rest through web search) · ${sites.count { it.discovered }} found automatically"
                     },
                     fontSize = 13.sp,
                 )
@@ -103,7 +103,7 @@ fun SitesScreen() {
                 val filters = remember(sites) {
                     buildList {
                         add(Triple("all", "All", sites.size))
-                        add(Triple("searchable", "Searchable", sites.count { it.inVideoSearch && !it.searchTemplate.isNullOrBlank() }))
+                        add(Triple("searchable", "Searchable", sites.count { isSearchable(it) }))
                         add(Triple("new", "Found automatically", sites.count { it.discovered }))
                         SiteKind.LABELS.forEach { (k, label) -> add(Triple(k, label, sites.count { it.kind == k })) }
                         add(Triple("unscanned", "Not checked", sites.count { it.kind == null }))
@@ -115,7 +115,7 @@ fun SitesScreen() {
                 val shown = sites.filter { s ->
                     (q.isBlank() || s.title.contains(q, true) || s.domain.contains(q, true)) && when (kindFilter) {
                         "all" -> true
-                        "searchable" -> s.inVideoSearch && !s.searchTemplate.isNullOrBlank()
+                        "searchable" -> isSearchable(s)
                         "new" -> s.discovered
                         "unscanned" -> s.kind == null
                         else -> s.kind == kindFilter
@@ -128,7 +128,8 @@ fun SitesScreen() {
                                 s.kind?.let { k -> Text(SiteKind.LABELS[k] ?: k, fontSize = 11.sp, color = if (k == SiteKind.VIDEO) Accent else Muted) }
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     if (s.discovered) Text("NEW", fontSize = 10.sp, color = Accent, fontWeight = FontWeight.Bold)
-                                    if (s.inVideoSearch && !s.searchTemplate.isNullOrBlank()) Icon(Icons.Default.ManageSearch, "Searchable", tint = Accent, modifier = Modifier.size(14.dp))
+                                    if (s.inVideoSearch && !s.searchTemplate.isNullOrBlank()) Icon(Icons.Default.ManageSearch, "Searchable (own search)", tint = Accent, modifier = Modifier.size(14.dp))
+                                    else if (isSearchable(s)) Icon(Icons.Default.TravelExplore, "Searchable via web search", tint = Muted, modifier = Modifier.size(14.dp))
                                 }
                             }
                             IconButton(onClick = { editing = s }) { Icon(Icons.Default.Edit, "Edit", tint = Muted) }
@@ -237,3 +238,7 @@ private fun PasteDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** A site is searchable for videos if it has its own search page, or is a video site (searched through web engines). */
+private fun isSearchable(s: Site) = s.inVideoSearch && !s.domain.contains('/') &&
+    (!s.searchTemplate.isNullOrBlank() || s.kind == SiteKind.VIDEO)

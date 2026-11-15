@@ -77,13 +77,22 @@ class Discovery(private val search: SiteSearch) {
         val query = (if (q.title != q.names.firstOrNull()) "\"${q.title}\" " else "") + q.names.take(1).joinToString(" ") + " video"
         val candidates = webResults(query, custom).filter { it.startsWith("http") }.mapNotNull { url ->
             val d = Repo.cleanDomain(attempt { URI(url).host }.getOrNull()) ?: return@mapNotNull null
-            if (d in known || SKIP.any { d == it || d.endsWith(".$it") || d.startsWith(it) } || SiteSearch.isNonVideo(d) || AdBlock.isUnsafe(d) || AdBlock.isAd(d)) null
+            if (SKIP.any { d == it || d.endsWith(".$it") || d.startsWith(it) } || SiteSearch.isNonVideo(d) || AdBlock.isUnsafe(d) || AdBlock.isAd(d)) null
             else d to url
-        }.distinctBy { it.first }.take(maxSites)
+        }.distinctBy { it.first }.sortedByDescending { it.first in known }.take(maxSites)
         val gate = Semaphore(4)
         candidates.map { (domain, url) ->
             async { gate.withPermit { attempt { checkPage(domain, url, q) }.getOrNull() } }
         }.awaitAll().filterNotNull().also { AppLog.i("Discover", "${candidates.size} new sites checked, ${it.size} had the video") }
+    }
+
+    /** Searches one site through web engines ("site:domain words") when it has no usable search page. */
+    suspend fun siteResults(domain: String, q: VideoQuery, custom: List<Pair<String, String>> = emptyList()): List<Hit> = coroutineScope {
+        val term = (if (q.title != q.names.firstOrNull()) q.title else q.names.firstOrNull().orEmpty())
+        val urls = webResults("site:$domain $term", custom, want = 6).filter { u ->
+            Repo.cleanDomain(attempt { URI(u).host }.getOrNull())?.let { it == domain || it.endsWith(".$domain") } == true
+        }.distinct().take(4)
+        urls.map { u -> async { attempt { checkPage(domain, u, q) }.getOrNull() } }.awaitAll().filterNotNull()
     }
 
     /** A result counts if its page is a video page (player / og:video / VideoObject) with a matching title. */
