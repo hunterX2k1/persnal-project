@@ -7,7 +7,11 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.database.Cursor;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -31,6 +35,11 @@ import com.fieldhelper.diag.core.Card;
 import com.fieldhelper.diag.core.CircuitTracer;
 import com.fieldhelper.diag.core.Engine;
 import com.fieldhelper.diag.core.Reply;
+import com.fieldhelper.diag.diagram.DiagramReader;
+import com.fieldhelper.diag.diagram.PdfExtractor;
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
+import com.tom_roush.pdfbox.io.MemoryUsageSetting;
+import com.tom_roush.pdfbox.pdmodel.PDDocument;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -41,7 +50,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Offline diagnosis helper. All screens are built in code, no extra libraries. */
+/** Offline diagnosis helper. All screens are built in code; the only library reads PDF drawings. */
 public class MainActivity extends Activity {
 
     private static final int BG = Color.parseColor("#F4F5F7");
@@ -52,6 +61,10 @@ public class MainActivity extends Activity {
     private static final int USER_BUBBLE = Color.parseColor("#0F6E56");
     private static final int BOT_BUBBLE = Color.WHITE;
     private static final int REQ_IMPORT = 42;
+    private static final int REQ_PDF = 43;
+    private static final String PRACTICE_PDF = "practice_drawing.pdf";
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private volatile boolean reading = false;
     private static final String USER_FILE = "user_cards.json";
 
     private final Engine engine = new Engine();
@@ -72,6 +85,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        PDFBoxResourceLoader.init(getApplicationContext());
         String loadMsg = loadAllCards();
 
         LinearLayout root = new LinearLayout(this);
@@ -201,7 +215,7 @@ public class MainActivity extends Activity {
         String[][] quick = {
                 {"Help", "help"}, {"Trace path", "trace 24V -> F1 -> S1 -> H1 -> 0V"}, {"Ohm's law", "V=24 R=12"},
                 {"Cable drop", "drop L=20 A=1.5 I=5 V=24"}, {"4-20 mA", "4-20 12 0 10 bar"}, {"Convert", "conv 5 bar psi"},
-                {"Example fault", "H5 lamp not glowing"}};
+                {"Example fault", "H5 lamp not glowing"}, {"Drawing example", "H7 alarm lamp not glowing"}};
         for (String[] q : quick) {
             TextView c = chip(q[0]);
             c.setOnClickListener(v -> { input.setText(q[1]); input.setSelection(q[1].length()); });
@@ -332,6 +346,12 @@ public class MainActivity extends Activity {
         btns.addView(smallButton("Export mine", v -> exportCards()), wl(44));
         box.addView(btns);
 
+        LinearLayout btns2 = new LinearLayout(this);
+        btns2.setPadding(0, 0, 0, dp(6));
+        btns2.addView(smallButton("Read drawing PDF", v -> pickPdf()), wl(44));
+        btns2.addView(smallButton("Try practice drawing", v -> readPractice()), wl(44));
+        box.addView(btns2);
+
         ListView list = new ListView(this);
         cardAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, new ArrayList<>());
         list.setAdapter(cardAdapter);
@@ -377,6 +397,21 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDelete(String id) {
+        if (id.toUpperCase().startsWith("DOC-")) {
+            String code = id.substring(4);
+            new AlertDialog.Builder(this)
+                    .setTitle("Remove drawing " + code + "?")
+                    .setMessage("This removes the drawing card and every circuit/part card read from it. You can read the PDF again any time.")
+                    .setPositiveButton("Remove", (x, y) -> {
+                        int n = engine.deleteDocument(code);
+                        saveUserCards();
+                        refreshCards();
+                        toast(n + " card(s) removed");
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Delete " + id + "?")
                 .setMessage("This removes your card from the phone. It can't be undone (export first if unsure). If it replaced a built-in card, restart the app to see the built-in one again.")
@@ -404,13 +439,129 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != REQ_IMPORT || res != RESULT_OK || data == null || data.getData() == null) return;
+        if (res != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
+        if (req == REQ_PDF) { readPdf(uri); return; }
+        if (req != REQ_IMPORT) return;
         try (InputStream in = getContentResolver().openInputStream(uri)) {
             importJson(readAll(in));
         } catch (Exception e) {
             toast("Import failed: " + e.getMessage());
         }
+    }
+
+    // ---------- Reading drawings ----------
+
+    private void pickPdf() {
+        if (reading) { toast("Still reading the last drawing…"); return; }
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/pdf");
+        try {
+            startActivityForResult(i, REQ_PDF);
+        } catch (Exception e) {
+            toast("No file picker found");
+        }
+    }
+
+    private void readPractice() {
+        if (reading) { toast("Still reading the last drawing…"); return; }
+        try {
+            File f = new File(getCacheDir(), PRACTICE_PDF);
+            try (InputStream in = getAssets().open(PRACTICE_PDF); FileOutputStream out = new FileOutputStream(f)) { copy(in, out); }
+            readPdfFile(f, PRACTICE_PDF);
+        } catch (Exception e) {
+            toast("Couldn't open the practice drawing: " + e.getMessage());
+        }
+    }
+
+    private void readPdf(Uri uri) {
+        String name = displayName(uri);
+        try {
+            File f = new File(getCacheDir(), "drawing.pdf");
+            try (InputStream in = getContentResolver().openInputStream(uri); FileOutputStream out = new FileOutputStream(f)) { copy(in, out); }
+            readPdfFile(f, name);
+        } catch (Exception e) {
+            toast("Couldn't open that PDF: " + e.getMessage());
+        }
+    }
+
+    /** Reads every page on a background thread, with a progress bar. */
+    private void readPdfFile(File file, String name) {
+        reading = true;
+        TextView msg = new TextView(this);
+        msg.setPadding(dp(20), dp(16), dp(20), dp(8));
+        msg.setTextSize(15);
+        msg.setTextColor(TEXT);
+        msg.setText("Opening " + name + "…");
+        AlertDialog dlg = new AlertDialog.Builder(this).setTitle("Reading drawing").setView(msg).setCancelable(false)
+                .setNegativeButton("Stop", (x, y) -> reading = false).show();
+        new Thread(() -> {
+            List<DiagramReader.PageResult> pages = new ArrayList<>();
+            String error = null;
+            try (PDDocument doc = PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly())) {
+                int n = doc.getNumberOfPages();
+                for (int i = 0; i < n && reading; i++) {
+                    final int done = i;
+                    ui.post(() -> msg.setText("Page " + (done + 1) + " of " + n + "\n" + bar(done, n)));
+                    try {
+                        pages.add(DiagramReader.readPage(PdfExtractor.page(doc, i)));
+                    } catch (Exception | OutOfMemoryError pe) {
+                        DiagramReader.PageResult bad = new DiagramReader.PageResult();
+                        bad.page = i + 1;
+                        bad.issues.add("Page " + (i + 1) + " couldn't be read: " + pe.getMessage());
+                        pages.add(bad);
+                    }
+                }
+            } catch (Exception | OutOfMemoryError e) {
+                error = e.getMessage();
+            }
+            final boolean stopped = !reading;
+            final String err = error;
+            final DiagramReader.DocResult dr = err == null ? DiagramReader.toCards(name, pages) : null;
+            ui.post(() -> {
+                reading = false;
+                dlg.dismiss();
+                if (err != null) {
+                    new AlertDialog.Builder(this).setTitle("Couldn't read " + name).setMessage(err).setPositiveButton("OK", null).show();
+                    return;
+                }
+                engine.deleteDocument(DiagramReader.docCodeOf(name));
+                for (Card c : dr.cards) engine.saveUserCard(c);
+                saveUserCards();
+                refreshCards();
+                String head = stopped ? "Stopped early. Cards were made from the pages read so far.\n\n" : "";
+                new AlertDialog.Builder(this)
+                        .setTitle(name)
+                        .setMessage(head + dr.report + "\n\nAsk about it in the Ask tab, e.g. a lamp or relay tag from the drawing.")
+                        .setPositiveButton("OK", null)
+                        .show();
+            });
+        }).start();
+    }
+
+    private static String bar(int done, int total) {
+        int pct = total == 0 ? 0 : done * 100 / total;
+        int fill = pct / 10;
+        StringBuilder b = new StringBuilder("[");
+        for (int k = 0; k < 10; k++) b.append(k < fill ? "█" : "░");
+        return b.append("] ").append(pct).append("%").toString();
+    }
+
+    private String displayName(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (i >= 0 && c.getString(i) != null) return c.getString(i);
+            }
+        } catch (Exception ignored) { }
+        return "drawing.pdf";
+    }
+
+    private static void copy(InputStream in, java.io.OutputStream out) throws java.io.IOException {
+        byte[] buf = new byte[65536];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
     }
 
     private void pasteImport() {

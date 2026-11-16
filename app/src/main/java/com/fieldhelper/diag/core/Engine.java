@@ -59,6 +59,18 @@ public class Engine {
         return false;
     }
 
+    /** Removes a drawing's DOC card and every card read from it (IDs ...-CODE-...). Returns how many. */
+    public int deleteDocument(String code) {
+        String c = code.toUpperCase(Locale.US);
+        List<String> ids = new ArrayList<>();
+        for (Card x : userCards) {
+            String u = x.id.toUpperCase(Locale.US);
+            if (u.equals("DOC-" + c) || u.startsWith("CKT-" + c + "-") || u.startsWith("C-" + c + "-")) ids.add(x.id);
+        }
+        for (String id : ids) deleteUserCard(id);
+        return ids.size();
+    }
+
     /** All user cards as JSON, to save to phone storage. */
     public String userCardsJson() {
         List<Object> l = new ArrayList<>();
@@ -134,6 +146,7 @@ public class Engine {
                 + "Ask about a part:  what does K12 do\n"
                 + "Ask about a principle:  how does a relay work\n"
                 + "Trace any path:  trace 24V -> F1 -> S1 -> H1 -> 0V\n"
+                + "Read your wiring PDFs:  Cards tab → Read drawing PDF (or Try practice drawing)\n"
                 + "Ohm's law:  V=24 R=12   or   24V 5W\n"
                 + "Cable drop:  drop L=20 A=1.5 I=5 V=24\n"
                 + "4-20 mA:  4-20 12 0 10 bar\n"

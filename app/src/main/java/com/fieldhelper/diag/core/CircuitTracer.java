@@ -52,6 +52,8 @@ public final class CircuitTracer {
             return "Supply " + name + ": measure it against 0V. Is the battery or power supply OK?";
         if (u.startsWith("F")) return "Fuse " + name + ": power off, check continuity. Blown fuse? Find why before replacing.";
         if (u.startsWith("Q")) return "Breaker " + name + ": is it ON or tripped? Measure voltage in and out.";
+        if (u.startsWith("K") && (u.contains("A1-A2") || u.contains("A2-A1")))
+            return "Relay coil " + name + ": measure voltage across A1-A2 when it should pull in; power off and check coil resistance.";
         if (u.startsWith("K")) return "Relay contact " + name + ": is the relay pulled in? Measure voltage both sides of the contact.";
         if (u.startsWith("S")) return "Switch " + name + ": operate it and measure voltage both sides.";
         if (u.startsWith("X") || u.startsWith("TB")) return "Terminal " + name + ": measure voltage here, check the wire is tight and not corroded.";

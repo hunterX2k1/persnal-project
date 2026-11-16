@@ -10,6 +10,7 @@ A small, fully offline helper (no LLM, no internet permission). It answers **onl
 | Answerer | Builds the answer from the matched card + the cards it links to, then adds principle reminders and references |
 | Circuit tracer | Turns a path like `24V -> F3 -> K12:13-14 -> X2:5 -> H5 -> X2:6 -> 0V` into an ordered check list |
 | Calculators | Ohm's law + power, cable voltage drop, 4-20 mA scaling, unit conversion, maths |
+| Diagram reader | Reads your own wiring-diagram PDFs (computer-made, searchable) and makes circuit + part cards automatically, with page numbers |
 | Card editor | Add or edit your own cards on the phone, import/export as JSON |
 
 Starter cards: 20 electrical principles (P-001…P-020), a **made-up** practice panel (lamp H5, relay K12, PLC output DO4) with circuit and fault cards, plus generic 4-20 mA and CAN bus fault cards.

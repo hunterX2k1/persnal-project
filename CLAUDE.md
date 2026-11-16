@@ -30,13 +30,22 @@ Example: "module light is not glowing" → find the circuit in the indexed diagr
 - `assets/cards/01_principles.json` (P-001…P-020), `02_example_circuit.json` (made-up panel: H5 lamp, K12 relay, PLC A1 DO4, F2/F3, X2; CKT-001/002; F-001…F-004).
 - `.github/workflows/build-apk.yml` builds a debug APK (artifact "DiagHelper-apk"). Gradle wrapper 8.9, AGP 8.5.2, compileSdk 34, minSdk 26, Java 17, no dependencies, no permissions.
 
+## Diagram reader (added)
+- User's diagram PDFs are vector (sharp lines, searchable text). Decision: read them with geometry rules, not an AI model, so terminal numbers are exact.
+- `app/src/main/java/com/fieldhelper/diag/diagram/`: `PdfExtractor` (PdfBox-Android: painted lines/shapes + positioned words), `PageGeom` (raw page data), `DiagramReader` (pure Java: wires vs symbols, nets with T-joints/dots, tags/pins/descriptions from nearest text, path search supply → load → 0V, auto CKT-/C-/DOC- cards with page source).
+- App: Cards tab → "Read drawing PDF" / "Try practice drawing" (`assets/practice_drawing.pdf`, made by `tools/make_practice_drawing.py`). Long-press nothing; tap the DOC- card → Delete removes the whole drawing.
+- Desktop test: compile core + diagram with Apache PDFBox 2.0.x (PdfExtractor with `com.tom_roush.pdfbox`→`org.apache.pdfbox`, `PointF`→`Point2D`, `Path.FillType`→`int`). Practice drawing gives all 4 circuits exactly.
+- Not done yet: cross-sheet references (paths that continue on another page show "? (… not on this page)"), tuning on a real MTU sheet, scanned PDFs (would need OCR).
+- Planned next (user agreed): small donor model MiniLM (~22 MB, ONNX, offline) to match free-wording questions to cards. It only finds cards, never writes values.
+- Phone: Moto Edge 60 Pro 8 GB; user has only the phone.
+
 ## Verification status
 - Engine tested on desktop JDK: all checks passed (fault lookup, calculators, Not in index, user card save/reload/delete).
-- MainActivity was type-checked only against hand-written Android stubs. **The APK has never been built yet** — first real build still needed (GitHub Actions or Android Studio). Fix any compile errors there.
+- APK builds (Gradle + Android SDK 34). Not yet run on a device/emulator by Claude (no KVM in the cloud container); user tests on the phone.
 - To re-run engine tests: compile `core/*.java` with a small test main that loads the two JSON files and calls `Engine.ask(...)`.
 
 ## Next steps (open)
-1. Build the APK for real and fix any build errors.
+1. ~~Build the APK~~ done. Test diagram reader on a real MTU sheet and tune.
 2. Convert the user's real MTU diagram sheets into cards (user sends a photo; produce card JSON; mark unreadable items "UNREADABLE"; user checks terminals before relying on it). Real MTU documents are private — keep them out of public repos.
 3. Later ideas from the chat: optional small LLM only for phrasing; specialist ML models (anomaly detection on sensor data) — not started.
 
