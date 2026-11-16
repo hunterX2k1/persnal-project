@@ -59,7 +59,13 @@ public class Answerer {
             return near;
         }
         byMeaning[0] = top[0] < MIN_SCORE;
-        return out.size() > 6 ? new ArrayList<>(out.subList(0, 6)) : out;
+        return out.size() > 10 ? new ArrayList<>(out.subList(0, 10)) : out;
+    }
+
+    /** Cards made from the user's own drawings (sheet cards and read circuits). */
+    static boolean fromDrawing(Card c) {
+        String u = c.id.toUpperCase();
+        return u.matches("^DOC-.+-P\\d+$") || (c.user && (u.startsWith("CKT-") || u.startsWith("C-")) && !c.source.isEmpty());
     }
 
     public Reply answer(String query) {
@@ -79,12 +85,24 @@ public class Answerer {
             case "Fault": fault(top, b, used); break;
             case "Circuit": circuit(top, b, used, true); break;
             case "Component": component(top, b, used); break;
-            default: general(top, b, used);
+            default:
+                if (top.id.toUpperCase().matches("^DOC-.+-P\\d+$")) sheet(top, query, b, used);
+                else general(top, b, used);
         }
         List<CardIndex.Hit> others = new ArrayList<>();
         for (CardIndex.Hit h : hits.subList(1, hits.size()))
             if (!used.contains(h.card.id) && h.score >= MIN_SCORE && h.score * 2 >= hits.get(0).score) others.add(h);
+        others.removeIf(h -> fromDrawing(h.card) && !fromDrawing(top));
         if (!others.isEmpty()) b.append("\n\nAlso related:\n").append(list(others, 3));
+        if (!fromDrawing(top)) {
+            // a general answer: point to where this appears in the user's own drawings
+            List<CardIndex.Hit> mine = new ArrayList<>();
+            for (CardIndex.Hit h : hits) if (fromDrawing(h.card) && h.score >= MIN_SCORE && mine.size() < 3) mine.add(h);
+            if (!mine.isEmpty()) {
+                b.append("\n\nIn your drawings:\n").append(list(mine, 3));
+                for (CardIndex.Hit h : mine) { used.add(h.card.id); }
+            }
+        }
         if (byMeaning[0]) b.append("\n\n(Found by meaning: your words didn't match the card exactly. Check it's the right card.)");
         Reply r = new Reply(b.toString().trim());
         r.refs.addAll(refs(used));
@@ -149,6 +167,28 @@ public class Answerer {
         }
         if (!linked.isEmpty()) b.append("Linked to: ").append(String.join("; ", linked)).append("\n");
         principles(c, null, b, used);
+    }
+
+    /** A scanned sheet: show only the lines that match the question (OCR text can be long). */
+    private void sheet(Card c, String query, StringBuilder b, Set<String> used) {
+        used.add(c.id);
+        b.append(c.title).append("\n");
+        String[] lines = c.simple.split("\n");
+        if (lines.length > 0) b.append(lines[0]).append("\n");
+        List<String> q = CardIndex.tokens(query, true);
+        List<String> hits = new ArrayList<>();
+        for (int k = 1; k < lines.length && hits.size() < 10; k++) {
+            List<String> lt = CardIndex.tokens(lines[k], false);
+            for (String t : q) if (t.length() > 1 && lt.contains(t)) { hits.add(lines[k]); break; }
+        }
+        if (!hits.isEmpty()) {
+            b.append("\nOn this sheet:\n");
+            for (String h : hits) b.append("• ").append(h).append("\n");
+        } else {
+            b.append("\nSheet text (start):\n");
+            for (int k = 1; k < Math.min(lines.length, 9); k++) b.append("• ").append(lines[k]).append("\n");
+        }
+        b.append("\nOpen ").append(c.source).append(" to see the wiring.\n");
     }
 
     private void general(Card c, StringBuilder b, Set<String> used) {

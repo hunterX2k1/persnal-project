@@ -35,14 +35,22 @@ Example: "module light is not glowing" → find the circuit in the indexed diagr
 - `app/src/main/java/com/fieldhelper/diag/diagram/`: `PdfExtractor` (PdfBox-Android: painted lines/shapes + positioned words), `PageGeom` (raw page data), `DiagramReader` (pure Java: wires vs symbols, nets with T-joints/dots, tags/pins/descriptions from nearest text, path search supply → load → 0V, auto CKT-/C-/DOC- cards with page source).
 - App: Cards tab → "Read drawing PDF" / "Try practice drawing" (`assets/practice_drawing.pdf`, made by `tools/make_practice_drawing.py`). Long-press nothing; tap the DOC- card → Delete removes the whole drawing.
 - Desktop test: compile core + diagram with Apache PDFBox 2.0.x (PdfExtractor with `com.tom_roush.pdfbox`→`org.apache.pdfbox`, `PointF`→`Point2D`, `Path.FillType`→`int`). Practice drawing gives all 4 circuits exactly.
-- Not done yet: cross-sheet references (paths that continue on another page show "? (… not on this page)"), tuning on a real MTU sheet, scanned PDFs (would need OCR).
+- Not done yet: cross-sheet references (paths that continue on another page show "? (… not on this page)"), tuning on a real vector MTU sheet.
+
+## Scanned PDFs: OCR (added)
+- The user's first real MTU PDF (21 sheets, 2006) turned out to be scanned pictures (Acrobat Image Conversion, 1-bit 400 dpi, no text/lines) even though it looks sharp. The geometry reader finds nothing on such pages; the app now detects them (`PageResult.scanned`).
+- User chose on-phone OCR. `ai/PaddleOcr`: PaddleOCR PP-OCRv3 det+rec ONNX (Apache 2.0, from RapidOCR 1.2.3 wheel), same ONNX Runtime as MiniLM. Detection in full-width strips (640 px, 224 overlap), CTC decode, sideways text turned clockwise first. Assets `assets/ocr/det.onnx`, `rec.onnx`, `keys.txt`.
+- App renders scanned pages with Android `PdfRenderer` at 200 dpi → grey → OCR → `diagram/ScanReader` → one card per sheet `DOC-<code>-P<n>` (title from title block + column headings; text repeated on ≥50% of sheets dropped as boilerplate). `DOC-<code>` lists all sheets.
+- `Answerer.sheet()` shows only lines matching the question; general answers add "In your drawings:" pointers. `SemanticIndex` keeps one vector per sheet heading; a heading counts only if similarity ≥ 0.6 (measured: true 0.69-0.78, noise ≤ 0.51).
+- Tested on the real 21-sheet scan: all 21 sheet titles read right, ~80 s on desktop; 15/18 test questions right (misses: "power supply 24V" → a PCU supply sheet instead of sheet 3, "slot 6 of the PCU", general fuse question without sheet pointer). OCR does not follow wires; exact pin data needs conversion by Claude (step 2 below).
+- Never commit the user's MTU PDFs or cards made from them.
 ## Donor model (added)
 - User's idea: take only the needed part of an open-source model. Used all-MiniLM-L6-v2 (Apache 2.0, distilled sentence model), 8-bit arm64 ONNX, `assets/model/minilm.onnx` + `vocab.txt`; run with ONNX Runtime Android (arm64-v8a only).
 - `ai/WordPieceTokenizer` (matches HF BertWordPiece exactly), `ai/MiniLm` (mean pooling, normalised 384-d), `ai/SemanticIndex` (vector per card, cache `files/card_vectors.bin`), `core/SemanticSearch` interface.
 - `Answerer.rank`: score = word score + 50 × (similarity − 0.30); accept only if similarity ≥ 0.30 or word score ≥ 15. Rejects nonsense ("coffee machine broken") that word search alone matched. Answers marked "Found by meaning" when words didn't match.
 - Known limit: reasoning questions ("which fuse feeds the alarm lamp") aren't solved by meaning search.
 - Desktop test: ONNX Runtime Java 1.19.2 jar + same classes; tested 18 questions, 17 right.
-- Phone: Moto Edge 60 Pro 8 GB; user has only the phone.
+- Phone: Moto Edge 60 Pro 8 GB; user has only the phone. APK ~64 MB (models: MiniLM 23 MB, OCR 13 MB).
 
 ## Verification status
 - Engine tested on desktop JDK: all checks passed (fault lookup, calculators, Not in index, user card save/reload/delete).

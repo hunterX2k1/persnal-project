@@ -68,7 +68,7 @@ public class Engine {
         List<String> ids = new ArrayList<>();
         for (Card x : userCards) {
             String u = x.id.toUpperCase(Locale.US);
-            if (u.equals("DOC-" + c) || u.startsWith("CKT-" + c + "-") || u.startsWith("C-" + c + "-")) ids.add(x.id);
+            if (u.equals("DOC-" + c) || u.startsWith("DOC-" + c + "-P") || u.startsWith("CKT-" + c + "-") || u.startsWith("C-" + c + "-")) ids.add(x.id);
         }
         for (String id : ids) deleteUserCard(id);
         return ids.size();

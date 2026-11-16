@@ -46,7 +46,7 @@ public class CardIndex {
         for (String w : new String[]{"plc", "controller", "ecu", "output", "outputs", "do"}) SYN.put(w, "plc");
         for (String w : new String[]{"ohm", "ohms", "ohm's", "ohmslaw"}) SYN.put(w, "ohm");
         for (String w : new String[]{"diode", "diodes", "freewheel", "flyback"}) SYN.put(w, "diode");
-        for (String w : new String[]{"can", "canbus"}) SYN.put(w, "canbus");
+        for (String w : new String[]{"can", "canbus", "feldbus", "fieldbus"}) SYN.put(w, "canbus");
     }
 
     public void clear() { byId.clear(); weights.clear(); }
@@ -115,7 +115,8 @@ public class CardIndex {
         Set<String> out = new LinkedHashSet<>();
         if (text == null) return new ArrayList<>(out);
         String t = text.toLowerCase().replace("→", " ").replace("->", " ").replace("←", " ").replace("<-", " ")
-                .replace("’", "").replace("'", "");
+                .replace("’", "").replace("'", "")
+                .replaceAll("\\bcan[\\s-]+(bus|h|l|high|low)\\b", "canbus $1"); // "CAN bus" is not the verb "can"
         for (String raw : t.split("[^a-z0-9:.\\-+_]+")) {
             String w = trimPunct(raw);
             if (w.isEmpty()) continue;

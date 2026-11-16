@@ -32,6 +32,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.fieldhelper.diag.ai.MiniLm;
+import com.fieldhelper.diag.ai.PaddleOcr;
+import com.fieldhelper.diag.diagram.PageGeom;
+import com.fieldhelper.diag.diagram.ScanReader;
 import com.fieldhelper.diag.ai.SemanticIndex;
 import com.fieldhelper.diag.core.Card;
 import com.fieldhelper.diag.core.CircuitTracer;
@@ -69,6 +72,7 @@ public class MainActivity extends Activity {
     private volatile boolean reading = false;
     private TextView titleView;
     private volatile SemanticIndex semantic;
+    private PaddleOcr ocr; // loaded the first time a scanned page needs it
     private final java.util.concurrent.ExecutorService aiThread = java.util.concurrent.Executors.newSingleThreadExecutor();
     private static final String USER_FILE = "user_cards.json";
 
@@ -548,14 +552,27 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Stop", (x, y) -> reading = false).show();
         new Thread(() -> {
             List<DiagramReader.PageResult> pages = new ArrayList<>();
+            List<ScanReader.ScanPage> scans = new ArrayList<>();
             String error = null;
+            android.graphics.pdf.PdfRenderer renderer = null;
+            android.os.ParcelFileDescriptor pfd = null;
             try (PDDocument doc = PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly())) {
                 int n = doc.getNumberOfPages();
                 for (int i = 0; i < n && reading; i++) {
                     final int done = i;
                     ui.post(() -> msg.setText("Page " + (done + 1) + " of " + n + "\n" + bar(done, n)));
                     try {
-                        pages.add(DiagramReader.readPage(PdfExtractor.page(doc, i)));
+                        PageGeom g = PdfExtractor.page(doc, i);
+                        DiagramReader.PageResult pr = DiagramReader.readPage(g);
+                        if (pr.scanned) {
+                            // a picture of the page: read its text with the OCR models
+                            ui.post(() -> msg.setText("Page " + (done + 1) + " of " + n + " · scanned, reading text (OCR)…\n" + bar(done, n)));
+                            if (renderer == null) {
+                                pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+                                renderer = new android.graphics.pdf.PdfRenderer(pfd);
+                            }
+                            scans.add(ocrPage(renderer, i));
+                        } else pages.add(pr);
                     } catch (Exception | OutOfMemoryError pe) {
                         DiagramReader.PageResult bad = new DiagramReader.PageResult();
                         bad.page = i + 1;
@@ -565,10 +582,29 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception | OutOfMemoryError e) {
                 error = e.getMessage();
+            } finally {
+                try { if (renderer != null) renderer.close(); if (pfd != null) pfd.close(); } catch (Exception ignored) { }
             }
             final boolean stopped = !reading;
             final String err = error;
-            final DiagramReader.DocResult dr = err == null ? DiagramReader.toCards(name, pages) : null;
+            String code = DiagramReader.docCodeOf(name);
+            final List<Card> cards = new ArrayList<>();
+            final StringBuilder report = new StringBuilder();
+            if (err == null) {
+                if (!pages.isEmpty()) {
+                    DiagramReader.DocResult dr = DiagramReader.toCards(name, pages);
+                    for (Card c : dr.cards) if (scans.isEmpty() || !c.id.equalsIgnoreCase("DOC-" + code)) cards.add(c);
+                    report.append(dr.report);
+                }
+                if (!scans.isEmpty()) {
+                    List<Card> sc = ScanReader.toCards(name, code, scans);
+                    cards.addAll(sc);
+                    if (report.length() > 0) report.append("\n\n");
+                    report.append(scans.size()).append(" scanned sheet(s) read by OCR. Text is searchable now; wires in pictures are not followed.\n");
+                    report.append("Ask e.g. \"oil pressure\" or a plug name. Letters can be misread: check the sheet.\n");
+                    for (Card c : sc) if (!c.id.equalsIgnoreCase("DOC-" + code) && report.length() < 1500) report.append("\n• ").append(c.title.length() > 70 ? c.title.substring(0, 70) + "…" : c.title);
+                }
+            }
             ui.post(() -> {
                 reading = false;
                 dlg.dismiss();
@@ -576,20 +612,59 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Couldn't read " + name).setMessage(err).setPositiveButton("OK", null).show();
                     return;
                 }
-                if (!dr.scannedOnly) {
-                    engine.deleteDocument(DiagramReader.docCodeOf(name));
-                    for (Card c : dr.cards) engine.saveUserCard(c);
+                if (!cards.isEmpty()) {
+                    engine.deleteDocument(code);
+                    for (Card c : cards) engine.saveUserCard(c);
                     saveUserCards();
                     refreshCards();
                 }
                 String head = stopped ? "Stopped early. Cards were made from the pages read so far.\n\n" : "";
                 new AlertDialog.Builder(this)
                         .setTitle(name)
-                        .setMessage(head + dr.report + (dr.scannedOnly ? "" : "\n\nAsk about it in the Ask tab, e.g. a lamp or relay tag from the drawing."))
+                        .setMessage(head + report.toString().trim())
                         .setPositiveButton("OK", null)
                         .show();
             });
         }).start();
+    }
+
+    /** Draws one page as a grey picture (200 dpi) and reads its text. Runs on the reading thread. */
+    private ScanReader.ScanPage ocrPage(android.graphics.pdf.PdfRenderer renderer, int index) throws Exception {
+        if (ocr == null) {
+            File det = assetFile("ocr/det.onnx"), rec = assetFile("ocr/rec.onnx");
+            try (InputStream keys = getAssets().open("ocr/keys.txt")) { ocr = new PaddleOcr(det.getPath(), rec.getPath(), keys); }
+        }
+        try (android.graphics.pdf.PdfRenderer.Page page = renderer.openPage(index)) {
+            float scale = 200f / 72f;
+            int w = Math.max(1, Math.round(page.getWidth() * scale)), h = Math.max(1, Math.round(page.getHeight() * scale));
+            long px = (long) w * h;
+            if (px > 12_000_000L) { double f = Math.sqrt(12_000_000.0 / px); w = (int) (w * f); h = (int) (h * f); }
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            bmp.eraseColor(Color.WHITE);
+            page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            byte[] gray = new byte[w * h];
+            int[] row = new int[w];
+            for (int y = 0; y < h; y++) {
+                bmp.getPixels(row, 0, w, 0, y, w, 1);
+                for (int x = 0; x < w; x++) {
+                    int c = row[x];
+                    gray[y * w + x] = (byte) ((((c >> 16) & 255) * 3 + ((c >> 8) & 255) * 6 + (c & 255)) / 10);
+                }
+            }
+            bmp.recycle();
+            return new ScanReader.ScanPage(index + 1, w, h, ocr.read(new PaddleOcr.Gray(w, h, gray)));
+        }
+    }
+
+    /** Copies an asset to app storage once (models must be files for the model runtime). */
+    private File assetFile(String asset) throws java.io.IOException {
+        File f = new File(getFilesDir(), asset.replace('/', '_'));
+        long len;
+        try (android.content.res.AssetFileDescriptor fd = getAssets().openFd(asset)) { len = fd.getLength(); }
+        if (!f.exists() || f.length() != len) {
+            try (InputStream in = getAssets().open(asset); FileOutputStream out = new FileOutputStream(f)) { copy(in, out); }
+        }
+        return f;
     }
 
     private static String bar(int done, int total) {

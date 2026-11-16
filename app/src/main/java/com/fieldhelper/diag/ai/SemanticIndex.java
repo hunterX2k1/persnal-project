@@ -23,10 +23,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * Keeps one meaning vector per card, saved to a cache file so each card is only processed once.
  */
 public final class SemanticIndex implements SemanticSearch {
-    private static final int CACHE_VERSION = 1;
+    private static final int CACHE_VERSION = 2;
+    /** Measured on a real MTU sheet set: true heading matches 0.69-0.78, noise up to 0.51. */
+    private static final float HEADING_MIN = 0.6f;
     private final MiniLm model;
     private final File cacheFile;
-    private final Map<String, float[]> vectors = new ConcurrentHashMap<>();
+    private final Map<String, float[][]> vectors = new ConcurrentHashMap<>();
     private final Map<String, Integer> hashes = new ConcurrentHashMap<>();
     private volatile boolean ready = false;
 
@@ -52,6 +54,26 @@ public final class SemanticIndex implements SemanticSearch {
         return b.toString();
     }
 
+    /**
+     * All texts to embed for a card. Scanned sheets mix many topics, so each heading gets its own
+     * vector too, and the best-matching one counts.
+     */
+    public static List<String> cardTexts(Card c) {
+        List<String> r = new ArrayList<>();
+        r.add(cardText(c));
+        if (c.id.toUpperCase().matches("^DOC-.+-P\\d+$")) {
+            int a = c.title.indexOf(" (");
+            int z = c.title.lastIndexOf(')');
+            if (a > 0 && z > a) {
+                for (String h : c.title.substring(a + 2, z).replace("…", "").split(",")) {
+                    String t = h.trim();
+                    if (t.length() > 2 && r.size() < 25) r.add(t);
+                }
+            }
+        }
+        return r;
+    }
+
     /** Brings vectors in line with the cards: adds new/changed ones, drops removed ones. */
     public synchronized void sync(Collection<Card> cards, Progress p) {
         Set<String> live = new HashSet<>();
@@ -59,7 +81,7 @@ public final class SemanticIndex implements SemanticSearch {
         for (Card c : cards) {
             String id = c.id.toUpperCase();
             live.add(id);
-            int h = cardText(c).hashCode();
+            int h = String.join("\n", cardTexts(c)).hashCode();
             Integer old = hashes.get(id);
             if (old == null || old != h || !vectors.containsKey(id)) todo.add(c);
         }
@@ -67,9 +89,11 @@ public final class SemanticIndex implements SemanticSearch {
         int done = 0;
         for (Card c : todo) {
             try {
-                String t = cardText(c);
-                vectors.put(c.id.toUpperCase(), model.embed(t));
-                hashes.put(c.id.toUpperCase(), t.hashCode());
+                List<String> ts = cardTexts(c);
+                float[][] vs = new float[ts.size()][];
+                for (int k = 0; k < ts.size(); k++) vs[k] = model.embed(ts.get(k));
+                vectors.put(c.id.toUpperCase(), vs);
+                hashes.put(c.id.toUpperCase(), String.join("\n", ts).hashCode());
             } catch (Exception ignored) { }
             done++;
             if (p != null && (done % 10 == 0 || done == todo.size())) p.update(done, todo.size());
@@ -84,14 +108,23 @@ public final class SemanticIndex implements SemanticSearch {
         if (!ready) return out;
         float[] q;
         try { q = model.embed(query); } catch (Exception e) { return out; }
-        for (Map.Entry<String, float[]> e : vectors.entrySet()) {
-            float[] v = e.getValue();
-            float s = 0;
-            for (int d = 0; d < q.length; d++) s += q[d] * v[d];
-            out.add(new Match(e.getKey(), s));
+        for (Map.Entry<String, float[][]> e : vectors.entrySet()) {
+            float[][] vs = e.getValue();
+            float full = dot(q, vs[0]), head = -1;
+            for (int k = 1; k < vs.length; k++) head = Math.max(head, dot(q, vs[k]));
+            // a single heading only counts when it clearly matches (short texts give noisy scores);
+            // the whole-card score then breaks ties between sheets with the same heading
+            float sim = head >= HEADING_MIN ? Math.max(full, head + 0.1f * full) : full;
+            out.add(new Match(e.getKey(), sim));
         }
         out.sort((a, b) -> Float.compare(b.similarity, a.similarity));
         return out.size() > limit ? new ArrayList<>(out.subList(0, limit)) : out;
+    }
+
+    private static float dot(float[] a, float[] b) {
+        float s = 0;
+        for (int d = 0; d < a.length; d++) s += a[d] * b[d];
+        return s;
     }
 
     private void loadCache() {
@@ -99,14 +132,15 @@ public final class SemanticIndex implements SemanticSearch {
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(cacheFile)))) {
             if (in.readInt() != CACHE_VERSION) return;
             int n = in.readInt();
-            Map<String, float[]> v = new HashMap<>();
+            Map<String, float[][]> v = new HashMap<>();
             Map<String, Integer> h = new HashMap<>();
             for (int i = 0; i < n; i++) {
                 String id = in.readUTF();
                 int hash = in.readInt();
-                float[] f = new float[MiniLm.DIM];
-                for (int d = 0; d < f.length; d++) f[d] = in.readFloat();
-                v.put(id, f);
+                int count = in.readInt();
+                float[][] fs = new float[count][MiniLm.DIM];
+                for (float[] f : fs) for (int d = 0; d < f.length; d++) f[d] = in.readFloat();
+                v.put(id, fs);
                 h.put(id, hash);
             }
             vectors.putAll(v);
@@ -127,7 +161,9 @@ public final class SemanticIndex implements SemanticSearch {
             for (String id : ids) {
                 out.writeUTF(id);
                 out.writeInt(hashes.getOrDefault(id, 0));
-                for (float f : vectors.get(id)) out.writeFloat(f);
+                float[][] fs = vectors.get(id);
+                out.writeInt(fs.length);
+                for (float[] f : fs) for (float x : f) out.writeFloat(x);
             }
         } catch (Exception e) {
             tmp.delete();
