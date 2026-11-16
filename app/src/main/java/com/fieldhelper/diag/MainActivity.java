@@ -576,14 +576,16 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Couldn't read " + name).setMessage(err).setPositiveButton("OK", null).show();
                     return;
                 }
-                engine.deleteDocument(DiagramReader.docCodeOf(name));
-                for (Card c : dr.cards) engine.saveUserCard(c);
-                saveUserCards();
-                refreshCards();
+                if (!dr.scannedOnly) {
+                    engine.deleteDocument(DiagramReader.docCodeOf(name));
+                    for (Card c : dr.cards) engine.saveUserCard(c);
+                    saveUserCards();
+                    refreshCards();
+                }
                 String head = stopped ? "Stopped early. Cards were made from the pages read so far.\n\n" : "";
                 new AlertDialog.Builder(this)
                         .setTitle(name)
-                        .setMessage(head + dr.report + "\n\nAsk about it in the Ask tab, e.g. a lamp or relay tag from the drawing.")
+                        .setMessage(head + dr.report + (dr.scannedOnly ? "" : "\n\nAsk about it in the Ask tab, e.g. a lamp or relay tag from the drawing."))
                         .setPositiveButton("OK", null)
                         .show();
             });

@@ -92,7 +92,7 @@ public final class PdfExtractor {
         @Override public void fillPath(Path.FillType windingRule) { commit(true); }
         @Override public void fillAndStrokePath(Path.FillType windingRule) { commit(true); }
         @Override public void clip(Path.FillType windingRule) { }
-        @Override public void drawImage(PDImage pdImage) { }
+        @Override public void drawImage(PDImage pdImage) { g.images++; }
         @Override public void shadingFill(COSName shadingName) { }
     }
 

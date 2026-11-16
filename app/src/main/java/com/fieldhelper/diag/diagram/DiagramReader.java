@@ -42,6 +42,8 @@ public final class DiagramReader {
     public static final class PageResult {
         public int page;
         public int wires, symbols;
+        /** True when the page is only a picture (scan) with no lines or text to read. */
+        public boolean scanned;
         public final List<Elem> elems = new ArrayList<>();
         public final List<Circuit> circuits = new ArrayList<>();
         public final List<String> issues = new ArrayList<>();
@@ -70,6 +72,7 @@ public final class DiagramReader {
     public static PageResult readPage(PageGeom g) {
         PageResult res = new PageResult();
         res.page = g.page;
+        res.scanned = g.images > 0 && g.words.isEmpty() && g.subs.size() < 5;
 
         float h = medianHeight(g);
         float tol = Math.max(0.5f, h * 0.15f);
@@ -411,6 +414,8 @@ public final class DiagramReader {
         public final List<Card> cards = new ArrayList<>();
         public String report = "";
         public int circuits, complete, parts;
+        /** Every page was a scan: nothing was read, so no cards should be saved. */
+        public boolean scannedOnly;
     }
 
     public static DocResult toCards(String fileName, List<PageResult> pages) {
@@ -530,7 +535,16 @@ public final class DiagramReader {
             for (int k = 0; k < Math.min(8, issues.size()); k++) rep.append("• ").append(issues.get(k)).append("\n");
             if (issues.size() > 8) rep.append("• … and ").append(issues.size() - 8).append(" more\n");
         }
-        if (withWiring == 0) rep.append("\nNo wiring found. If this PDF is a scan (text can't be selected), it can't be read this way.\n");
+        int scanned = 0;
+        for (PageResult pr : pages) if (pr.scanned) scanned++;
+        if (scanned > 0 && scanned == pages.size()) {
+            rep.setLength(0);
+            rep.append("This PDF is scanned pictures of the pages (").append(scanned).append(" page(s)).\n")
+               .append("It has no lines or text inside, so the drawing reader can't read it.\n\n")
+               .append("What you can do: send the PDF to Claude once to turn it into cards, then import them here (Cards → Import file).\n");
+        } else if (scanned > 0) {
+            rep.append("\n").append(scanned).append(" page(s) are scanned pictures and were skipped.\n");
+        } else if (withWiring == 0) rep.append("\nNo wiring found on any page.\n");
         rep.append("\nAlways check terminal numbers against the drawing before relying on them.");
         out.report = rep.toString().trim();
 
@@ -540,6 +554,7 @@ public final class DiagramReader {
         doc.tags = new ArrayList<>(words(shortName(fileName).replaceAll("[_.\\-]", " ")));
         doc.tags.add(code.toLowerCase(Locale.US));
         doc.simple = "Drawing read automatically. " + out.report.replace("\n", " ");
+        out.scannedOnly = scanned > 0 && scanned == pages.size();
         doc.source = shortName(fileName);
         doc.user = true;
         out.cards.add(doc);

@@ -10,6 +10,8 @@ import java.util.List;
 public final class PageGeom {
     public int page;          // 1-based page number
     public float width, height;
+    /** Pictures painted on the page (a scanned page is one big picture). */
+    public int images;
     public final List<Sub> subs = new ArrayList<>();
     public final List<Word> words = new ArrayList<>();
 
