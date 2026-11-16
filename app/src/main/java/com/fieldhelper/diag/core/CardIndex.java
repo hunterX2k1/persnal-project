@@ -22,6 +22,9 @@ public class CardIndex {
 
     private final Map<String, Card> byId = new LinkedHashMap<>();
     private final Map<String, Map<String, Integer>> weights = new HashMap<>();
+    /** Word pairs in each card title, e.g. "slot 6", "plug x9": matching the pair beats matching the words apart. */
+    private final Map<String, Set<String>> pairs = new HashMap<>();
+    private static final int PAIR_BONUS = 8;
 
     private static final Set<String> STOP = new HashSet<>(Arrays.asList(
             "the", "a", "an", "is", "are", "was", "of", "in", "on", "at", "to", "it", "its", "and", "or",
@@ -47,9 +50,14 @@ public class CardIndex {
         for (String w : new String[]{"ohm", "ohms", "ohm's", "ohmslaw"}) SYN.put(w, "ohm");
         for (String w : new String[]{"diode", "diodes", "freewheel", "flyback"}) SYN.put(w, "diode");
         for (String w : new String[]{"can", "canbus", "feldbus", "fieldbus"}) SYN.put(w, "canbus");
+        // abbreviations common on wiring diagrams
+        SYN.put("emerg", "emergency"); SYN.put("emergancy", "emergency");
+        SYN.put("temp", "temperature"); SYN.put("press", "pressure"); SYN.put("pres", "pressure");
+        SYN.put("instr", "instrument"); SYN.put("instruments", "instrument"); SYN.put("sens", "sensor");
+        SYN.put("mon", "monitoring"); SYN.put("ctrl", "control"); SYN.put("sw", "switch");
     }
 
-    public void clear() { byId.clear(); weights.clear(); }
+    public void clear() { byId.clear(); weights.clear(); pairs.clear(); }
 
     public void add(Card c) {
         if (c.id.isEmpty()) return;
@@ -65,6 +73,7 @@ public class CardIndex {
         put(w, c.simple, 1);
         for (String s : c.checks) put(w, s, 1);
         weights.put(key, w);
+        pairs.put(key, pairsOf(c.title));
     }
 
     public void addAll(Collection<Card> cards) { for (Card c : cards) add(c); }
@@ -72,7 +81,15 @@ public class CardIndex {
     public boolean remove(String id) {
         String key = id.toUpperCase();
         weights.remove(key);
+        pairs.remove(key);
         return byId.remove(key) != null;
+    }
+
+    private static Set<String> pairsOf(String text) {
+        Set<String> r = new HashSet<>();
+        List<String> t = tokens(text, true);
+        for (int k = 0; k + 1 < t.size(); k++) r.add(t.get(k) + " " + t.get(k + 1));
+        return r;
     }
 
     private static void put(Map<String, Integer> w, String text, int weight) {
@@ -147,6 +164,7 @@ public class CardIndex {
     public List<Hit> search(String query, int limit) {
         List<String> q = tokens(query, true);
         boolean faultWords = q.contains("fault");
+        Set<String> qPairs = pairsOf(query);
         List<Hit> hits = new ArrayList<>();
         if (q.isEmpty()) return hits;
         for (Map.Entry<String, Card> e : byId.entrySet()) {
@@ -158,10 +176,13 @@ public class CardIndex {
             }
             if (matched == 0) continue;
             score += matched * 2;
+            Set<String> cp = pairs.get(e.getKey());
+            if (cp != null) for (String p : qPairs) if (cp.contains(p)) score += PAIR_BONUS;
             Card c = e.getValue();
             String type = c.type();
             if (faultWords && type.equals("Fault")) score += 6;
-            if (type.equals("Source")) score -= 3;
+            // the document summary card ranks below its sheets; sheet cards (DOC-...-P5) are not penalised
+            if (type.equals("Source") && !c.id.toUpperCase().matches("^DOC-.+-P\\d+$")) score -= 3;
             hits.add(new Hit(c, score));
         }
         hits.sort((x, y) -> y.score - x.score);

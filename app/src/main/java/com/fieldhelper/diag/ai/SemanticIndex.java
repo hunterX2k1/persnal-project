@@ -64,6 +64,10 @@ public final class SemanticIndex implements SemanticSearch {
         if (c.id.toUpperCase().matches("^DOC-.+-P\\d+$")) {
             int a = c.title.indexOf(" (");
             int z = c.title.lastIndexOf(')');
+            // the sheet's own title ("POWER SUPPLY 24VDC") is its most important heading
+            int colon = c.title.indexOf(": ");
+            String core = colon > 0 ? c.title.substring(colon + 2, a > colon ? a : c.title.length()).trim() : "";
+            if (core.length() > 2) r.add(core);
             if (a > 0 && z > a) {
                 for (String h : c.title.substring(a + 2, z).replace("…", "").split(",")) {
                     String t = h.trim();

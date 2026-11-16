@@ -85,6 +85,8 @@ public final class ScanReader {
                 for (String w : s.split("[\\s,;()]+")) {
                     String u = w.toUpperCase(Locale.US);
                     if (u.matches("^[-+=][A-Z]{1,4}\\d{1,4}(\\.\\d+)?$") || u.matches("^[A-Z]{2,}\\d?_[A-Z0-9_+-]+$")) tags.add(u.toLowerCase(Locale.US));
+                    // standard device letters (IEC 81346): -F070.2 is a fuse, -K12 a relay, -X2 a plug/terminal ...
+                    if (u.matches("^-[A-Z]\\d{1,4}(\\.\\d+)?$")) for (String kw : deviceWords(u.charAt(1))) tags.add(kw);
                 }
             }
             tags.add(code.toLowerCase(Locale.US));
@@ -154,6 +156,23 @@ public final class ScanReader {
         }
         out.sort((a, b) -> Math.abs(a.y0 - b.y0) > 10 ? Integer.compare(a.y0, b.y0) : Integer.compare(a.x0, b.x0));
         return out;
+    }
+
+    static String[] deviceWords(char letter) {
+        switch (letter) {
+            case 'F': return new String[]{"fuse"};
+            case 'Q': return new String[]{"breaker", "fuse"};
+            case 'K': return new String[]{"relay"};
+            case 'X': return new String[]{"plug", "terminal", "connector"};
+            case 'W': return new String[]{"cable"};
+            case 'S': return new String[]{"switch"};
+            case 'H': return new String[]{"lamp"};
+            case 'B': return new String[]{"sensor"};
+            case 'Y': return new String[]{"valve", "solenoid"};
+            case 'M': return new String[]{"motor"};
+            case 'G': return new String[]{"supply"};
+            default: return new String[0];
+        }
     }
 
     private static int cy(PaddleOcr.Word w) { return (w.y0 + w.y1) / 2; }
