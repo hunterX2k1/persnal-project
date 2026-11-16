@@ -62,6 +62,8 @@ class BrowserActivity : ComponentActivity() {
     private var unsafeUrl by mutableStateOf<String?>(null)
     private var notice by mutableStateOf<Pair<String, String?>?>(null) // message, url to open anyway
     private var noticeId by mutableIntStateOf(0)
+    /** A download the page started, waiting for the save dialog: url, user agent, file name, mime. */
+    private var pendingDownload by mutableStateOf<List<String?>?>(null)
 
     @Volatile private var currentSite = ""
     @Volatile private var adblockOn = true
@@ -217,6 +219,7 @@ class BrowserActivity : ComponentActivity() {
 
     private fun download(url: String, ua: String, cd: String?, mime: String?) {
         val name = URLUtil.guessFileName(url, cd, mime)
+        if (url.startsWith("http") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { pendingDownload = listOf(url, ua, name, mime); return }
         when {
             !url.startsWith("http") -> Toast.makeText(this, "This download only works in the phone browser", Toast.LENGTH_LONG).show()
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> runCatching {
@@ -319,6 +322,16 @@ class BrowserActivity : ComponentActivity() {
                 if (loadProgress in 1..99) LinearProgressIndicator(progress = { loadProgress / 100f }, modifier = Modifier.fillMaxWidth())
             }
         }
+        pendingDownload?.let { d ->
+            SaveDialog(
+                fileName = d[2] ?: "download", onDismiss = { pendingDownload = null },
+                onSave = { name, folder, wifi ->
+                    app.downloads.enqueue(d[0]!!, name, folder, d[1] ?: "", d[3], wifi)
+                    pendingDownload = null
+                    show("Downloading $name — see the Downloads tab", null)
+                },
+            )
+        }
         unsafeUrl?.let { u ->
             val host = Uri.parse(u).host.orEmpty()
             AlertDialog(
@@ -375,6 +388,7 @@ class BrowserActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
         const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     }
 }

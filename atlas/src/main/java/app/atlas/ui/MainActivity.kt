@@ -30,6 +30,7 @@ private val tabs = listOf(
     Tab("home", "Home", Icons.Default.Explore),
     Tab("search", "Search", Icons.Default.Search),
     Tab("saved", "Saved", Icons.Default.Bookmarks),
+    Tab("downloads", "Downloads", Icons.Default.Download),
     Tab("settings", "Settings", Icons.Default.Tune),
 )
 
@@ -71,6 +72,7 @@ private fun Main() {
                 composable("home") { HomeScreen(onPage = { nav.navigate("page/$it?a=") }, onSearch = { nav.navigate("search") }) }
                 composable("search") { SearchScreen() }
                 composable("saved") { SavedScreen() }
+                composable("downloads") { DownloadsScreen() }
                 composable("settings") { SettingsScreen() }
                 composable(
                     "page/{slug}?a={a}",

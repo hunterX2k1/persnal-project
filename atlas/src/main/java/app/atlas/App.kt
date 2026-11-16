@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import app.atlas.data.AdBlock
 import app.atlas.data.AppLog
+import app.atlas.data.Downloads
 import app.atlas.data.Store
 import app.atlas.data.USER_AGENT
 import app.atlas.data.WikiRepo
@@ -16,6 +17,7 @@ import java.io.File
 class App : Application(), coil.ImageLoaderFactory {
     lateinit var repo: WikiRepo
     lateinit var store: Store
+    lateinit var downloads: Downloads
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -23,6 +25,7 @@ class App : Application(), coil.ImageLoaderFactory {
         AppLog.init(this)
         repo = WikiRepo(File(filesDir, "wiki"))
         store = Store(this)
+        downloads = Downloads(this)
         scope.launch { AdBlock.load(File(filesDir, "blocklists")) }
     }
 
