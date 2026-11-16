@@ -31,6 +31,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.fieldhelper.diag.ai.MiniLm;
+import com.fieldhelper.diag.ai.SemanticIndex;
 import com.fieldhelper.diag.core.Card;
 import com.fieldhelper.diag.core.CircuitTracer;
 import com.fieldhelper.diag.core.Engine;
@@ -65,6 +67,9 @@ public class MainActivity extends Activity {
     private static final String PRACTICE_PDF = "practice_drawing.pdf";
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean reading = false;
+    private TextView titleView;
+    private volatile SemanticIndex semantic;
+    private final java.util.concurrent.ExecutorService aiThread = java.util.concurrent.Executors.newSingleThreadExecutor();
     private static final String USER_FILE = "user_cards.json";
 
     private final Engine engine = new Engine();
@@ -100,6 +105,7 @@ public class MainActivity extends Activity {
         title.setPadding(dp(16), dp(14), dp(16), dp(4));
         title.setBackgroundColor(ACCENT);
         root.addView(title);
+        titleView = title;
 
         LinearLayout tabRow = new LinearLayout(this);
         tabRow.setBackgroundColor(ACCENT);
@@ -132,6 +138,49 @@ public class MainActivity extends Activity {
         showTab(0);
         addBot(engine.help());
         if (loadMsg != null) toast(loadMsg);
+        startDonorModel();
+    }
+
+    // ---------- donor model (meaning search) ----------
+
+    private void setStatus(String s) { ui.post(() -> titleView.setText(s.isEmpty() ? "Diag Helper" : "Diag Helper  ·  " + s)); }
+
+    /** Loads the small offline model once, then prepares every card (cached, so later starts are quick). */
+    private void startDonorModel() {
+        List<Card> cards = new ArrayList<>(engine.index.all());
+        aiThread.execute(() -> {
+            try {
+                setStatus("AI loading…");
+                File model = new File(getFilesDir(), "minilm.onnx");
+                long assetLen;
+                try (android.content.res.AssetFileDescriptor fd = getAssets().openFd("model/minilm.onnx")) { assetLen = fd.getLength(); }
+                if (!model.exists() || model.length() != assetLen) {
+                    try (InputStream in = getAssets().open("model/minilm.onnx"); FileOutputStream out = new FileOutputStream(model)) { copy(in, out); }
+                }
+                MiniLm m;
+                try (InputStream vocab = getAssets().open("model/vocab.txt")) { m = new MiniLm(model.getPath(), vocab); }
+                SemanticIndex si = new SemanticIndex(m, new File(getFilesDir(), "card_vectors.bin"));
+                si.sync(cards, (done, total) -> setStatus("AI preparing cards " + (done * 100 / Math.max(1, total)) + "%"));
+                semantic = si;
+                ui.post(() -> engine.setSemantic(si));
+                setStatus("AI ready");
+                ui.postDelayed(() -> setStatus(""), 3000);
+            } catch (Throwable t) {
+                setStatus("");
+                ui.post(() -> toast("Meaning search is off (" + t.getMessage() + "). Word search still works."));
+            }
+        });
+    }
+
+    /** Call after cards change: updates the model's view of the cards in the background. */
+    private void resyncDonorModel() {
+        SemanticIndex si = semantic;
+        if (si == null) return;
+        List<Card> cards = new ArrayList<>(engine.index.all());
+        aiThread.execute(() -> {
+            si.sync(cards, (done, total) -> setStatus("AI updating " + (done * 100 / Math.max(1, total)) + "%"));
+            setStatus("");
+        });
     }
 
     // ---------- data ----------
@@ -171,6 +220,7 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             toast("Save failed: " + e.getMessage());
         }
+        resyncDonorModel();
     }
 
     private static String readAll(InputStream in) throws java.io.IOException {

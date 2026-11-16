@@ -8,12 +8,63 @@ import java.util.Set;
 /** Builds answers only from index cards, and lists every card it used. */
 public class Answerer {
     public static final int MIN_SCORE = 7;
+    /** With the donor model: minimum meaning-similarity for an answer, and the weight of meaning vs words. */
+    public static final float MIN_SIMILARITY = 0.30f;
+    private static final float MEANING_WEIGHT = 50f;
+    private static final int STRONG_WORDS = 15;
     private final CardIndex index;
+    private SemanticSearch semantic;
 
     public Answerer(CardIndex index) { this.index = index; }
 
+    public void setSemantic(SemanticSearch s) { semantic = s; }
+
+    /**
+     * Ranks cards. Words only, or (when the donor model is ready) words + meaning together:
+     * score = word score + 50 × (similarity − 0.30). A card must also be close in meaning
+     * (similarity ≥ 0.30) unless the words match strongly (e.g. an exact tag like K12).
+     */
+    private List<CardIndex.Hit> rank(String query, boolean[] byMeaning) {
+        if (semantic == null || !semantic.ready()) {
+            List<CardIndex.Hit> hits = index.search(query, 6);
+            if (hits.isEmpty() || hits.get(0).score < MIN_SCORE) return new ArrayList<>();
+            return hits;
+        }
+        java.util.Map<String, Integer> words = new java.util.HashMap<>();
+        for (CardIndex.Hit h : index.search(query, 40)) words.put(h.card.id.toUpperCase(), h.score);
+        java.util.Map<String, Float> sims = new java.util.HashMap<>();
+        for (SemanticSearch.Match m : semantic.search(query, 60)) sims.put(m.cardId.toUpperCase(), m.similarity);
+        Set<String> ids = new LinkedHashSet<>(words.keySet());
+        ids.addAll(sims.keySet());
+        List<CardIndex.Hit> out = new ArrayList<>();
+        java.util.Map<CardIndex.Hit, float[]> parts = new java.util.HashMap<>();
+        for (String id : ids) {
+            Card c = index.get(id);
+            if (c == null) continue;
+            int w = words.getOrDefault(id, 0);
+            float s = sims.getOrDefault(id, 0f);
+            int fused = Math.round(w + MEANING_WEIGHT * (s - MIN_SIMILARITY));
+            CardIndex.Hit h = new CardIndex.Hit(c, fused);
+            out.add(h);
+            parts.put(h, new float[]{w, s});
+        }
+        out.sort((a, b) -> b.score - a.score);
+        if (out.isEmpty()) return out;
+        float[] top = parts.get(out.get(0));
+        boolean ok = out.get(0).score >= MIN_SCORE && (top[1] >= MIN_SIMILARITY || top[0] >= STRONG_WORDS);
+        if (!ok) {
+            // keep only close matches for the "Not in index" hint
+            List<CardIndex.Hit> near = new ArrayList<>();
+            for (CardIndex.Hit h : out) if (parts.get(h)[1] >= 0.25f && near.size() < 3) near.add(new CardIndex.Hit(h.card, 0));
+            return near;
+        }
+        byMeaning[0] = top[0] < MIN_SCORE;
+        return out.size() > 6 ? new ArrayList<>(out.subList(0, 6)) : out;
+    }
+
     public Reply answer(String query) {
-        List<CardIndex.Hit> hits = index.search(query, 6);
+        boolean[] byMeaning = {false};
+        List<CardIndex.Hit> hits = rank(query, byMeaning);
         if (hits.isEmpty() || hits.get(0).score < MIN_SCORE) {
             Reply r = new Reply("Not in index.\nI only answer from my cards, so I won't guess. "
                     + "Add a card for this in the Cards tab (circuit path, fault checks, source page)"
@@ -34,6 +85,7 @@ public class Answerer {
         for (CardIndex.Hit h : hits.subList(1, hits.size()))
             if (!used.contains(h.card.id) && h.score >= MIN_SCORE && h.score * 2 >= hits.get(0).score) others.add(h);
         if (!others.isEmpty()) b.append("\n\nAlso related:\n").append(list(others, 3));
+        if (byMeaning[0]) b.append("\n\n(Found by meaning: your words didn't match the card exactly. Check it's the right card.)");
         Reply r = new Reply(b.toString().trim());
         r.refs.addAll(refs(used));
         r.kind = top.type();

@@ -11,6 +11,7 @@ A small, fully offline helper (no LLM, no internet permission). It answers **onl
 | Circuit tracer | Turns a path like `24V -> F3 -> K12:13-14 -> X2:5 -> H5 -> X2:6 -> 0V` into an ordered check list |
 | Calculators | Ohm's law + power, cable voltage drop, 4-20 mA scaling, unit conversion, maths |
 | Diagram reader | Reads your own wiring-diagram PDFs (computer-made, searchable) and makes circuit + part cards automatically, with page numbers |
+| Meaning search | A small offline donor model (MiniLM, 23 MB) understands your own wording, e.g. "module light not glowing" finds the lamp fault card. It only picks cards; answers still come from cards |
 | Card editor | Add or edit your own cards on the phone, import/export as JSON |
 
 Starter cards: 20 electrical principles (P-001…P-020), a **made-up** practice panel (lamp H5, relay K12, PLC output DO4) with circuit and fault cards, plus generic 4-20 mA and CAN bus fault cards.

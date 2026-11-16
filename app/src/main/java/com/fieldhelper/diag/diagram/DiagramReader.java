@@ -60,6 +60,8 @@ public final class DiagramReader {
         public int page;
         public String loadTag, loadLabel, loadKind, desc;
         public List<String> nodes = new ArrayList<>();
+        /** Descriptions of the other parts in the path, e.g. "Lamp test" for S1. */
+        public List<String> partDescs = new ArrayList<>();
         public boolean complete;
     }
 
@@ -343,6 +345,9 @@ public final class DiagramReader {
                 int endNet = dn.isEmpty() ? (s1 <= s2 ? ed[1] : ed[0]) : dn.get(dn.size() - 1)[1];
                 c.nodes.add(netName(endNet, netLabel, sourceLabel));
             } else c.nodes.add("? (return not on this page)");
+            for (Elem other : res.elems)
+                if (other != load && !other.desc.isEmpty() && c.nodes.contains(other.label) && !c.partDescs.contains(other.tag + " " + other.desc))
+                    c.partDescs.add(other.tag + " " + other.desc);
             res.circuits.add(c);
         }
         return res;
@@ -434,7 +439,9 @@ public final class DiagramReader {
                 for (String nd : c.nodes) { String t = nd.contains(":") ? nd.substring(0, nd.indexOf(':')) : nd; if (t.matches("[A-Z]{1,3}\\d.*")) tags.add(t); }
                 tags.addAll(kindWords(c.loadKind));
                 tags.addAll(words(c.desc));
+                for (String pd : c.partDescs) tags.addAll(words(pd));
                 tags.add(code.toLowerCase(Locale.US));
+                if (!c.partDescs.isEmpty()) card.simple += " Parts: " + String.join("; ", c.partDescs) + ".";
                 card.tags = new ArrayList<>(tags);
                 card.user = true;
                 ckts.add(card);

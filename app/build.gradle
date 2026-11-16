@@ -10,8 +10,16 @@ android {
         applicationId 'com.fieldhelper.diag'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
+        ndk {
+            // Phones like the Moto Edge 60 Pro are arm64; keeps the APK small
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    androidResources {
+        noCompress 'onnx'
     }
 
     buildTypes {
@@ -30,4 +38,6 @@ android {
 dependencies {
     // Reads the exact lines and words inside PDF drawings (offline, open source, Apache 2.0)
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+    // Runs the small donor model (MiniLM) offline on the phone (MIT licence)
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.19.2'
 }

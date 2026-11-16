@@ -13,6 +13,9 @@ import java.util.Map;
 public class Engine {
     public final CardIndex index = new CardIndex();
     private final Answerer answerer = new Answerer(index);
+
+    /** Plugs in the donor model (meaning search). Null = words only. */
+    public void setSemantic(SemanticSearch s) { answerer.setSemantic(s); }
     private final List<Card> userCards = new ArrayList<>();
 
     /** Loads one JSON file of cards: either [ {...}, ... ] or { "cards": [ ... ] }. Returns how many. */

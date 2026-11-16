@@ -17,7 +17,7 @@ public class CardIndex {
     public static class Hit {
         public final Card card;
         public final int score;
-        Hit(Card c, int s) { card = c; score = s; }
+        public Hit(Card c, int s) { card = c; score = s; }
     }
 
     private final Map<String, Card> byId = new LinkedHashMap<>();
