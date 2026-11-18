@@ -72,7 +72,21 @@
         <!-- Speed -->
         <LinearLayout style="@style/Card">
             <TextView style="@style/Label" android:text="Your internet speed" />
+            <Switch
+                android:id="@+id/autoSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:text="Auto – check speed live and adjust"
+                android:textColor="@color/text"
+                android:textSize="15sp" />
+            <TextView
+                android:id="@+id/autoInfo"
+                style="@style/Body"
+                android:textColor="@color/muted"
+                android:textSize="13sp" />
             <LinearLayout
+                android:id="@+id/manualRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
@@ -122,6 +136,31 @@
                 style="@style/Body"
                 android:textSize="17sp"
                 android:textStyle="bold" />
+            <RadioGroup
+                android:id="@+id/protectGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginVertical="6dp"
+                android:orientation="vertical">
+                <RadioButton
+                    android:id="@+id/protect0"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Balanced – better video, ping may rise up to ~60 ms"
+                    android:textColor="@color/text" />
+                <RadioButton
+                    android:id="@+id/protect1"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Strong – ping kept within ~35 ms (recommended)"
+                    android:textColor="@color/text" />
+                <RadioButton
+                    android:id="@+id/protect2"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Maximum – lowest ping, video may drop quality"
+                    android:textColor="@color/text" />
+            </RadioGroup>
             <SeekBar
                 android:id="@+id/limitBar"
                 android:layout_width="match_parent"

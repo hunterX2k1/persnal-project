@@ -17,6 +17,22 @@ packets go through immediately.
 
 Limits can be changed while it runs; they apply instantly.
 
+## Auto mode (live speed, on by default)
+Mobile speed changes all the time, so a fixed number is always wrong. With **Auto** on, NetSplit
+pings your connection twice a second (tiny DNS queries to your carrier's DNS / 1.1.1.1 / 8.8.8.8 that
+travel the same mobile queue as the game's packets):
+
+* Ping rises above its normal level → YouTube is filling the line → its limit is cut right away (×0.7).
+* Ping stays low and YouTube wants more → its limit is raised (fast at first, gently near the level
+  that caused lag last time), so it follows the speed back up.
+* The live connection speed is estimated and shown in the app and notification.
+
+**Game protection** (priority mode) sets how much extra ping is tolerated: Balanced ≈ 60 ms,
+Strong ≈ 35 ms (default), Maximum ≈ 22 ms. In split mode the split % is applied to the live speed.
+
+Simulated check (`AutoTunerTest`): link 20 → 4 → 40 Mbps; extra ping stayed ≈ 6–10 ms while YouTube
+got 17.7 / 3.3 / 33.4 Mbps.
+
 ## How it works
 Android doesn't let normal apps throttle other apps, so NetSplit uses a **local VPN**
 (`VpnService`) that only carries the limited app(s). A small userspace TCP/UDP forwarder
@@ -29,13 +45,13 @@ Optionally NetSplit blocks QUIC (UDP 443) for limited apps so YouTube falls back
 which makes the limit exact.
 
 ## Install
-Download `release/NetSplit-v1.0.apk` to your phone, open it and allow "install unknown apps".
+Download `release/NetSplit-v1.1.apk` to your phone, open it and allow "install unknown apps".
 Requires Android 10+.
 
 ## Using it
 1. Open NetSplit → it pre-selects Shadow Fight and YouTube if installed (or tap **Choose**).
-2. Tap **Measure** (with nothing else downloading) or type your speed in Mbps.
-3. Priority mode → set the background limit (e.g. 25–35 %). The hint shows which video quality fits.
+2. Leave **Auto** on (or turn it off and Measure / type a fixed speed).
+3. Priority mode → pick Game protection (Strong is a good start).
 4. Tap **Start** and accept the VPN prompt. A key icon appears in the status bar.
 5. Open YouTube, then your game.
 

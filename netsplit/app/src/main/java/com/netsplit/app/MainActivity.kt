@@ -18,6 +18,7 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.RadioGroup
 import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.netsplit.app.vpn.NetSplitVpnService
@@ -40,6 +41,10 @@ class MainActivity : Activity() {
     private lateinit var quic: CheckBox
     private lateinit var start: Button
     private lateinit var live: TextView
+    private lateinit var autoSwitch: Switch
+    private lateinit var autoInfo: TextView
+    private lateinit var manualRow: View
+    private lateinit var protectGroup: RadioGroup
     private var binding = false
 
     private companion object {
@@ -74,12 +79,28 @@ class MainActivity : Activity() {
         quic = findViewById(R.id.quic)
         start = findViewById(R.id.start)
         live = findViewById(R.id.live)
+        autoSwitch = findViewById(R.id.autoSwitch)
+        autoInfo = findViewById(R.id.autoInfo)
+        manualRow = findViewById(R.id.manualRow)
+        protectGroup = findViewById(R.id.protectGroup)
 
         binding = true
         modeGroup.check(if (s.priorityMode) R.id.modePriority else R.id.modeSplit)
         speed.setText(fmtNum(s.totalMbps))
         quic.isChecked = s.blockQuic
+        autoSwitch.isChecked = s.autoMode
+        protectGroup.check(listOf(R.id.protect0, R.id.protect1, R.id.protect2)[s.protection.coerceIn(0, 2)])
         binding = false
+
+        autoSwitch.setOnCheckedChangeListener { _, c ->
+            if (binding) return@setOnCheckedChangeListener
+            s.autoMode = c; refresh(); settingsChanged()
+        }
+        protectGroup.setOnCheckedChangeListener { _, id ->
+            if (binding) return@setOnCheckedChangeListener
+            s.protection = when (id) { R.id.protect0 -> 0; R.id.protect2 -> 2; else -> 1 }
+            refresh(); settingsChanged()
+        }
 
         modeGroup.setOnCheckedChangeListener { _, id ->
             if (binding) return@setOnCheckedChangeListener
@@ -155,6 +176,18 @@ class MainActivity : Activity() {
         val total = s.totalMbps
         val nameA = appLabel(s.appA) ?: "Game"
         val nameB = appLabel(s.appB) ?: "Background app"
+        val auto = s.autoMode
+        manualRow.visibility = if (auto) View.GONE else View.VISIBLE
+        speedStatus.visibility = if (auto) View.GONE else View.VISIBLE
+        if (!(auto && NetSplitVpnService.running && NetSplitVpnService.liveMbps > 0f)) {
+            autoInfo.text = if (auto) {
+                "While running, NetSplit pings your connection twice a second. When the ping starts rising " +
+                    "(YouTube is filling the line) it cuts YouTube at once, and gives it more again when the line is clear."
+            } else "Uses the fixed speed below."
+        }
+        val autoPriority = auto && s.priorityMode
+        protectGroup.visibility = if (autoPriority) View.VISIBLE else View.GONE
+        limitBar.visibility = if (autoPriority) View.GONE else View.VISIBLE
         if (s.priorityMode) {
             modeHelp.text = "Your game is never touched (no VPN, zero extra lag). Only the background app is held to a small share so it can't flood your connection."
             bindRow(rowA, "PRIORITY APP (GAME)", s.appA, "Full speed · not routed")
@@ -164,6 +197,12 @@ class MainActivity : Activity() {
             limitValue.text = "$nameB: ${s.bgPercent}% = ${fmtNum(mbpsOf(s.bgPercent))} Mbps"
             limitHint.text = videoHint(mbpsOf(s.bgPercent)) +
                 "\n$nameA keeps the remaining ${fmtNum(total - mbpsOf(s.bgPercent))} Mbps of headroom."
+            if (autoPriority) {
+                bindRow(rowB, "BACKGROUND APP", s.appB, "Auto – adjusts live")
+                limitLabel.text = "Game protection"
+                limitValue.text = "$nameB gets as much speed as possible without raising your game's ping."
+                limitHint.text = "Stronger protection = lower ping in $nameA, but $nameB may play in lower quality."
+            }
         } else {
             val a = s.splitA
             modeHelp.text = "Both apps are capped at their share of your speed. Good when neither app should starve the other."
@@ -174,6 +213,11 @@ class MainActivity : Activity() {
             limitValue.text = "$nameA $a%  ·  $nameB ${100 - a}%"
             limitHint.text = "$nameA: up to ${fmtNum(mbpsOf(a))} Mbps\n$nameB: up to ${fmtNum(mbpsOf(100 - a))} Mbps — " +
                 videoHint(mbpsOf(100 - a)).replaceFirstChar { it.lowercase() }
+            if (auto) {
+                bindRow(rowA, "APP 1", s.appA, "$a% of live speed")
+                bindRow(rowB, "APP 2", s.appB, "${100 - a}% of live speed")
+                limitHint.text = "Shares of your live speed, re-checked twice a second (last known about ${fmtNum(total)} Mbps)."
+            }
         }
         updateStartButton()
     }
@@ -198,6 +242,9 @@ class MainActivity : Activity() {
             updateStartButton()
             val lines = NetSplitVpnService.liveLines
             val err = NetSplitVpnService.lastError
+            if (s.autoMode && NetSplitVpnService.running && NetSplitVpnService.liveMbps > 0f) {
+                autoInfo.text = "Live speed ≈ ${fmtNum(NetSplitVpnService.liveMbps)} Mbps – limits follow it automatically."
+            }
             live.text = when {
                 NetSplitVpnService.running && lines.isNotEmpty() -> lines.joinToString("\n")
                 NetSplitVpnService.running -> "Starting…"

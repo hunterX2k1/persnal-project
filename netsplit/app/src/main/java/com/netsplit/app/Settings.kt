@@ -39,6 +39,20 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("quic", true)
         set(v) = p.edit().putBoolean("quic", v).apply()
 
+    /** Follow the live connection speed instead of a fixed number. */
+    var autoMode: Boolean
+        get() = p.getBoolean("auto", true)
+        set(v) = p.edit().putBoolean("auto", v).apply()
+
+    /** Auto mode game protection: 0 = balanced, 1 = strong, 2 = maximum. */
+    var protection: Int
+        get() = p.getInt("protect", 1)
+        set(v) = p.edit().putInt("protect", v).apply()
+
+    /** Extra ping (ms) tolerated before the background app is cut back. */
+    val thresholdMs: Double
+        get() = when (protection) { 0 -> 60.0; 2 -> 22.0; else -> 35.0 }
+
     var initialized: Boolean
         get() = p.getBoolean("init", false)
         set(v) = p.edit().putBoolean("init", v).apply()

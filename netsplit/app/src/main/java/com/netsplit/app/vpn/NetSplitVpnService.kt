@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -41,6 +42,12 @@ class NetSplitVpnService : VpnService() {
         @Volatile var liveLines: List<String> = emptyList()
             private set
         @Volatile var lastError: String? = null
+        /** Auto mode status line (live speed + ping), empty when not in auto mode. */
+        @Volatile var autoLine: String = ""
+            private set
+        /** Live estimated connection speed in Mbps (0 if unknown). */
+        @Volatile var liveMbps: Float = 0f
+            private set
 
         fun fmtMbps(bytesPerSec: Double) = when {
             bytesPerSec * 8 >= 1e6 -> "%.1f Mbps".format(bytesPerSec * 8 / 1e6)
@@ -54,6 +61,11 @@ class NetSplitVpnService : VpnService() {
     private var readerThread: Thread? = null
     @Volatile private var readerRunning = false
     private var activePkgs: Set<String> = emptySet()
+
+    @Volatile private var tuner: AutoTuner? = null
+    private var tunerThread: Thread? = null
+    @Volatile private var tunerRunning = false
+    private var dnsForProbe: List<InetAddress> = emptyList()
 
     private val main = Handler(Looper.getMainLooper())
     private var prev = LongArray(0)
@@ -113,12 +125,81 @@ class NetSplitVpnService : VpnService() {
         val e = engine
         if (e != null && limiters.map { it.packageName }.toSet() == activePkgs) {
             // Same apps: just change the limits live, no reconnect needed.
-            for (l in limiters) e.limiters.firstOrNull { it.packageName == l.packageName }?.rateBytesPerSec = l.rateBytesPerSec
             e.blockQuic = s.blockQuic
+            val t = tuner
+            if (s.autoMode && t != null && t.priorityMode == s.priorityMode) {
+                t.thresholdMs = s.thresholdMs
+                t.splitA = s.splitA
+            } else {
+                stopTuner()
+                for (l in limiters) e.limiters.firstOrNull { it.packageName == l.packageName }?.rateBytesPerSec = l.rateBytesPerSec
+                if (s.autoMode) startTuner(e, s)
+            }
             return
         }
         stopEngine()
         startEngine(limiters, s.blockQuic)
+        if (s.autoMode) engine?.let { startTuner(it, s) }
+    }
+
+    // ------------------------------------------------------------------ live auto-adjust
+
+    private fun startTuner(eng: Engine, s: Settings) {
+        val initial = if (s.priorityMode) eng.limiters[0].rateBytesPerSec.toDouble() else s.totalMbps * 125_000.0
+        val t = AutoTuner(s.priorityMode, s.splitA, s.thresholdMs, initial)
+        tuner = t
+        tunerRunning = true
+        val targets = (dnsForProbe.take(2) + listOf(InetAddress.getByName("1.1.1.1"), InetAddress.getByName("8.8.8.8"))).distinct()
+        tunerThread = thread(name = "netsplit-tuner") {
+            LatencyProbe(targets).use { probe ->
+                var lastAt = System.nanoTime()
+                var lastTotal = TrafficStats.getTotalRxBytes()
+                val lastUsed = LongArray(eng.limiters.size) { eng.limiters[it].bytesDown.get() }
+                var ticks = 0
+                while (tunerRunning) {
+                    val started = System.nanoTime()
+                    val rtt = probe.probe(400)
+                    val now = System.nanoTime()
+                    val dt = (now - lastAt) / 1e9
+                    lastAt = now
+                    val usage = DoubleArray(eng.limiters.size) { i ->
+                        val b = eng.limiters[i].bytesDown.get()
+                        val u = (b - lastUsed[i]) / dt
+                        lastUsed[i] = b; u
+                    }
+                    // Total phone traffic. Bytes of limited apps show up twice (mobile + VPN interface): count once.
+                    val total = TrafficStats.getTotalRxBytes()
+                    val totalRate = if (total >= 0 && lastTotal >= 0) {
+                        ((total - lastTotal) / dt - usage.sum()).coerceAtLeast(usage.sum())
+                    } else usage.sum()
+                    lastTotal = total
+                    if (!tunerRunning) break
+                    val limits = t.tick(now / 1_000_000L, rtt, totalRate, usage)
+                    for (i in limits.indices) eng.limiters[i].rateBytesPerSec = limits[i]
+
+                    liveMbps = (t.linkBytesPerSec * 8 / 1e6).toFloat()
+                    autoLine = when {
+                        !t.probesOk -> "Live: waiting for ping replies… (limits held)"
+                        else -> "Live speed ≈ %.1f Mbps · ping %s (+%.0f ms)".format(
+                            liveMbps, t.pingMs?.let { "%.0f ms".format(it) } ?: "lost", t.extraMs,
+                        )
+                    }
+                    // Remember the live speed so the next start begins from a good guess.
+                    if (++ticks % 20 == 0 && t.probesOk) Settings(this).totalMbps = liveMbps.coerceAtLeast(0.5f)
+                    val sleepMs = 500 - (System.nanoTime() - started) / 1_000_000L
+                    if (sleepMs > 0) try { Thread.sleep(sleepMs) } catch (_: InterruptedException) { break }
+                }
+            }
+        }
+    }
+
+    private fun stopTuner() {
+        tunerRunning = false
+        tunerThread?.interrupt()
+        try { tunerThread?.join(1500) } catch (_: InterruptedException) {}
+        tunerThread = null
+        tuner = null
+        autoLine = ""
     }
 
     private fun startEngine(limiters: List<AppLimiter>, blockQuic: Boolean) {
@@ -136,6 +217,7 @@ class NetSplitVpnService : VpnService() {
             .addAddress("fd00:215::2", 128)
             .addRoute("::", 0)
             .setBlocking(false)
+        dnsForProbe = dns
         for (d in dns) b.addDnsServer(d)
         if (dns.none { it is Inet4Address }) b.addDnsServer("8.8.8.8")
         for (l in limiters) b.addAllowedApplication(l.packageName)
@@ -192,6 +274,7 @@ class NetSplitVpnService : VpnService() {
     }
 
     private fun stopEngine() {
+        stopTuner()
         readerRunning = false
         engine?.stop()
         try { readerThread?.join(1500) } catch (_: InterruptedException) {}
@@ -222,11 +305,12 @@ class NetSplitVpnService : VpnService() {
                 val ds = if (dt > 0) (d - prev[i * 2]) / dt else 0.0
                 val us = if (dt > 0) (u - prev[i * 2 + 1]) / dt else 0.0
                 prev[i * 2] = d; prev[i * 2 + 1] = u
-                "${l.label}: ↓ ${fmtMbps(ds)}  ↑ ${fmtMbps(us)}   (limit ${fmtMbps(l.rateBytesPerSec.toDouble())})"
+                "${l.label}: ↓ ${fmtMbps(ds)}  ↑ ${fmtMbps(us)}   (limit ${fmtMbps(l.rateBytesPerSec.toDouble())}${if (tuner != null) ", auto" else ""})"
             }
             prevAt = now
-            liveLines = lines
-            if (tickCount++ % 2 == 0) goForeground(lines.joinToString("\n"))
+            val all = if (autoLine.isNotEmpty()) lines + autoLine else lines
+            liveLines = all
+            if (tickCount++ % 2 == 0) goForeground(all.joinToString("\n"))
             main.postDelayed(this, 1000)
         }
     }
