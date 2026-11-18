@@ -75,6 +75,7 @@ fun SettingsScreen() {
         ToggleRow("Hide from Recent apps & block screenshots", "Shows a blank card in the app switcher", prefs.hideInRecents) { prefs.hideInRecents = it }
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }
         ToggleRow("Clear browser data on close", "Cookies, history and cache are wiped each time", prefs.clearBrowserOnExit) { prefs.clearBrowserOnExit = it }
+        if (prefs.clearBrowserOnExit) ToggleRow("Keep TeraBox signed in", "Your TeraBox sign-in survives the clean-up; everything else is still wiped", prefs.keepTeraBoxSignedIn) { prefs.keepTeraBoxSignedIn = it }
 
         SectionTitle("New releases")
         val unseenNew by repo.releases.unseen.collectAsState()

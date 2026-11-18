@@ -3,6 +3,7 @@ package app.vault.ui
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
@@ -45,6 +46,7 @@ import app.vault.AppLock
 import app.vault.app
 import app.vault.data.AdBlock
 import app.vault.data.AppLog
+import app.vault.data.TeraBox
 import java.io.ByteArrayInputStream
 
 /**
@@ -86,6 +88,8 @@ class BrowserActivity : ComponentActivity() {
         val start = intent.getStringExtra(EXTRA_URL) ?: "about:blank"
         AppLog.i("Browser", "Open ${Uri.parse(start).host}")
         pageUrl = start
+        // TeraBox's mobile site pushes its app; the desktop site lets you sign in and play in the browser.
+        if (TeraBox.isTeraBox(Uri.parse(start).host)) { desktop = true; applyDesktop(web) }
         if (needsUnsafeWarning(start)) unsafeUrl = start else web.loadUrl(start)
 
         setContent { VaultTheme { BrowserUi() } }
@@ -143,6 +147,7 @@ class BrowserActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                if (!desktop && TeraBox.isTeraBox(Uri.parse(url).host)) { desktop = true; applyDesktop(); view.stopLoading(); view.loadUrl(url); return }
                 pageUrl = url; pageLoaded = false
                 currentSite = AdBlock.site(Uri.parse(url).host)
                 adblockOn = prefs.adblock && currentSite !in prefs.allowAds
@@ -287,9 +292,11 @@ class BrowserActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (prefs.clearBrowserOnExit) {
+            val keep = if (prefs.keepTeraBoxSignedIn) TeraBox.saveCookies() else emptyMap()
             web.clearHistory(); web.clearCache(true); web.clearFormData()
             CookieManager.getInstance().removeAllCookies(null)
             WebStorage.getInstance().deleteAllData()
+            if (keep.isNotEmpty()) TeraBox.restoreCookies(keep)
         }
         web.destroy()
         super.onDestroy()
@@ -377,6 +384,13 @@ class BrowserActivity : ComponentActivity() {
                         leadingIcon = { Icon(Icons.Default.Shield, null) },
                         onClick = { prefs.toggleAllowAds(currentSite); web.reload(); menu = false },
                     )
+                    if (TeraBox.isTeraBox(Uri.parse(pageUrl).host)) DropdownMenuItem(
+                        text = { Text("Open in TeraBox app") }, leadingIcon = { Icon(Icons.Default.OpenInNew, null) },
+                        onClick = {
+                            menu = false
+                            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pageUrl)).addCategory(Intent.CATEGORY_BROWSABLE).setFlags(Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)) }
+                                .onFailure { show("The TeraBox app isn't installed", null) }
+                        })
                     DropdownMenuItem(text = { Text("Add this site to My sites") }, leadingIcon = { Icon(Icons.Default.AddLink, null) },
                         onClick = {
                             menu = false

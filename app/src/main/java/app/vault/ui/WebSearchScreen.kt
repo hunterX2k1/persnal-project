@@ -33,6 +33,18 @@ fun WebSearchScreen() {
             Spacer(Modifier.width(6.dp))
             FilterChip(mode == "web", { mode = "web" }, label = { Text("Web") }, leadingIcon = { Icon(Icons.Default.TravelExplore, null, Modifier.size(16.dp)) })
         }
+        // A TeraBox link on the clipboard? Offer to open it straight away.
+        val ctx = LocalContext.current
+        var clip by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) {
+            clip = ctx.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+                ?.takeIf { app.vault.data.TeraBox.isTeraBoxLink(it) }
+        }
+        clip?.let { link ->
+            FilledTonalButton(onClick = { ctx.openBrowser(link) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Icon(Icons.Default.CloudDownload, null); Spacer(Modifier.width(8.dp)); Text("Open copied TeraBox link")
+            }
+        }
         if (mode == "sites") MySitesSearch() else WebEnginesPane()
     }
 }
