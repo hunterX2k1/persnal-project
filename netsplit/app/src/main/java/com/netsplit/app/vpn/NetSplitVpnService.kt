@@ -48,6 +48,9 @@ class NetSplitVpnService : VpnService() {
         /** Live estimated connection speed in Mbps (0 if unknown). */
         @Volatile var liveMbps: Float = 0f
             private set
+        /** What the game is doing right now (priority mode with game boost). */
+        @Volatile var gameLine: String = ""
+            private set
 
         fun fmtMbps(bytesPerSec: Double) = when {
             bytesPerSec * 8 >= 1e6 -> "%.1f Mbps".format(bytesPerSec * 8 / 1e6)
@@ -145,7 +148,10 @@ class NetSplitVpnService : VpnService() {
     // ------------------------------------------------------------------ live auto-adjust
 
     private fun startTuner(eng: Engine, s: Settings) {
-        val initial = if (s.priorityMode) eng.limiters[0].rateBytesPerSec.toDouble() else s.totalMbps * 125_000.0
+        // Limited apps are the ones the tuner controls; a monitor-only one is the game we watch.
+        val limited = eng.limiters.filter { !it.monitorOnly }
+        val game = eng.limiters.firstOrNull { it.monitorOnly }
+        val initial = if (s.priorityMode) limited[0].rateBytesPerSec.toDouble() else s.totalMbps * 125_000.0
         val t = AutoTuner(s.priorityMode, s.splitA, s.thresholdMs, initial)
         tuner = t
         tunerRunning = true
@@ -154,7 +160,9 @@ class NetSplitVpnService : VpnService() {
             LatencyProbe(targets).use { probe ->
                 var lastAt = System.nanoTime()
                 var lastTotal = TrafficStats.getTotalRxBytes()
-                val lastUsed = LongArray(eng.limiters.size) { eng.limiters[it].bytesDown.get() }
+                val lastUsed = LongArray(limited.size) { limited[it].bytesDown.get() }
+                var lastGame = game?.let { it.bytesDown.get() + it.bytesUp.get() } ?: 0L
+                var lastGameDown = game?.bytesDown?.get() ?: 0L
                 var ticks = 0
                 while (tunerRunning) {
                     val started = System.nanoTime()
@@ -162,22 +170,37 @@ class NetSplitVpnService : VpnService() {
                     val now = System.nanoTime()
                     val dt = (now - lastAt) / 1e9
                     lastAt = now
-                    val usage = DoubleArray(eng.limiters.size) { i ->
-                        val b = eng.limiters[i].bytesDown.get()
+                    val usage = DoubleArray(limited.size) { i ->
+                        val b = limited[i].bytesDown.get()
                         val u = (b - lastUsed[i]) / dt
                         lastUsed[i] = b; u
                     }
-                    // Total phone traffic. Bytes of limited apps show up twice (mobile + VPN interface): count once.
+                    // Game traffic (down + up): what it is asking for right now.
+                    var gameDown = 0.0
+                    val gameRate = game?.let {
+                        val d = it.bytesDown.get(); val u = it.bytesUp.get()
+                        gameDown = (d - lastGameDown) / dt
+                        val r = (d + u - lastGame) / dt
+                        lastGame = d + u; lastGameDown = d; r
+                    }
+                    // Whole-phone download rate. Routed bytes are counted twice (mobile + VPN interface): count once.
+                    val routedDown = usage.sum() + gameDown
                     val total = TrafficStats.getTotalRxBytes()
                     val totalRate = if (total >= 0 && lastTotal >= 0) {
-                        ((total - lastTotal) / dt - usage.sum()).coerceAtLeast(usage.sum())
-                    } else usage.sum()
+                        ((total - lastTotal) / dt - routedDown).coerceAtLeast(routedDown)
+                    } else routedDown
                     lastTotal = total
                     if (!tunerRunning) break
-                    val limits = t.tick(now / 1_000_000L, rtt, totalRate, usage)
-                    for (i in limits.indices) eng.limiters[i].rateBytesPerSec = limits[i]
+                    val limits = t.tick(now / 1_000_000L, rtt, totalRate, usage, gameRate)
+                    for (i in limits.indices) limited[i].rateBytesPerSec = limits[i]
 
                     liveMbps = (t.linkBytesPerSec * 8 / 1e6).toFloat()
+                    gameLine = when {
+                        game == null -> ""
+                        t.gameSurge -> "${game.label} wants more → boosting it now (reserved ${fmtMbps(t.gameReserve)})"
+                        t.gameReserve > 0 -> "${game.label} active · ${fmtMbps(t.gameReserve)} kept free for it"
+                        else -> "${game.label} idle"
+                    }
                     autoLine = when {
                         !t.probesOk -> "Live: waiting for ping replies… (limits held)"
                         else -> "Live speed ≈ %.1f Mbps · ping %s (+%.0f ms)".format(
@@ -200,6 +223,7 @@ class NetSplitVpnService : VpnService() {
         tunerThread = null
         tuner = null
         autoLine = ""
+        gameLine = ""
     }
 
     private fun startEngine(limiters: List<AppLimiter>, blockQuic: Boolean) {
@@ -305,10 +329,10 @@ class NetSplitVpnService : VpnService() {
                 val ds = if (dt > 0) (d - prev[i * 2]) / dt else 0.0
                 val us = if (dt > 0) (u - prev[i * 2 + 1]) / dt else 0.0
                 prev[i * 2] = d; prev[i * 2 + 1] = u
-                "${l.label}: ↓ ${fmtMbps(ds)}  ↑ ${fmtMbps(us)}   (limit ${fmtMbps(l.rateBytesPerSec.toDouble())}${if (tuner != null) ", auto" else ""})"
+                "${l.label}: ↓ ${fmtMbps(ds)}  ↑ ${fmtMbps(us)}   (${if (l.monitorOnly) "priority, never limited" else "limit " + fmtMbps(l.rateBytesPerSec.toDouble()) + if (tuner != null) ", auto" else ""})"
             }
             prevAt = now
-            val all = if (autoLine.isNotEmpty()) lines + autoLine else lines
+            val all = lines + listOf(autoLine, gameLine).filter { it.isNotEmpty() }
             liveLines = all
             if (tickCount++ % 2 == 0) goForeground(all.joinToString("\n"))
             main.postDelayed(this, 1000)

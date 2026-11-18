@@ -72,8 +72,9 @@ class Engine(
             -1
         }
         limiters.firstOrNull { it.uid == uid }?.let { return it }
-        // Only the selected apps are routed into the VPN, so with a single limited app every flow is its.
-        return if (limiters.size == 1) limiters[0] else null
+        // Only the selected apps are routed into the VPN, so with a single app every flow is its.
+        // With a game + background app and an unknown owner, treat it as the (limited) background app.
+        return if (limiters.size == 1) limiters[0] else limiters.firstOrNull { !it.monitorOnly }
     }
 
     fun run() {
@@ -198,7 +199,7 @@ class Engine(
         var s = udp[key]
         if (s == null) {
             val lim = limiterFor(Pk.UDP, ip, sport, dport)
-            if (blockQuic && lim != null && dport == 443) {
+            if (blockQuic && lim != null && !lim.monitorOnly && dport == 443) {
                 // QUIC ignores our TCP-level throttling tricks less gracefully; make the app use TCP.
                 writeTun(Pk.portUnreachable(ip))
                 return

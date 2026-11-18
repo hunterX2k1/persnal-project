@@ -53,6 +53,11 @@ class Settings(ctx: Context) {
     val thresholdMs: Double
         get() = when (protection) { 0 -> 60.0; 2 -> 22.0; else -> 35.0 }
 
+    /** Priority + auto: watch the game's traffic and give it more when it asks for more. */
+    var gameBoost: Boolean
+        get() = p.getBoolean("boost", true)
+        set(v) = p.edit().putBoolean("boost", v).apply()
+
     var initialized: Boolean
         get() = p.getBoolean("init", false)
         set(v) = p.edit().putBoolean("init", v).apply()
@@ -66,7 +71,9 @@ class Settings(ctx: Context) {
         val a = appA
         val b = appB
         return if (priorityMode) {
-            listOfNotNull(b?.let { lim(it, bgPercent) })
+            // bytesPerSec = 0 → never limited; the game is only routed so its live demand can be seen.
+            val watchGame = autoMode && gameBoost && a != null
+            listOfNotNull(b?.let { lim(it, bgPercent) }, if (watchGame) Limit(a!!, 100, 0) else null)
         } else {
             listOfNotNull(a?.let { lim(it, splitA) }, b?.let { lim(it, 100 - splitA) })
         }

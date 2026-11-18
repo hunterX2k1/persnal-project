@@ -27,6 +27,13 @@ travel the same mobile queue as the game's packets):
   that caused lag last time), so it follows the speed back up.
 * The live connection speed is estimated and shown in the app and notification.
 
+**Game boost** (priority + auto, on by default): the game is also passed through NetSplit, *never
+limited*, only so its live traffic can be seen (Android doesn't let apps read another app's live usage).
+When the game asks for more (match loading, asset download), NetSplit keeps 1.5–2× its recent
+use free and cuts YouTube at once; when the game calms down, YouTube gets the speed back.
+Measured cost: +0.15 ms per round trip. Simulated: game jumps to 3 Mbps on a 10 Mbps line →
+worst extra ping 89 ms with boost vs 336 ms without.
+
 **Game protection** (priority mode) sets how much extra ping is tolerated: Balanced ≈ 60 ms,
 Strong ≈ 35 ms (default), Maximum ≈ 22 ms. In split mode the split % is applied to the live speed.
 
@@ -45,7 +52,7 @@ Optionally NetSplit blocks QUIC (UDP 443) for limited apps so YouTube falls back
 which makes the limit exact.
 
 ## Install
-Download `release/NetSplit-v1.1.apk` to your phone, open it and allow "install unknown apps".
+Download `release/NetSplit-v1.2.apk` to your phone, open it and allow "install unknown apps".
 Requires Android 10+.
 
 ## Using it

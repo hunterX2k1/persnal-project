@@ -231,4 +231,39 @@ class EngineKernelTest {
         }
         ss.close()
     }
+
+    /** Extra delay the priority game picks up by passing through NetSplit (monitor-only, never limited). */
+    @Test
+    fun addedLatencyForGame() {
+        assumeTrue(canRun())
+        DatagramSocket(0, InetAddress.getLoopbackAddress()).use { echo ->
+            thread(isDaemon = true) {
+                val b = ByteArray(2048)
+                while (true) {
+                    val p = DatagramPacket(b, b.size)
+                    try { echo.receive(p) } catch (_: Exception) { break }
+                    echo.send(DatagramPacket(p.data, p.length, p.socketAddress))
+                }
+            }
+            fun pingPong(target: InetSocketAddress): Double {
+                DatagramSocket().use { c ->
+                    c.soTimeout = 2000
+                    val times = (1..300).map {
+                        val t0 = System.nanoTime()
+                        c.send(DatagramPacket(ByteArray(64), 64, target))
+                        c.receive(DatagramPacket(ByteArray(100), 100))
+                        (System.nanoTime() - t0) / 1e6
+                    }.drop(50).sorted()
+                    return times[times.size / 2]
+                }
+            }
+            Rig(rateBytes = 0, ifname = "nstest4").use {
+                pingPong(InetSocketAddress(fakeServer, echo.localPort)) // warm-up
+                val direct = pingPong(InetSocketAddress(InetAddress.getLoopbackAddress(), echo.localPort))
+                val via = pingPong(InetSocketAddress(fakeServer, echo.localPort))
+                println("UDP ping median: direct %.3f ms, through NetSplit %.3f ms → added %.3f ms".format(direct, via, via - direct))
+                assertTrue(via - direct < 2.0)
+            }
+        }
+    }
 }

@@ -49,6 +49,8 @@ class AppLimiter(
 ) {
     val down = TokenBucket(rateBytesPerSec)
     val up = TokenBucket(rateBytesPerSec)
+    /** Priority app: routed only so we can watch its traffic; never throttled. */
+    val monitorOnly: Boolean get() = down.unlimited
     val bytesDown = AtomicLong()
     val bytesUp = AtomicLong()
 

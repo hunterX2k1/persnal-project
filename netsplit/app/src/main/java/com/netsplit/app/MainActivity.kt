@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private lateinit var autoInfo: TextView
     private lateinit var manualRow: View
     private lateinit var protectGroup: RadioGroup
+    private lateinit var boost: CheckBox
     private var binding = false
 
     private companion object {
@@ -83,12 +84,14 @@ class MainActivity : Activity() {
         autoInfo = findViewById(R.id.autoInfo)
         manualRow = findViewById(R.id.manualRow)
         protectGroup = findViewById(R.id.protectGroup)
+        boost = findViewById(R.id.boost)
 
         binding = true
         modeGroup.check(if (s.priorityMode) R.id.modePriority else R.id.modeSplit)
         speed.setText(fmtNum(s.totalMbps))
         quic.isChecked = s.blockQuic
         autoSwitch.isChecked = s.autoMode
+        boost.isChecked = s.gameBoost
         protectGroup.check(listOf(R.id.protect0, R.id.protect1, R.id.protect2)[s.protection.coerceIn(0, 2)])
         binding = false
 
@@ -138,6 +141,7 @@ class MainActivity : Activity() {
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
+        boost.setOnCheckedChangeListener { _, c -> if (!binding) { s.gameBoost = c; refresh(); settingsChanged() } }
         quic.setOnCheckedChangeListener { _, c -> if (!binding) { s.blockQuic = c; settingsChanged() } }
         start.setOnClickListener { onStartClicked() }
 
@@ -187,6 +191,7 @@ class MainActivity : Activity() {
         }
         val autoPriority = auto && s.priorityMode
         protectGroup.visibility = if (autoPriority) View.VISIBLE else View.GONE
+        boost.visibility = if (autoPriority) View.VISIBLE else View.GONE
         limitBar.visibility = if (autoPriority) View.GONE else View.VISIBLE
         if (s.priorityMode) {
             modeHelp.text = "Your game is never touched (no VPN, zero extra lag). Only the background app is held to a small share so it can't flood your connection."
@@ -199,6 +204,7 @@ class MainActivity : Activity() {
                 "\n$nameA keeps the remaining ${fmtNum(total - mbpsOf(s.bgPercent))} Mbps of headroom."
             if (autoPriority) {
                 bindRow(rowB, "BACKGROUND APP", s.appB, "Auto – adjusts live")
+                if (s.gameBoost) bindRow(rowA, "PRIORITY APP (GAME)", s.appA, "Never limited · gets more the moment it asks")
                 limitLabel.text = "Game protection"
                 limitValue.text = "$nameB gets as much speed as possible without raising your game's ping."
                 limitHint.text = "Stronger protection = lower ping in $nameA, but $nameB may play in lower quality."

@@ -178,6 +178,14 @@
         <LinearLayout style="@style/Card">
             <TextView style="@style/Label" android:text="Options" />
             <CheckBox
+                android:id="@+id/boost"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:text="Game boost – watch the game's traffic and give it more the moment it asks (game is never limited; adds about 0.2 ms)"
+                android:textColor="@color/text"
+                android:textSize="14sp" />
+            <CheckBox
                 android:id="@+id/quic"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

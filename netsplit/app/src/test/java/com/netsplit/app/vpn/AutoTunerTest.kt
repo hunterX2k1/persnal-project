@@ -89,4 +89,49 @@ class AutoTunerTest {
         println("before %.0f, during outage %.0f, recovered %.0f".format(before, after, t.ctl.value))
         assertTrue(t.ctl.value > 0.8 * before)
     }
+
+    /**
+     * Game asks for 3 Mbps (match loading) for 20 s on a 10 Mbps line while YouTube is hungry.
+     * With the game's traffic visible, YouTube must step aside quickly so the game gets what it asks for.
+     */
+    private fun surge(watchGame: Boolean): Triple<Double, Double, Double> {
+        val cap = 1_250_000.0
+        val tuner = AutoTuner(true, 50, 35.0, 600_000.0)
+        val rnd = Random(3)
+        var queue = 0.0; var t = 0L
+        var ytB = 0.0; var gB = 0.0; var totB = 0.0
+        var gameSurgeGot = 0.0; var gameSurgeN = 0; var delayMax = 0.0
+        for (i in 0 until 60 * 100) {
+            val sec = i / 100.0
+            val demand = if (sec in 30.0..50.0) 375_000.0 else 12_000.0
+            val yt = tuner.ctl.value
+            val arrive = (yt + demand) * 0.01
+            val served = minOf(queue + arrive, cap * 0.01)
+            queue += arrive - served
+            val gameServed = served * demand / (yt + demand)
+            gB += gameServed; ytB += served - gameServed; totB += served
+            if (sec in 33.0..50.0) { gameSurgeGot += gameServed / 0.01; gameSurgeN++ }
+            if (sec >= 31.0) delayMax = maxOf(delayMax, queue / cap * 1000)
+            t += 10
+            if (t % 500 == 0L) {
+                val rtt = 40 + queue / cap * 1000 + rnd.nextDouble() * 10
+                tuner.tick(t, if (rtt > 400) null else rtt, totB / 0.5, doubleArrayOf(ytB / 0.5), if (watchGame) gB / 0.5 else null)
+                ytB = 0.0; gB = 0.0; totB = 0.0
+            }
+        }
+        return Triple(gameSurgeGot / gameSurgeN, delayMax, tuner.ctl.value)
+    }
+
+    @Test
+    fun gameGetsMoreWhenItAsks() {
+        val (got, delay, ytAfter) = surge(watchGame = true)
+        val (gotBlind, delayBlind, _) = surge(watchGame = false)
+        println("game wants 3.0 Mbps → gets %.2f Mbps (worst extra ping %.0f ms) with game boost".format(got * 8 / 1e6, delay))
+        println("                    → gets %.2f Mbps (worst extra ping %.0f ms) without".format(gotBlind * 8 / 1e6, delayBlind))
+        println("youtube 10 s after the surge: %.1f Mbps".format(ytAfter * 8 / 1e6))
+        assertTrue("game got $got", got > 0.9 * 375_000)
+        assertTrue(got >= gotBlind)
+        assertTrue(delay <= delayBlind)
+        assertTrue("youtube should recover after the game calms down", ytAfter > 600_000)
+    }
 }
