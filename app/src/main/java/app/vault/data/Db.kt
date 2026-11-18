@@ -37,6 +37,8 @@ data class Performer(
     val sceneCount: Int? = null,
     /** English Wikipedia article (free source only). */
     val wiki: String? = null,
+    /** Links to this performer elsewhere, one "Site|url" per line (from StashDB). */
+    val links: String? = null,
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
@@ -74,6 +76,8 @@ interface PerformerDao {
     // ---- merging the free source with ThePornDB (same person, two ids) ----
     @Query("SELECT id FROM performers WHERE id LIKE 'wd:%' AND name = :name COLLATE NOCASE")
     suspend fun freeIdsNamed(name: String): List<String>
+    @Query("SELECT * FROM performers WHERE name = :name COLLATE NOCASE")
+    suspend fun byName(name: String): List<Performer>
     @Query("SELECT LOWER(name) FROM performers WHERE id NOT LIKE 'wd:%' AND LOWER(name) IN (:lowerNames)")
     suspend fun paidNamesIn(lowerNames: List<String>): List<String>
     @Query("UPDATE OR IGNORE favorites SET performerId = :to WHERE performerId = :from") suspend fun moveFavorites(from: String, to: String)
@@ -122,7 +126,7 @@ interface SiteDao {
     @Query("DELETE FROM sites") suspend fun clear()
 }
 
-@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 4, exportSchema = false)
+@Database(entities = [Performer::class, Favorite::class, Tag::class, Site::class], version = 5, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun performers(): PerformerDao
     abstract fun sites(): SiteDao
@@ -140,6 +144,11 @@ abstract class AppDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE sites ADD COLUMN inVideoSearch INTEGER NOT NULL DEFAULT 1")
                 db.execSQL("ALTER TABLE sites ADD COLUMN searchCheckedAt INTEGER NOT NULL DEFAULT 0")
                 // Old rows stored "35DD"-style cup sizes; they are rewritten on the next sync.
+            }
+        }
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE performers ADD COLUMN links TEXT")
             }
         }
         val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {

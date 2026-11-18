@@ -21,12 +21,49 @@ import java.net.URLEncoder
 
 class Repo(private val context: Context, val prefs: Prefs) {
     private val db = Room.databaseBuilder(context, AppDb::class.java, "vault.db")
-        .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4)
+        .addMigrations(AppDb.MIGRATION_1_2, AppDb.MIGRATION_2_3, AppDb.MIGRATION_3_4, AppDb.MIGRATION_4_5)
         .fallbackToDestructiveMigration()
         .build()
     val performers = db.performers()
     val sites = db.sites()
     val api = TpdbApi { prefs.apiKey }
+    val stash = StashDbApi { prefs.stashKey }
+    val hasStash get() = prefs.stashKey.isNotBlank()
+
+    /**
+     * Saves StashDB profiles, merging with the same person from other sources:
+     * a ThePornDB profile keeps its id and gets missing details + links filled in;
+     * a free-database (Wikidata) profile is replaced, keeping favourites and tags.
+     */
+    private suspend fun upsertStash(list: List<Performer>) {
+        for (p in list) {
+            val same = performers.byName(p.name).filter { it.id != p.id }
+            val tpdb = same.firstOrNull { !it.id.startsWith("wd:") && !it.id.startsWith("sdb:") }
+            if (tpdb != null) { performers.upsert(listOf(tpdb.fillFrom(p))); performers.delete(p.id); continue }
+            val old = performers.get(p.id)
+            var merged = if (old != null) p.fillFrom(old) else p
+            for (wd in same.filter { it.id.startsWith("wd:") }) {
+                merged = merged.fillFrom(wd)
+                performers.moveFavorites(wd.id, p.id); performers.moveTags(wd.id, p.id)
+                performers.deleteFavoritesOf(wd.id); performers.deleteTagsOf(wd.id); performers.delete(wd.id)
+            }
+            performers.upsert(listOf(merged))
+        }
+    }
+
+    private suspend fun syncStash(pages: Int): Int {
+        var page = prefs.stashCursor; var fetched = 0
+        for (n in 0 until pages) {
+            syncProgress.value = "StashDB page $page…"
+            val (items, count) = stash.performers(page)
+            upsertStash(items); fetched += items.size
+            val atEnd = items.isEmpty() || page * 100 >= count
+            page = if (atEnd) 1 else page + 1
+            if (atEnd) break
+        }
+        prefs.stashCursor = page
+        return fetched
+    }
     val free = WikidataSource()
     private val syncLock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -60,6 +97,7 @@ class Repo(private val context: Context, val prefs: Prefs) {
             val parts = mutableListOf<String>()
             parts += "Free database: ${syncFree()} profiles"
             if (hasKey) parts += "ThePornDB: ${syncTpdb(tpdbPages)} profiles"
+            if (hasStash) parts += "StashDB: " + (attempt { syncStash(6) }.getOrElse { AppLog.e("Sync", "StashDB sync failed", it); -1 }.let { if (it < 0) "failed" else "$it profiles" })
             prefs.lastSync = System.currentTimeMillis()
             parts.joinToString(" · ").also { AppLog.i("Sync", it) }
         } finally {
@@ -113,6 +151,11 @@ class Repo(private val context: Context, val prefs: Prefs) {
     private suspend fun upsertTpdb(list: List<Performer>) {
         if (list.isEmpty()) return
         performers.upsert(list)
+        for (p in list) for (sdb in performers.byName(p.name).filter { it.id.startsWith("sdb:") }) {
+            performers.upsert(listOf((performers.get(p.id) ?: p).fillFrom(sdb)))
+            performers.moveFavorites(sdb.id, p.id); performers.moveTags(sdb.id, p.id)
+            performers.deleteFavoritesOf(sdb.id); performers.deleteTagsOf(sdb.id); performers.delete(sdb.id)
+        }
         for (p in list) for (old in performers.freeIdsNamed(p.name)) {
             performers.moveFavorites(old, p.id); performers.moveTags(old, p.id)
             performers.deleteFavoritesOf(old); performers.deleteTagsOf(old); performers.delete(old)
@@ -122,10 +165,11 @@ class Repo(private val context: Context, val prefs: Prefs) {
 
     /** Searches ThePornDB (needs a key) and caches matches locally. */
     suspend fun searchOnline(query: String): String {
-        if (!hasKey) return "Everything from the free database is already on your phone. Try another spelling, or add a ThePornDB key for more."
+        val fromStash = if (hasStash) attempt { stash.search(query).also { upsertStash(it) }.size }.getOrDefault(0) else 0
+        if (!hasKey) return if (hasStash) "Found $fromStash on StashDB" else "Everything from the free database is already on your phone. Try another spelling, or add a ThePornDB key for more."
         val res = api.performers(1, query)
         upsertTpdb(res.items)
-        return "Found ${res.items.size} online"
+        return "Found ${res.items.size + fromStash} online"
     }
 
     /** Refreshes one profile from its source; for free profiles, loads the Wikipedia summary once. */
@@ -381,12 +425,15 @@ class Repo(private val context: Context, val prefs: Prefs) {
     }
 
     /** Saves a performer picked from online suggestions. */
-    suspend fun saveFromOnline(p: Performer) = upsertTpdb(listOf(p))
+    suspend fun saveFromOnline(p: Performer) = if (p.id.startsWith("sdb:")) upsertStash(listOf(p)) else upsertTpdb(listOf(p))
 
     /** Online name suggestions (ThePornDB) for people not in the library yet. */
-    suspend fun onlineSuggestions(q: String): List<Performer> =
-        if (!hasKey || q.trim().length < 3) emptyList()
-        else api.performers(1, q.trim()).items.filter { p -> p.age()?.let { it >= 18 } != false }.take(6)
+    suspend fun onlineSuggestions(q: String): List<Performer> {
+        if (q.trim().length < 3) return emptyList()
+        val tp = if (hasKey) attempt { api.performers(1, q.trim()).items }.getOrDefault(emptyList()) else emptyList()
+        val sd = if (hasStash) attempt { stash.search(q.trim()) }.getOrDefault(emptyList()) else emptyList()
+        return (tp + sd).distinctBy { it.name.lowercase() }.filter { p -> p.age()?.let { it >= 18 } != false }.take(6)
+    }
 
     /** Makes sure a performer credited in a scene is in the library (fetching from ThePornDB if needed). */
     suspend fun ensurePerformer(id: String): Performer? =

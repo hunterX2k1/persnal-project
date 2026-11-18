@@ -116,6 +116,13 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
                     Text("Find all videos on my sites", fontWeight = FontWeight.Bold)
                 }
                 TextButton(onClick = { showSites = true }) { Text("Or open one of my sites yourself") }
+                // Babepedia: exact page if StashDB knows it, otherwise their usual profile address for this name
+                val links = perf.linkList()
+                val babepedia = links.firstOrNull { it.second.contains("babepedia.com", true) }?.second
+                    ?: "https://www.babepedia.com/babe/" + perf.name.trim().replace(Regex("\\s+"), "_")
+                OutlinedButton(onClick = { ctx.openBrowser(babepedia) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Public, null); Spacer(Modifier.width(6.dp)); Text("View on Babepedia")
+                }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { vm.toggleFavorite() }, modifier = Modifier.weight(1f)) {
                         Icon(if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = Accent)
@@ -156,6 +163,15 @@ fun PerformerScreen(id: String, onBack: () -> Unit, onScene: (String) -> Unit, o
                     }
                 }
 
+                val otherLinks = perf.linkList().filterNot { it.second.contains("babepedia.com", true) }
+                if (otherLinks.isNotEmpty()) {
+                    SectionTitle("Links")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        otherLinks.forEach { (site, url) ->
+                            AssistChip(onClick = { ctx.openBrowser(url) }, label = { Text(site, maxLines = 1) }, leadingIcon = { Icon(Icons.Default.Link, null, Modifier.size(16.dp)) })
+                        }
+                    }
+                }
                 perf.bio?.let { bio ->
                     SectionTitle("About")
                     Text(bio, color = Color(0xFFCFCFD4), maxLines = if (bioOpen) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis,

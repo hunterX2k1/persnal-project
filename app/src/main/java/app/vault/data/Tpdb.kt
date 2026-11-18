@@ -100,7 +100,7 @@ class TpdbApi(private val key: () -> String) {
      */
     suspend fun scenes(p: Performer, page: Int = 1): ScenePage {
         val enc = URLEncoder.encode(p.id, "UTF-8")
-        val byId = if (p.id.startsWith("wd:")) null
+        val byId = if (p.id.startsWith("wd:") || p.id.startsWith("sdb:")) null
             else runCatching { get("/performers/$enc/scenes?per_page=40&page=$page") }.getOrNull()
         val json = byId ?: get("/scenes?per_page=40&page=$page&q=" + URLEncoder.encode(p.name, "UTF-8"))
         val data = json.optJSONArray("data") ?: return ScenePage(emptyList(), page, page, 0).also { AppLog.w("API", "Scenes response had no data array") }

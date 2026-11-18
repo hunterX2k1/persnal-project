@@ -71,6 +71,17 @@ fun SettingsScreen() {
             Button(onClick = { prefs.apiKey = key.trim(); if (prefs.apiKey.isNotBlank()) repo.startSync() }, enabled = key.trim() != prefs.apiKey) { Text("Save key") }
             OutlinedButton(onClick = { ctx.openBrowser("https://theporndb.net/register") }) { Text("Get a free key") }
         }
+        SectionTitle("Optional: StashDB key")
+        Text("Community database with more performers, measurements and links to their other profiles (Babepedia, socials…). " +
+            "Needs a free StashDB account — new accounts need an invite from an existing member.", fontSize = 13.sp, color = Muted)
+        var stashKey by remember { mutableStateOf(prefs.stashKey) }
+        OutlinedTextField(stashKey, { stashKey = it }, label = { Text("StashDB API key") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { prefs.stashKey = stashKey.trim(); if (prefs.stashKey.isNotBlank()) repo.startSync() }, enabled = stashKey.trim() != prefs.stashKey) { Text("Save key") }
+            OutlinedButton(onClick = { ctx.openBrowser("https://stashdb.org/") }) { Text("Open StashDB") }
+        }
+
         SectionTitle("Privacy")
         ToggleRow("Hide from Recent apps & block screenshots", "Shows a blank card in the app switcher", prefs.hideInRecents) { prefs.hideInRecents = it }
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }

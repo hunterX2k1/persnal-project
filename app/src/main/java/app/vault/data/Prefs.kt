@@ -47,6 +47,8 @@ class Prefs(context: Context) {
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
     var adblock by bool("adblock", true)
+    var stashKey by str("stash_key", "")
+    var stashCursor by int("stash_cursor", 1)
     var keepTeraBoxSignedIn by bool("keep_terabox", true)
     /** Minutes in the background before the PIN is asked again (0 = immediately). */
     var lockAfterMin by int("lock_after_min", 0)

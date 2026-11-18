@@ -97,7 +97,11 @@ class DiscoverVm(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openOnline(p: Performer, then: (String) -> Unit) = viewModelScope.launch { repo.saveFromOnline(p); nameIndex = null; then(p.id) }
+    fun openOnline(p: Performer, then: (String) -> Unit) = viewModelScope.launch {
+        repo.saveFromOnline(p); nameIndex = null
+        // The profile may have been merged into an existing one with the same name.
+        then(repo.performers.get(p.id)?.id ?: repo.performers.byName(p.name).firstOrNull()?.id ?: p.id)
+    }
 
     val saved = repo.saved.all.map { l -> l.filter { it.kind == "discover" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -217,7 +221,7 @@ fun DiscoverScreen(key: String, favoritesOnly: Boolean, onOpen: (String) -> Unit
                     )
                 }
                 if (online.isNotEmpty()) {
-                    Text("From ThePornDB", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    Text("Online", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                     online.forEach { p ->
                         SuggestionRow(
                             name = p.name, typed = filter.text, image = p.thumb ?: p.image, hint = "Not in your library yet",

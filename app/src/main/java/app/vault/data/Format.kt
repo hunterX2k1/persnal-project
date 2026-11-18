@@ -55,6 +55,23 @@ fun Performer.debutAge(): Int? {
 fun Performer.measurementsText(): String? = measurements ?: if (bust != null || waist != null || hips != null)
     "${bust ?: "?"}${cup.orEmpty()}-${waist ?: "?"}-${hips ?: "?"}" else null
 
+/** Fill this profile's missing details from another source's copy of the same person. */
+fun Performer.fillFrom(o: Performer): Performer = copy(
+    aliases = aliases ?: o.aliases, gender = gender ?: o.gender, birthday = birthday ?: o.birthday,
+    careerStart = careerStart ?: o.careerStart, careerEnd = careerEnd ?: o.careerEnd, ethnicity = ethnicity ?: o.ethnicity,
+    nationality = nationality ?: o.nationality, hair = hair ?: o.hair, eyes = eyes ?: o.eyes, heightCm = heightCm ?: o.heightCm,
+    weightKg = weightKg ?: o.weightKg, measurements = measurements ?: o.measurements, cup = cup ?: o.cup, bust = bust ?: o.bust,
+    waist = waist ?: o.waist, hips = hips ?: o.hips, natural = natural ?: o.natural, zodiac = zodiac ?: o.zodiac,
+    birthplace = birthplace ?: o.birthplace, tattoos = tattoos ?: o.tattoos, piercings = piercings ?: o.piercings,
+    bio = bio ?: o.bio, image = image ?: o.image, thumb = thumb ?: o.thumb, sceneCount = sceneCount ?: o.sceneCount,
+    wiki = wiki ?: o.wiki, links = listOfNotNull(links, o.links).joinToString("\n").lines().filter { it.isNotBlank() }.distinct().joinToString("\n").ifBlank { null },
+)
+
+/** (site name, url) pairs from [Performer.links]. */
+fun Performer.linkList(): List<Pair<String, String>> = links?.lines()?.mapNotNull { l ->
+    l.split('|', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+}.orEmpty()
+
 fun formatDuration(sec: Int?): String? = sec?.takeIf { it > 0 }?.let {
     if (it >= 3600) "%d:%02d:%02d".format(it / 3600, it / 60 % 60, it % 60) else "%d:%02d".format(it / 60, it % 60)
 }
