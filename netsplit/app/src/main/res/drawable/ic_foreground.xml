@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- a split arrow: one thick lane (game) and one thin lane (background) -->
+    <path android:fillColor="#3DDC97"
+        android:pathData="M30,50 L58,50 L58,40 L78,54 L58,68 L58,58 L30,58 Z" />
+    <path android:fillColor="#9AA3B2"
+        android:pathData="M30,70 L60,70 L60,66 L70,72 L60,78 L60,74 L30,74 Z" />
+    <path android:fillColor="#9AA3B2"
+        android:pathData="M30,34 L60,34 L60,30 L70,36 L60,42 L60,38 L30,38 Z" />
+</vector>

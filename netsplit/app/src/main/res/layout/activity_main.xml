@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:id="@+id/root"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="NetSplit"
+            android:textColor="@color/text"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Smooth gaming while YouTube plays in the background"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
+        <!-- Mode -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/Label" android:text="Mode" />
+            <RadioGroup
+                android:id="@+id/modeGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <RadioButton
+                    android:id="@+id/modePriority"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Priority mode – game first"
+                    android:textColor="@color/text" />
+                <RadioButton
+                    android:id="@+id/modeSplit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Split mode – e.g. 50 / 50"
+                    android:textColor="@color/text" />
+            </RadioGroup>
+            <TextView
+                android:id="@+id/modeHelp"
+                style="@style/Body"
+                android:layout_marginTop="6dp"
+                android:textColor="@color/muted"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Apps -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/Label" android:text="Apps" />
+            <include android:id="@+id/rowA" layout="@layout/app_row" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="8dp"
+                android:background="@color/card_border" />
+            <include android:id="@+id/rowB" layout="@layout/app_row" />
+        </LinearLayout>
+
+        <!-- Speed -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/Label" android:text="Your internet speed" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <EditText
+                    android:id="@+id/speed"
+                    android:layout_width="96dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:selectAllOnFocus="true"
+                    android:textColor="@color/text"
+                    android:textSize="22sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingStart="6dp"
+                    android:text="Mbps"
+                    android:textColor="@color/muted"
+                    android:textSize="16sp" />
+                <Button
+                    android:id="@+id/measure"
+                    android:layout_width="wrap_content"
+                    android:layout_height="38dp"
+                    android:background="@drawable/btn_outline"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="14dp"
+                    android:text="Measure"
+                    android:textAllCaps="false"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+            <TextView
+                android:id="@+id/speedStatus"
+                style="@style/Body"
+                android:layout_marginTop="4dp"
+                android:text="Tap Measure with nothing else downloading, or type your usual speed."
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Limit -->
+        <LinearLayout style="@style/Card">
+            <TextView android:id="@+id/limitLabel" style="@style/Label" />
+            <TextView
+                android:id="@+id/limitValue"
+                style="@style/Body"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+            <SeekBar
+                android:id="@+id/limitBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginVertical="10dp"
+                android:max="17" />
+            <TextView
+                android:id="@+id/limitHint"
+                style="@style/Body"
+                android:textColor="@color/muted"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Options -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/Label" android:text="Options" />
+            <CheckBox
+                android:id="@+id/quic"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Make limited apps use TCP (block QUIC). Recommended – makes YouTube's limit exact."
+                android:textColor="@color/text"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/start"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/btn_primary"
+            android:text="Start"
+            android:textAllCaps="false"
+            android:textColor="#0F1218"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/liveCard"
+            style="@style/Card">
+            <TextView style="@style/Label" android:text="Live" />
+            <TextView
+                android:id="@+id/live"
+                style="@style/Body"
+                android:fontFamily="monospace"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingMultiplier="1.2"
+            android:text="How it works: NetSplit starts a local VPN on your phone that carries only the apps you limit. Nothing leaves your phone except the normal traffic. Tip: open NetSplit, press Start, then open YouTube and your game. If the game still lags, lower the background limit or YouTube's video quality."
+            android:textColor="@color/muted"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>
