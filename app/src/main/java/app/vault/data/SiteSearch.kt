@@ -1,0 +1,275 @@
+package app.vault.data
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+import java.net.URI
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+
+/** One video found on one of my sites. [score] is 0–100 similarity to what was searched for. */
+data class Hit(val domain: String, val siteTitle: String, val title: String, val url: String, val thumb: String?, val duration: String?, val score: Int, val ms: Long = 0)
+
+sealed interface SiteStatus {
+    data object Searching : SiteStatus
+    data class Found(val count: Int) : SiteStatus
+    data object Nothing : SiteStatus
+    /** The site refused automated requests (bot check / captcha / 403). */
+    data class Blocked(val code: Int) : SiteStatus
+    data object NoSearchLink : SiteStatus
+    data class Failed(val reason: String) : SiteStatus
+}
+
+data class SiteProgress(val site: Site, val status: SiteStatus, val hits: List<Hit> = emptyList())
+
+/** Adds a site's result to the map, combining it with an earlier result for the same site (e.g. its own search + web search). */
+fun Map<String, SiteProgress>.merged(p: SiteProgress): Map<String, SiteProgress> {
+    val old = this[p.site.domain] ?: return this + (p.site.domain to p)
+    val hits = (old.hits + p.hits).distinctBy { it.url }
+    val status = when {
+        hits.isNotEmpty() -> SiteStatus.Found(hits.size)
+        old.status is SiteStatus.Searching -> p.status
+        else -> old.status
+    }
+    return this + (p.site.domain to old.copy(status = status, hits = hits))
+}
+
+/** What we're looking for: a scene title plus the people in it. */
+data class VideoQuery(val title: String, val names: List<String>)
+
+/**
+ * Meta-search over the user's own sites, like a tube aggregator: runs each site's search,
+ * pulls video links (title, thumbnail, duration) out of the result page, and ranks them by
+ * how closely the title and cast match.
+ */
+class SiteSearch(private val onTemplateFound: suspend (Site, String?) -> Unit = { _, _ -> }) {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    fun searchAll(sites: List<Site>, q: VideoQuery, parallel: Int = 6): Flow<SiteProgress> = channelFlow {
+        val gate = Semaphore(parallel)
+        for (site in sites) launch(Dispatchers.IO) {
+            send(SiteProgress(site, SiteStatus.Searching))
+            val result = gate.withPermit {
+                attempt { withTimeoutOrNull(35_000) { searchSite(site, q) } ?: SiteProgress(site, SiteStatus.Failed("too slow")) }
+                    .getOrElse { SiteProgress(site, SiteStatus.Failed(it.message ?: "error")) }
+            }
+            AppLog.i("SiteSearch", "${site.domain}: ${result.status::class.simpleName} ${result.hits.size}")
+            send(result)
+        }
+        awaitClose { }
+    }
+
+    private suspend fun searchSite(site: Site, q: VideoQuery): SiteProgress {
+        var template = site.searchTemplate
+        if (template.isNullOrBlank()) {
+            val recentlyChecked = System.currentTimeMillis() - site.searchCheckedAt < WEEK
+            if (recentlyChecked) return SiteProgress(site, SiteStatus.NoSearchLink)
+            template = detectTemplate(site, q.names.firstOrNull() ?: q.title)
+            onTemplateFound(site, template)
+            if (template == null) return SiteProgress(site, SiteStatus.NoSearchLink)
+        }
+        // 1) search by title, 2) if that finds little, search by the main performer's name.
+        val first = fetchHits(site, template, q.title, q)
+        if (first.first != null) return SiteProgress(site, first.first!!)
+        var hits = first.second
+        if (hits.size < 3 && q.names.isNotEmpty()) {
+            val second = fetchHits(site, template, q.names.first(), q)
+            hits = (hits + second.second).distinctBy { it.url }
+        }
+        hits = hits.sortedByDescending { it.score }.take(PER_SITE)
+        return SiteProgress(site, if (hits.isEmpty()) SiteStatus.Nothing else SiteStatus.Found(hits.size), hits)
+    }
+
+    /** Returns (blocking status or null, hits). */
+    private suspend fun fetchHits(site: Site, template: String, term: String, q: VideoQuery): Pair<SiteStatus?, List<Hit>> {
+        val url = fill(template, term)
+        val t0 = System.currentTimeMillis()
+        val page = fetch(url)
+        val ms = System.currentTimeMillis() - t0
+        if (page.blocked) return SiteStatus.Blocked(page.code) to emptyList()
+        if (page.html == null) return SiteStatus.Failed("HTTP ${page.code}") to emptyList()
+        return null to extract(page.html, url, site, q).map { it.copy(ms = ms) }
+    }
+
+    /**
+     * Finds a site's search link, most reliable first:
+     *  1. the site's OpenSearch description (what browsers use for "search this site"),
+     *  2. the search box on its home page (form action + field name),
+     *  3. a few common URL patterns.
+     * A candidate counts only if its result page actually comes back and mentions what we searched for.
+     */
+    suspend fun detectTemplate(site: Site, sample: String): String? {
+        val lenient = site.kind == SiteKind.VIDEO
+        val home = "https://${site.domain}/"
+        val page = fetch(home)
+        if (page.blocked) return null
+        page.html?.let { html ->
+            val doc = Jsoup.parse(html, home)
+            doc.selectFirst("link[rel=search][type*=opensearch]")?.absUrl("href")?.takeIf { it.isNotEmpty() }?.let { osd ->
+                fetch(osd).html?.let { xml ->
+                    Regex("template=\"([^\"]*\\{searchTerms\\}[^\"]*)\"").findAll(xml)
+                        .map { it.groupValues[1].replace("&amp;", "&").replace("{searchTerms}", "{q}").replace(Regex("\\{[^}]*\\?\\}"), "") }
+                        .firstOrNull { !it.contains("suggest", true) && !it.contains("json", true) }
+                        ?.let { if (verify(it, sample, site, lenient)) return it.also { _ -> AppLog.i("SiteSearch", "Search link for ${site.domain} from OpenSearch") } }
+                }
+            }
+            for (form in doc.select("form")) {
+                if (form.attr("method").equals("post", true)) continue
+                val input = form.selectFirst("input[type=search], input[name=q], input[name=s], input[name=search], input[name=query], input[name=k], input[name=keyword], input[name=search_query], input[name=term]") ?: continue
+                val name = input.attr("name")
+                if (name.isBlank()) continue
+                val action = form.absUrl("action").ifBlank { home }
+                val hidden = form.select("input[type=hidden][name]").joinToString("") { "&" + it.attr("name") + "=" + URLEncoder.encode(it.attr("value"), "UTF-8") }
+                val tpl = action + (if ('?' in action) "&" else "?") + name + "={q}" + hidden
+                if (verify(tpl, sample, site, lenient)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain} from its search box") }
+            }
+        }
+        for (pattern in if (lenient) PATTERNS else PATTERNS.take(5)) {
+            val tpl = "https://${site.domain}$pattern"
+            if (verify(tpl, sample, site, lenient)) return tpl.also { AppLog.i("SiteSearch", "Search link for ${site.domain}: $pattern") }
+        }
+        AppLog.i("SiteSearch", "No search link found for ${site.domain}")
+        return null
+    }
+
+    /** A search link works if its page loads and either echoes the term or lists matching videos. */
+    private suspend fun verify(tpl: String, sample: String, site: Site, lenient: Boolean = false): Boolean {
+        val url = fill(tpl, sample)
+        val p = fetch(url)
+        val html = p.html ?: return false
+        if (p.blocked) return false
+        // A known video site's result page counts if it lists several videos, even if this performer isn't on it.
+        if (lenient && videoLinkCount(html, url, site) >= 4 && fill(tpl, "x") != "https://${site.domain}/") return true
+        val echoes = sample.split(' ').filter { it.length >= 3 }.all { html.contains(it, ignoreCase = true) }
+        val hits = extract(html, url, site, VideoQuery(sample, listOf(sample))).count { it.score >= 40 }
+        return hits >= 2 || (echoes && extract(html, url, site, VideoQuery(sample, emptyList())).size + hits >= 1)
+    }
+
+    class Page(val code: Int, val html: String?, val blocked: Boolean, val finalUrl: String? = null)
+
+    suspend fun fetch(url: String): Page = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url)
+            .header("User-Agent", BROWSER_UA)
+            .header("Accept", "text/html,application/xhtml+xml")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .build()
+        runCatching {
+            client.newCall(req).execute().use { r ->
+                val body = r.body?.source()?.use { src -> src.request(MAX_BYTES); src.buffer.readUtf8(minOf(src.buffer.size, MAX_BYTES)) }
+                val bot = body != null && BOT_MARKERS.any { body.contains(it, ignoreCase = true) } && body.length < 60_000
+                when {
+                    r.code == 403 || r.code == 503 || r.code == 429 || bot -> Page(r.code, null, true)
+                    !r.isSuccessful -> Page(r.code, null, false)
+                    else -> Page(r.code, body, false, r.request.url.toString())
+                }
+            }
+        }.getOrElse { Page(0, null, false) }
+    }
+
+    companion object {
+        const val PER_SITE = 6
+        const val WEEK = 7 * 24 * 60 * 60 * 1000L
+        private const val MAX_BYTES = 3L * 1024 * 1024
+        const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+        private val BOT_MARKERS = listOf("cf-chl", "Just a moment...", "captcha", "Attention Required", "ddos-guard", "challenge-platform")
+
+        /** Common search link patterns. {q} = URL-encoded term, {q-} = words joined with hyphens. */
+        val PATTERNS = listOf(
+            "/search?q={q}", "/search/{q-}/", "/search/{q-}", "/?s={q}", "/search?search={q}",
+            "/search?query={q}", "/videos/search?q={q}", "/search/videos?q={q}", "/search?k={q}", "/s/{q-}/",
+            "/search/videos/{q-}/", "/videos/{q-}/", "/?search={q}", "/search.php?q={q}", "/search?search_query={q}",
+            "/en/search/{q-}/", "/find/{q-}/", "/search/?q={q}", "/q/{q-}/", "/?k={q}",
+        )
+
+        /** Links on a page that look like individual videos (thumbnail + video-style address). */
+        fun videoLinkCount(html: String, pageUrl: String, site: Site): Int =
+            Jsoup.parse(html, pageUrl).select("a[href]:has(img)").map { it.absUrl("href") }.distinct().count { h ->
+                val host = runCatching { URI(h).host }.getOrNull()?.lowercase()?.removePrefix("www.") ?: return@count false
+                (host == site.domain || host.endsWith("." + site.domain)) &&
+                    Regex("/(video|videos|watch|v|view|embed|movie)s?/|/\\d{4,}/|watch\\?|view_video").containsMatchIn(h)
+            }
+
+        /** Social, code and reference sites never have videos to find. */
+        private val NON_VIDEO_SITES = listOf(
+            "reddit.com", "redd.it", "discord.com", "discord.gg", "github.com", "gitlab.com", "codeberg.org", "gitgud.io",
+            "twitter.com", "x.com", "t.me", "telegram.org", "wikipedia.org", "imgur.com", "ibb.co", "archive.org",
+            "pixiv.net", "saucenao.com", "wordpress.com", "stashapp.cc", "iafd.com", "data18.com", "adultfilmdatabase.com",
+        )
+        fun isNonVideo(domain: String) = NON_VIDEO_SITES.any { domain == it || domain.endsWith(".$it") } ||
+            Regex("(^|\\.)git\\.|booru|\\.onion$").containsMatchIn(domain)
+
+        fun fill(template: String, term: String): String {
+            val enc = URLEncoder.encode(term.trim(), "UTF-8")
+            val hy = term.trim().lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-')
+            return template.replace("{q-}", hy).replace("{q}", enc)
+        }
+
+        private val STOP = setOf("the", "and", "with", "her", "his", "for", "from", "she", "you", "your", "this", "that", "are", "was", "gets", "get", "in", "on", "of", "to", "a", "an", "hd", "4k", "1080p", "720p", "video", "videos", "porn", "xxx", "full", "free", "new")
+
+        fun tokens(s: String): Set<String> = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.length >= 3 && it !in STOP }.toSet()
+
+        /** 0–100: share of the wanted title's words present, plus a bonus when a cast member's name appears. */
+        fun score(candidate: String, q: VideoQuery): Int {
+            val want = tokens(q.title)
+            val have = tokens(candidate)
+            val titlePart = if (want.isEmpty()) 0.0 else want.count { it in have }.toDouble() / want.size
+            val lc = candidate.lowercase()
+            val nameHit = q.names.any { n -> n.length >= 4 && lc.contains(n.lowercase()) } ||
+                q.names.any { n -> tokens(n).let { t -> t.size >= 2 && t.all { it in have } } }
+            return ((titlePart * 75) + (if (nameHit) 35 else 0)).toInt().coerceAtMost(100)
+        }
+
+        /** Pulls video-like links out of a search result page. Works on most tube-style layouts. */
+        fun extract(html: String, pageUrl: String, site: Site, q: VideoQuery): List<Hit> {
+            val doc = Jsoup.parse(html, pageUrl)
+            val pagePath = runCatching { URI(pageUrl).path }.getOrNull()
+            val out = LinkedHashMap<String, Hit>()
+            for (a in doc.select("a[href]:has(img)")) {
+                val href = a.absUrl("href").substringBefore('#')
+                if (href.isEmpty() || href in out) continue
+                val host = runCatching { URI(href).host }.getOrNull()?.lowercase()?.removePrefix("www.") ?: continue
+                if (!(host == site.domain || host.endsWith("." + site.domain) || site.domain.endsWith(".$host"))) continue
+                val path = runCatching { URI(href).path }.getOrNull().orEmpty()
+                if (path.length < 2 || path == pagePath || NON_VIDEO.containsMatchIn(path)) continue
+                val img = a.selectFirst("img")
+                val title = listOf(a.attr("title"), img?.attr("alt").orEmpty(), a.text(), a.parent()?.selectFirst("[title]")?.attr("title").orEmpty())
+                    .map { it.trim() }.filter { it.length in 6..220 }.maxByOrNull { it.length } ?: continue
+                val s = score(title, q)
+                if (s < 30) continue
+                out[href] = Hit(site.domain, site.title, title, href, thumbOf(img), durationNear(a), s)
+            }
+            return out.values.sortedByDescending { it.score }
+        }
+
+        private val NON_VIDEO = Regex("/(search|tags?|categor(y|ies)|channels?|models?|pornstars?|users?|members?|login|signup|register|account|playlists?|page/\\d+)(/|$)", RegexOption.IGNORE_CASE)
+
+        private fun thumbOf(img: Element?): String? {
+            img ?: return null
+            for (attr in listOf("data-src", "data-original", "data-thumb", "data-lazy-src", "data-mediumthumb", "data-thumb_url", "src")) {
+                val v = img.absUrl(attr).ifEmpty { img.attr(attr) }
+                if (v.startsWith("http") && !v.endsWith(".gif")) return v
+            }
+            return null
+        }
+
+        private val DURATION = Regex("\\b(\\d{1,2}:)?\\d{1,2}:\\d{2}\\b")
+        private fun durationNear(a: Element): String? =
+            DURATION.find(a.text())?.value ?: a.parent()?.let { DURATION.find(it.text())?.value }
+    }
+}
