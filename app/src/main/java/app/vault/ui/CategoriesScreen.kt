@@ -138,7 +138,7 @@ private enum class Length(val label: String, val range: IntRange) { ANY("Any len
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun CategoriesScreen(onScene: (String) -> Unit) {
+fun CategoriesScreen(onScene: (String) -> Unit, onPlaylist: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val vm: CategoriesVm = viewModel()
     val all by vm.all.collectAsStateWithLifecycle()
@@ -159,6 +159,13 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
     val recent by vm.repo.taste.recent.collectAsStateWithLifecycle()
     val later by vm.repo.taste.later.collectAsStateWithLifecycle()
     fun openSaved(s: Scene) { vm.repo.sceneCache[s.id] = s; onScene(s.id) }
+    val newItems by vm.repo.releases.items.collectAsStateWithLifecycle()
+    val newUnseen by vm.repo.releases.unseen.collectAsStateWithLifecycle()
+    val playlists by vm.repo.playlists.all.collectAsStateWithLifecycle()
+    var creatingPlaylist by remember { mutableStateOf(false) }
+    LaunchedEffect(newUnseen, picked.isEmpty() && text.isBlank()) {
+        if (newUnseen > 0 && picked.isEmpty() && text.isBlank()) { kotlinx.coroutines.delay(2500); vm.repo.releases.markSeen() }
+    }
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<SavedSearch?>(null) }
     var sort by rememberSaveable { mutableStateOf(CatSort.LATEST) }
@@ -285,6 +292,23 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
                                 }
                             }
                         }
+                        if (newItems.isNotEmpty()) SceneRow("New for you" + if (newUnseen > 0) " · $newUnseen new" else "", newItems) { openSaved(it) }
+                        Row(Modifier.padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Playlists", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { creatingPlaylist = true }) { Text("New") }
+                        }
+                        if (playlists.isEmpty()) Text("Make playlists from any video page → Playlist.", color = Muted, fontSize = 12.sp)
+                        else LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(playlists.entries.toList(), key = { "pl:" + it.key }) { (name, list) ->
+                                Column(Modifier.width(150.dp).clip(RoundedCornerShape(10.dp)).background(Surface1).clickable { onPlaylist(name) }) {
+                                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+                                        VImage(list.firstOrNull()?.let { listOf(it.thumb) + it.imageFallbacks } ?: emptyList(), Modifier.fillMaxSize())
+                                        Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) { Badge("${list.size}", dark = true) }
+                                    }
+                                    Text(name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, modifier = Modifier.padding(8.dp))
+                                }
+                            }
+                        }
                         if (later.isNotEmpty()) SceneRow("Watch later", later) { openSaved(it) }
                         if (recent.isNotEmpty()) SceneRow("Recently viewed", recent) { openSaved(it) }
                     }
@@ -345,6 +369,7 @@ fun CategoriesScreen(onScene: (String) -> Unit) {
         }
     }
 
+    if (creatingPlaylist) TextPrompt("New playlist", "e.g. Romantic nights", onDismiss = { creatingPlaylist = false }) { n -> vm.repo.playlists.create(n); creatingPlaylist = false }
     if (naming) TextPrompt("Save this search", "e.g. My favourites", onDismiss = { naming = false }) { n -> if (n.isNotBlank()) vm.saveSearch(n); naming = false }
     deleting?.let { s ->
         AlertDialog(

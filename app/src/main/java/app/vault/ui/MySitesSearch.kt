@@ -71,7 +71,7 @@ class MySitesSearchVm(app: Application) : AndroidViewModel(app) {
                     !Categories.unsafeTitle(h.title) && narrow.all { w -> Categories.score(h.title, w) >= 66 }
                 })
                 launch { repo.discover(q, broad = false).forEach { p -> progress.value = progress.value.merged(keep(p)) } }
-                repo.siteSearch.searchAll(sites, q).collect { p -> progress.value = progress.value.merged(keep(p)) }
+                repo.searchMySites(sites, q).collect { p -> progress.value = progress.value.merged(keep(p)) }
             } finally { running.value = false }
         }
     }

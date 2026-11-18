@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.sp
 import app.vault.AppLock
 import app.vault.app
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -44,10 +44,16 @@ private fun Root(onLeave: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = Bg) {
         when {
             !prefs.ageConfirmed -> AgeGate(onEnter = { prefs.ageConfirmed = true; AppLock.locked = false }, onLeave = onLeave)
-            prefs.hasPin && AppLock.locked -> PinPad(
-                title = "Enter PIN",
-                onDone = { pin -> prefs.checkPin(pin).also { if (it) AppLock.locked = false } },
-            )
+            prefs.hasPin && AppLock.locked -> {
+                val activity = LocalContext.current as androidx.fragment.app.FragmentActivity
+                val useBio = prefs.biometric && Biometrics.available(activity)
+                LaunchedEffect(Unit) { if (useBio) Biometrics.prompt(activity) { AppLock.locked = false } }
+                PinPad(
+                    title = "Enter PIN",
+                    onDone = { pin -> prefs.checkPin(pin).also { if (it) AppLock.locked = false } },
+                    extra = if (useBio) ({ TextButton(onClick = { Biometrics.prompt(activity) { AppLock.locked = false } }) { Text("Use fingerprint") } }) else null,
+                )
+            }
             else -> { MainScaffold(onPanic = onLeave); CrashPrompt() }
         }
     }
@@ -81,7 +87,7 @@ private fun AgeGate(onEnter: () -> Unit, onLeave: () -> Unit) {
 
 /** Numeric PIN pad. [onDone] returns true if the PIN was accepted. */
 @Composable
-fun PinPad(title: String, onDone: (String) -> Boolean, onCancel: (() -> Unit)? = null) {
+fun PinPad(title: String, onDone: (String) -> Boolean, onCancel: (() -> Unit)? = null, extra: (@Composable () -> Unit)? = null) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
     fun submit() { if (!onDone(pin)) { error = true; pin = "" } }
@@ -124,6 +130,7 @@ fun PinPad(title: String, onDone: (String) -> Boolean, onCancel: (() -> Unit)? =
                 }
             }
         }
+        extra?.invoke()
         Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (onCancel != null) OutlinedButton(onClick = onCancel) { Text("Cancel") }
             Button(onClick = ::submit, enabled = pin.length >= 4, shape = RoundedCornerShape(12.dp)) { Text("OK") }

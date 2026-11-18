@@ -19,6 +19,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.vault.AppLock
 import app.vault.app
+import app.vault.data.attempt
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -75,9 +76,20 @@ fun SettingsScreen() {
         ToggleRow("Blur all images", "Tap a profile photo to reveal it", prefs.blurImages) { prefs.blurImages = it }
         ToggleRow("Clear browser data on close", "Cookies, history and cache are wiped each time", prefs.clearBrowserOnExit) { prefs.clearBrowserOnExit = it }
 
+        SectionTitle("New releases")
+        val unseenNew by repo.releases.unseen.collectAsState()
+        var checkingNew by remember { mutableStateOf(false) }
+        Text("Follows your favourite performers (needs the ThePornDB key). Checked daily; new videos appear in Categories → New for you. No notifications.",
+            color = Muted, fontSize = 13.sp)
+        OutlinedButton(enabled = !checkingNew, modifier = Modifier.padding(top = 6.dp), onClick = {
+            checkingNew = true
+            scope.launch { val n = attempt { repo.checkNewReleases() }.getOrDefault(0); checkingNew = false; android.widget.Toast.makeText(ctx, "$n new videos", android.widget.Toast.LENGTH_SHORT).show() }
+        }) { Text(if (checkingNew) "Checking…" else "Check now" + if (unseenNew > 0) " · $unseenNew new" else "") }
+
         SectionTitle("Finding new sites")
         ToggleRow("Look for new sites while searching", "When you search your sites for a video, also search the web for it", prefs.discoverSites) { prefs.discoverSites = it }
         ToggleRow("Add sites that have the video", "New sites with a matching video are added to My sites (marked New)", prefs.autoAddDiscovered) { prefs.autoAddDiscovered = it }
+        TextButton(onClick = { repo.health.reset(); android.widget.Toast.makeText(ctx, "Site health reset", android.widget.Toast.LENGTH_SHORT).show() }) { Text("Reset site health scores") }
 
         SectionTitle("Ad blocker")
         ToggleRow("Block ads & trackers", "${app.vault.data.AdBlock.adHostCount} ad, tracker and malware hosts, including the pop-up networks adult sites use", prefs.adblock) { prefs.adblock = it }
@@ -89,8 +101,19 @@ fun SettingsScreen() {
             updatingLists = true
             scope.launch { app.vault.data.AdBlock.load(java.io.File(ctx.filesDir, "blocklists"), force = true); updatingLists = false }
         }) { Text(if (updatingLists) "Updating lists…" else "Update block lists") }
-        ToggleRow("PIN lock", "Asks for a PIN whenever the app is reopened", prefs.hasPin) { on ->
+        ToggleRow("PIN lock", "Asks for a PIN when the app is reopened", prefs.hasPin) { on ->
             if (on) pinStep = 1 else prefs.setPin(null)
+        }
+        if (prefs.hasPin) {
+            Text("Lock again after", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                listOf(0 to "Immediately", 1 to "1 min", 5 to "5 min", 15 to "15 min").forEach { (m, label) ->
+                    FilterChip(prefs.lockAfterMin == m, { prefs.lockAfterMin = m }, label = { Text(label) })
+                }
+            }
+            val activity = ctx as? androidx.fragment.app.FragmentActivity
+            if (activity != null && Biometrics.available(activity))
+                ToggleRow("Unlock with fingerprint", "Use your fingerprint or face instead of typing the PIN", prefs.biometric) { prefs.biometric = it }
         }
 
         SectionTitle("App icon & name")

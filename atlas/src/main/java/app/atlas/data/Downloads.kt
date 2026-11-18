@@ -32,8 +32,23 @@ object EpisodeParser {
     fun clean(s: String) = s.replace(Regex("[._]+"), " ").replace(Regex("\\s+"), " ").trim(' ', '-', '[', ']', '(', ')')
         .split(' ').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
 
-    /** Folder (inside Downloads/Atlas) a file goes into by default. */
-    fun suggestFolder(fileName: String): String = parse(fileName)?.let { "${it.show}/Season ${it.season}" } ?: ""
+    private val TYPES = listOf(
+        "Videos" to setOf("mp4", "mkv", "avi", "webm", "mov", "m4v", "ts", "wmv", "flv"),
+        "Music" to setOf("mp3", "flac", "m4a", "wav", "ogg", "opus", "aac"),
+        "Documents" to setOf("pdf", "epub", "mobi", "azw3", "doc", "docx", "txt", "cbz", "cbr", "djvu", "odt", "rtf"),
+        "Apps" to setOf("apk", "xapk", "apks", "apkm"),
+        "Archives" to setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz"),
+        "Images" to setOf("jpg", "jpeg", "png", "gif", "webp", "heic"),
+    )
+
+    /** Type folder for a file name, e.g. "Videos", "Documents" (empty if unknown). */
+    fun typeFolder(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        return TYPES.firstOrNull { ext in it.second }?.first.orEmpty()
+    }
+
+    /** Folder (inside Downloads/Atlas) a file goes into by default: series episodes by show and season, others by type. */
+    fun suggestFolder(fileName: String): String = parse(fileName)?.let { "${it.show}/Season ${it.season}" } ?: typeFolder(fileName)
 
     /** Folder and file names safe for the file system. */
     fun safe(path: String) = path.split('/')

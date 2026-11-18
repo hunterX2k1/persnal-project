@@ -105,6 +105,7 @@ fun SitesScreen() {
                         add(Triple("all", "All", sites.size))
                         add(Triple("searchable", "Searchable", sites.count { isSearchable(it) }))
                         add(Triple("new", "Found automatically", sites.count { it.discovered }))
+                        add(Triple("best", "Best", sites.count { (repo.health.score(it.domain) ?: 0) >= 60 }))
                         SiteKind.LABELS.forEach { (k, label) -> add(Triple(k, label, sites.count { it.kind == k })) }
                         add(Triple("unscanned", "Not checked", sites.count { it.kind == null }))
                     }.filter { it.third > 0 || it.first == "all" }
@@ -117,6 +118,7 @@ fun SitesScreen() {
                         "all" -> true
                         "searchable" -> isSearchable(s)
                         "new" -> s.discovered
+                        "best" -> (repo.health.score(s.domain) ?: 0) >= 60
                         "unscanned" -> s.kind == null
                         else -> s.kind == kindFilter
                     }
@@ -128,6 +130,10 @@ fun SitesScreen() {
                                 s.kind?.let { k -> Text(SiteKind.LABELS[k] ?: k, fontSize = 11.sp, color = if (k == SiteKind.VIDEO) Accent else Muted) }
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     if (s.discovered) Text("NEW", fontSize = 10.sp, color = Accent, fontWeight = FontWeight.Bold)
+                                    repo.health.score(s.domain)?.let { h ->
+                                        Text("♥$h", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                            color = when { h >= 60 -> androidx.compose.ui.graphics.Color(0xFF3DDC84); h >= 30 -> Accent; else -> MaterialTheme.colorScheme.error })
+                                    }
                                     if (s.inVideoSearch && !s.searchTemplate.isNullOrBlank()) Icon(Icons.Default.ManageSearch, "Searchable (own search)", tint = Accent, modifier = Modifier.size(14.dp))
                                     else if (isSearchable(s)) Icon(Icons.Default.TravelExplore, "Searchable via web search", tint = Muted, modifier = Modifier.size(14.dp))
                                 }

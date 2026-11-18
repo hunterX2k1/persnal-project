@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import app.vault.app
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -27,6 +28,7 @@ fun MainScaffold(onPanic: () -> Unit) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+    val newCount by androidx.compose.ui.platform.LocalContext.current.app.repo.releases.unseen.collectAsState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     val previewPlayer = remember { PreviewEngine.newPlayer(ctx).trackPreviewState() }
@@ -37,7 +39,7 @@ fun MainScaffold(onPanic: () -> Unit) {
     Scaffold(
         containerColor = Bg,
         bottomBar = {
-            if (route?.let { r -> r.startsWith("performer") || r.startsWith("videos") || r.startsWith("scene") || r.startsWith("find") } != true) NavigationBar(containerColor = Surface1) {
+            if (route?.let { r -> r.startsWith("performer") || r.startsWith("videos") || r.startsWith("scene") || r.startsWith("find") || r.startsWith("playlist") } != true) NavigationBar(containerColor = Surface1) {
                 tabs.forEach { t ->
                     NavigationBarItem(
                         selected = route == t.route,
@@ -47,7 +49,10 @@ fun MainScaffold(onPanic: () -> Unit) {
                                 launchSingleTop = true; restoreState = true
                             }
                         },
-                        icon = { Icon(t.icon, null) },
+                        icon = {
+                            if (t.route == "categories" && newCount > 0) BadgedBox(badge = { androidx.compose.material3.Badge { Text("$newCount") } }) { Icon(t.icon, null) }
+                            else Icon(t.icon, null)
+                        },
                         label = { Text(t.label, maxLines = 1) },
                         alwaysShowLabel = false,
                         colors = NavigationBarItemDefaults.colors(indicatorColor = Surface2, selectedIconColor = Accent, selectedTextColor = Accent),
@@ -61,7 +66,18 @@ fun MainScaffold(onPanic: () -> Unit) {
             composable("discover") { DiscoverScreen(key = "all", favoritesOnly = false, onOpen = open, onPanic = onPanic, onSettings = { nav.navigate("settings") }) }
             composable("favorites") { DiscoverScreen(key = "fav", favoritesOnly = true, onOpen = open, onPanic = onPanic, onSettings = { nav.navigate("settings") }) }
             composable("web") { WebSearchScreen() }
-            composable("categories") { CategoriesScreen(onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") }) }
+            composable("categories") {
+                CategoriesScreen(
+                    onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") },
+                    onPlaylist = { n -> nav.navigate("playlist/${android.net.Uri.encode(n)}") },
+                )
+            }
+            composable("playlist/{name}", arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+                PlaylistScreen(
+                    name = it.arguments?.getString("name").orEmpty(), onBack = { nav.popBackStack() },
+                    onScene = { sid -> nav.navigate("scene/${android.net.Uri.encode(sid)}") },
+                )
+            }
             composable("sites") { SitesScreen() }
             composable("settings") { SettingsScreen() }
             composable("performer/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {

@@ -79,7 +79,16 @@ fun DownloadsScreen() {
                 Text("Downloads", fontSize = 26.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
                 if (statuses.any { it.finished }) TextButton(onClick = { dl.clearFinished() }) { Text("Clear finished") }
             }
-            Text("Saved in Downloads/Atlas. Episodes are filed by series and season.", color = Muted, fontSize = 13.sp)
+            Text("Saved in Downloads/Atlas. Episodes are filed by series and season, other files by type.", color = Muted, fontSize = 13.sp)
+            // Storage: space used by finished downloads, and free space on the phone
+            val used = statuses.filter { it.finished }.sumOf { it.total.coerceAtLeast(0) }
+            val free = remember(statuses.size) {
+                runCatching { android.os.StatFs(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).path).availableBytes }.getOrDefault(-1L)
+            }
+            if (statuses.isNotEmpty()) Text(
+                "Using ${size(used)} in ${statuses.count { it.finished }} files" + if (free > 0) " · ${size(free)} free on the phone" else "",
+                color = Accent, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
+            )
 
             // Download from a direct file link
             Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,7 +116,7 @@ fun DownloadsScreen() {
                         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Folder, null, tint = Accent, modifier = Modifier.size(18.dp))
                             Text(folder, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp).weight(1f))
-                            Text("${list.count { it.finished }}/${list.size}", color = Muted, fontSize = 12.sp)
+                            Text("${list.count { it.finished }}/${list.size} · ${size(list.filter { it.finished }.sumOf { it.total.coerceAtLeast(0) })}", color = Muted, fontSize = 12.sp)
                         }
                     }
                     items(list.sortedBy { it.rec.fileName.lowercase() }, key = { it.rec.id }) { s -> DownloadRow(s) }

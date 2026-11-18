@@ -12,7 +12,10 @@ class EpisodeParserTest {
         assertEquals(EpisodeParser.Episode("Show Name", 1, 12), EpisodeParser.parse("Show Name S01 E12.mkv"))
         assertNull(EpisodeParser.parse("lecture-notes.pdf"))
         assertEquals("Show Name/Season 1", EpisodeParser.suggestFolder("Show.Name.S01E03.mkv"))
-        assertEquals("", EpisodeParser.suggestFolder("movie.2020.mkv"))
+        assertEquals("Videos", EpisodeParser.suggestFolder("movie.2020.mkv"))
+        assertEquals("Documents", EpisodeParser.suggestFolder("Some Book.epub"))
+        assertEquals("Apps", EpisodeParser.suggestFolder("tool-v2.apk"))
+        assertEquals("", EpisodeParser.suggestFolder("README"))
         assertEquals("Bad Name/Season 1", EpisodeParser.safe("Bad:Name/Season 1"))
     }
 }

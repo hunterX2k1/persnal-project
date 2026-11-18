@@ -14,6 +14,7 @@ import app.vault.data.SiteSearch
 import app.vault.data.Prefs
 import app.vault.data.USER_AGENT
 import app.vault.data.Repo
+import app.vault.sync.ReleasesWorker
 import app.vault.sync.SyncWorker
 import kotlinx.coroutines.launch
 
@@ -27,12 +28,16 @@ class App : Application(), coil.ImageLoaderFactory {
         prefs = Prefs(this)
         repo = Repo(this, prefs)
         // Re-lock whenever the whole app goes to the background.
+        // Lock when the app comes back after the chosen time in the background (0 = always).
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStop(owner: LifecycleOwner) {
-                AppLock.locked = true
+            override fun onStop(owner: LifecycleOwner) { prefs.lastBackground = System.currentTimeMillis() }
+            override fun onStart(owner: LifecycleOwner) {
+                val away = System.currentTimeMillis() - prefs.lastBackground
+                if (prefs.lastBackground == 0L || away >= prefs.lockAfterMin * 60_000L) AppLock.locked = true
             }
         })
         SyncWorker.schedule(this)
+        ReleasesWorker.schedule(this)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             AdBlock.load(java.io.File(filesDir, "blocklists"))
             runCatching { repo.tidySites() }

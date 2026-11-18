@@ -47,6 +47,10 @@ class Prefs(context: Context) {
     var lastSync by long("last_sync", 0L)
     var lastSyncMessage by str("last_sync_msg", "")
     var adblock by bool("adblock", true)
+    /** Minutes in the background before the PIN is asked again (0 = immediately). */
+    var lockAfterMin by int("lock_after_min", 0)
+    var biometric by bool("biometric", false)
+    var lastBackground by long("last_background", 0L)
     /** Grid columns chosen on each video screen (1 = list). */
     var colsFind by int("cols_find", 1)
     var colsVideos by int("cols_videos", 2)

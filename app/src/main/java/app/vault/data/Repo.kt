@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -167,7 +168,7 @@ class Repo(private val context: Context, val prefs: Prefs) {
                 (it.kind == null || it.kind == SiteKind.VIDEO) &&
                 // unknown sites already checked with no search page: skip for a month (video sites go through web search instead)
                 !(it.kind != SiteKind.VIDEO && it.searchTemplate.isNullOrBlank() && it.searchCheckedAt > 0 && now - it.searchCheckedAt < month)
-        }.sortedByDescending { !it.searchTemplate.isNullOrBlank() } // working sites first
+        }.sortedWith(compareByDescending<Site> { !it.searchTemplate.isNullOrBlank() }.thenByDescending { health.score(it.domain) ?: 50 })
     }
 
     // ---------------- Site scanner ----------------
@@ -292,6 +293,36 @@ class Repo(private val context: Context, val prefs: Prefs) {
     val categories = CategoryStore(context)
     val saved = SavedSearches(context)
     val taste = Taste(context)
+    val health = SiteHealth(context)
+    val playlists = Playlists(context)
+    val releases = NewReleases(context)
+
+    /** Searches my sites and records how each one did (site health). */
+    fun searchMySites(list: List<Site>, q: VideoQuery) =
+        siteSearch.searchAll(list, q).onEach { if (it.status !is SiteStatus.Searching) health.record(it) }
+
+    /**
+     * Checks the performers I follow (favourites from ThePornDB) for videos released since the last check.
+     * First check of a performer: videos from the last 14 days count as new.
+     */
+    suspend fun checkNewReleases(): Int {
+        if (!hasKey) return 0
+        val followed = performers.favoriteIds().filter { !it.startsWith("wd:") }.take(60)
+        val cutoff = java.time.LocalDate.now().minusDays(14).toString()
+        var added = 0
+        for (id in followed) {
+            val p = performers.get(id) ?: continue
+            val page = attempt { api.scenes(p, 1) }.getOrNull() ?: continue
+            val newest = page.scenes.mapNotNull { it.date }.maxOrNull() ?: continue
+            val since = releases.lastDate(id) ?: cutoff
+            val fresh = page.scenes.filter { (it.date ?: "") > since }.filterNot { Categories.isExcluded(*it.tags.toTypedArray()) }
+            fresh.forEach { sceneCache[it.id] = it }
+            releases.add(fresh); added += fresh.size
+            releases.setLastDate(id, newest)
+        }
+        AppLog.i("NewReleases", "Checked ${followed.size} followed performers, $added new videos")
+        return added
+    }
 
     /** "For you": searches your favourite tags in turn and ranks results by how well they fit your taste. */
     suspend fun forYou(page: Int): ScenePage? {

@@ -54,7 +54,7 @@ class SceneVm(app: Application, val sceneId: String) : AndroidViewModel(app) {
             val q = VideoQuery(s.title, s.performers.map { it.name })
             // Meanwhile, look for this video on sites not in my list yet.
             launch { repo.discover(q).forEach { p -> progress.value = progress.value.merged(p) } }
-            repo.siteSearch.searchAll(sites, q).collect { p ->
+            repo.searchMySites(sites, q).collect { p ->
                 progress.value = progress.value.merged(p)
                 if (progress.value.values.none { it.status is SiteStatus.Searching } && progress.value.size == sites.size) running.value = false
             }
@@ -77,6 +77,8 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
     val snack = remember { SnackbarHostState() }
     var descOpen by remember { mutableStateOf(false) }
     var showSites by remember { mutableStateOf(false) }
+    var playlistDialog by remember { mutableStateOf(false) }
+    val playlists by vm.repo.playlists.all.collectAsStateWithLifecycle()
 
     if (s == null) {
         Column(Modifier.statusBarsPadding()) {
@@ -104,9 +106,14 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
                 Text(listOfNotNull(s.siteName, s.date, formatDuration(s.durationSec)).joinToString(" • "), color = Muted, fontSize = 13.sp)
 
                 val isLater = later.any { it.id == s.id }
-                FilledTonalButton(onClick = { vm.repo.taste.toggleLater(s) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                    Icon(if (isLater) Icons.Default.BookmarkAdded else Icons.Default.BookmarkAdd, null); Spacer(Modifier.width(6.dp))
-                    Text(if (isLater) "In Watch later" else "Watch later")
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = { vm.repo.taste.toggleLater(s) }, modifier = Modifier.weight(1f)) {
+                        Icon(if (isLater) Icons.Default.BookmarkAdded else Icons.Default.BookmarkAdd, null); Spacer(Modifier.width(6.dp))
+                        Text(if (isLater) "In Watch later" else "Watch later")
+                    }
+                    FilledTonalButton(onClick = { playlistDialog = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.PlaylistAdd, null); Spacer(Modifier.width(6.dp)); Text("Playlist")
+                    }
                 }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (s.url != null) OutlinedButton(onClick = { ctx.openBrowser(s.url) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.OpenInNew, null); Spacer(Modifier.width(6.dp)); Text("Official page") }
@@ -189,5 +196,28 @@ fun SceneScreen(sceneId: String, onBack: () -> Unit, onPerformer: (String) -> Un
             }
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter))
+    }
+
+    if (playlistDialog) {
+        var newName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { playlistDialog = false },
+            title = { Text("Add to playlist") },
+            text = {
+                Column {
+                    playlists.keys.forEach { name ->
+                        Row(Modifier.fillMaxWidth().clickable { vm.repo.playlists.toggle(name, s) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(playlists[name].orEmpty().any { it.id == s.id }, { vm.repo.playlists.toggle(name, s) })
+                            Text(name, Modifier.weight(1f)); Text("${playlists[name].orEmpty().size}", color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(newName, { newName = it }, placeholder = { Text("New playlist") }, singleLine = true, modifier = Modifier.weight(1f))
+                        IconButton(enabled = newName.isNotBlank(), onClick = { vm.repo.playlists.create(newName); vm.repo.playlists.toggle(newName.trim(), s); newName = "" }) { Icon(Icons.Default.Add, "Create") }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { playlistDialog = false }) { Text("Done") } },
+        )
     }
 }
