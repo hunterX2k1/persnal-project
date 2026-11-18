@@ -17,11 +17,22 @@ android {
         versionName = "1.20"
     }
 
+    // Same key on every machine (and on GitHub), so new builds install over the existing app.
+    signingConfigs {
+        create("shared") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("shared") }
         release {
             isMinifyEnabled = false
             // Signed with the debug key so the APK installs directly (sideload / personal use).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {

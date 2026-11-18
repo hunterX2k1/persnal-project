@@ -16,10 +16,21 @@ android {
         versionName = "1.2"
     }
 
+    // Same key on every machine (and on GitHub), so new builds install over the existing app.
+    signingConfigs {
+        create("shared") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("shared") }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {
