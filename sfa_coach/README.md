@@ -60,3 +60,20 @@ sfa-coach ask --me Alice --opp Bob --move sweep --frame 16 --distance 0.8 --mode
 
 - Automatic move recognition trained on labelled replays, to replace manual labels.
 - Live practice coach (training and friend modes) using that model.
+
+## Measuring a hero (example: Itu)
+
+1. Go to training mode as Itu with the dummy standing still. Record at 60 fps.
+2. Perform each move 2–3 times, with a pause between moves. Cover:
+   - every button (weapon, kick) in each direction: neutral, forward, back, down,
+     plus the jump versions,
+   - combo strings, one at a time,
+   - Spacetime Slash and Time Manipulation,
+   - also record a few moves close to the dummy so hits connect, to judge reach.
+3. Run the command below. For each move, step frame by frame and press `1`
+   (move starts), `2` (first hit frame), `3` (last hit frame) and `4` (can act
+   again). Then type the move name. The command writes `data/characters/Itu.json`.
+
+```bash
+sfa-coach measure itu_training.mp4 --hero Itu
+```

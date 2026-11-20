@@ -20,6 +20,10 @@ def main(argv: list[str] | None = None) -> int:
     lab.add_argument("video")
     lab.add_argument("-o", "--out", required=True, help="timeline CSV to write")
 
+    mea = sub.add_parser("measure", help="measure a hero's frame data from a training video")
+    mea.add_argument("video")
+    mea.add_argument("--hero", required=True)
+
     rep = sub.add_parser("report", help="analyse a labelled timeline")
     rep.add_argument("timeline")
     rep.add_argument("--me", required=True, help="your character")
@@ -41,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "label":
         from .label import run
         run(args.video, args.out)
+        return 0
+    if args.cmd == "measure":
+        from .measure import run as measure_run
+        measure_run(args.video, args.hero, args.data)
         return 0
 
     roster = load_roster(args.data)
