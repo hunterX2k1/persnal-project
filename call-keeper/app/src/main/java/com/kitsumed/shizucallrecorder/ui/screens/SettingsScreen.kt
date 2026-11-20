@@ -620,24 +620,17 @@ private fun RecordingSection(
 
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), thickness = 0.5.dp)
 
+        // Call Keeper: recordings are stored privately inside the app; there is no folder to pick.
         ListItem(
-            modifier = Modifier
-                .clickable { onSelectFolder() }
-                .semantics(mergeDescendants = true) {},
+            modifier = Modifier.semantics(mergeDescendants = true) {},
             headlineContent = { Text(stringResource(R.string.settings_recording_folder_label)) },
             supportingContent = {
                 Text(
-                    text = recordingFolderLabel ?: stringResource(R.string.settings_tap_to_select_folder),
+                    text = "Private, inside Call Keeper (see the Recordings tab). Not visible to other apps. Uninstalling the app deletes all recordings.",
                     color = MaterialTheme.colorScheme.primary
                 )
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            trailingContent = {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null
-                )
-            },
         )
 
         ListItem(

@@ -11,6 +11,9 @@ package com.kitsumed.shizucallrecorder.ui.screens
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.widget.Toast
 import android.net.Uri
 import android.provider.ContactsContract
 import android.text.format.DateUtils
@@ -35,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -49,6 +53,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,19 +69,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kitsumed.shizucallrecorder.data.AppPreferences
 import com.kitsumed.shizucallrecorder.data.call.CallDirection
 import com.kitsumed.shizucallrecorder.data.recording.RecordingIndex
 import com.kitsumed.shizucallrecorder.integrations.shizuku.ShizukuConnectionManager
 import com.kitsumed.shizucallrecorder.system.permissions.PermissionChecks
+import com.kitsumed.shizucallrecorder.system.storage.PrivateRecordingStorage
 import com.kitsumed.shizucallrecorder.utils.AppLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -100,14 +107,27 @@ data class RecordingItem(
 data class RecordingsUiState(
     val loading: Boolean = true,
     val items: List<RecordingItem> = emptyList(),
-    val folderMissing: Boolean = false,
     val shizukuReady: Boolean = true
+)
+
+/** State of the built-in player: which recording is loaded and where playback is. */
+data class PlayerState(
+    val uri: Uri? = null,
+    val isPlaying: Boolean = false,
+    val positionMs: Int = 0,
+    val durationMs: Int = 0
 )
 
 class RecordingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(RecordingsUiState())
     val state = _state.asStateFlow()
+
+    private val _player = MutableStateFlow(PlayerState())
+    val player = _player.asStateFlow()
+
+    private var mediaPlayer: MediaPlayer? = null
+    private var progressJob: Job? = null
 
     fun refresh() {
         val context = getApplication<Application>()
@@ -116,38 +136,110 @@ class RecordingsViewModel(app: Application) : AndroidViewModel(app) {
             shizukuReady = ShizukuConnectionManager.isAvailable() && ShizukuConnectionManager.hasPermission()
         )
         viewModelScope.launch {
-            val (items, folderMissing) = withContext(Dispatchers.IO) { loadRecordings(context) }
-            _state.value = _state.value.copy(loading = false, items = items, folderMissing = folderMissing)
+            val items = withContext(Dispatchers.IO) { loadRecordings(context) }
+            _state.value = _state.value.copy(loading = false, items = items)
         }
     }
 
     fun delete(item: RecordingItem) {
         val context = getApplication<Application>()
+        if (_player.value.uri == item.uri) stopPlayback()
         viewModelScope.launch {
-            val deleted = withContext(Dispatchers.IO) {
-                runCatching { DocumentFile.fromSingleUri(context, item.uri)?.delete() == true }.getOrDefault(false)
-            }
+            val deleted = withContext(Dispatchers.IO) { PrivateRecordingStorage.delete(context, item.uri) }
             if (deleted) {
                 withContext(Dispatchers.IO) { RecordingIndex.remove(context, item.uri.toString()) }
                 _state.value = _state.value.copy(items = _state.value.items.filterNot { it.uri == item.uri })
+            } else {
+                Toast.makeText(context, "Could not delete the recording", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun loadRecordings(context: Context): Pair<List<RecordingItem>, Boolean> {
-        val folderUri = AppPreferences(context).getRecordingFolderUri() ?: return emptyList<RecordingItem>() to true
-        val root = runCatching { DocumentFile.fromTreeUri(context, folderUri) }.getOrNull()
-        if (root == null || !root.exists() || !root.isDirectory) return emptyList<RecordingItem>() to true
+    /** Play/pause toggle. Tapping a different recording switches to it. */
+    fun togglePlay(item: RecordingItem) {
+        val current = _player.value
+        val mp = mediaPlayer
+        if (current.uri == item.uri && mp != null) {
+            if (mp.isPlaying) {
+                mp.pause()
+                _player.value = current.copy(isPlaying = false, positionMs = mp.currentPosition)
+            } else {
+                mp.start()
+                _player.value = current.copy(isPlaying = true)
+                startProgressUpdates()
+            }
+            return
+        }
+        stopPlayback()
+        val context = getApplication<Application>()
+        try {
+            val player = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setDataSource(context, item.uri)
+                prepare()
+                setOnCompletionListener {
+                    _player.value = _player.value.copy(isPlaying = false, positionMs = 0)
+                    progressJob?.cancel()
+                    runCatching { it.seekTo(0) }
+                }
+                start()
+            }
+            mediaPlayer = player
+            _player.value = PlayerState(uri = item.uri, isPlaying = true, positionMs = 0, durationMs = player.duration.coerceAtLeast(0))
+            startProgressUpdates()
+        } catch (e: Exception) {
+            AppLogger.e("RecordingsScreen: could not play ${item.fileName}", e)
+            Toast.makeText(context, "Could not play this recording", Toast.LENGTH_SHORT).show()
+            stopPlayback()
+        }
+    }
 
-        val files = ArrayList<DocumentFile>()
-        collectAudioFiles(root, files, depth = 0)
+    fun seekTo(positionMs: Int) {
+        val mp = mediaPlayer ?: return
+        runCatching { mp.seekTo(positionMs) }
+        _player.value = _player.value.copy(positionMs = positionMs)
+    }
 
+    fun stopPlayback() {
+        progressJob?.cancel()
+        progressJob = null
+        mediaPlayer?.let { runCatching { it.stop() }; it.release() }
+        mediaPlayer = null
+        _player.value = PlayerState()
+    }
+
+    private fun startProgressUpdates() {
+        progressJob?.cancel()
+        progressJob = viewModelScope.launch {
+            while (isActive) {
+                val mp = mediaPlayer ?: break
+                val playing = runCatching { mp.isPlaying }.getOrDefault(false)
+                if (!playing) break
+                _player.value = _player.value.copy(positionMs = runCatching { mp.currentPosition }.getOrDefault(0))
+                delay(250)
+            }
+        }
+    }
+
+    override fun onCleared() {
+        stopPlayback()
+        super.onCleared()
+    }
+
+    private fun loadRecordings(context: Context): List<RecordingItem> {
+        val files = PrivateRecordingStorage.listFiles(context)
         val index = RecordingIndex.getAll(context)
         val contactCache = HashMap<String, String?>()
         val canReadContacts = PermissionChecks.hasContactsPermission(context)
 
-        val items = files.map { file ->
-            val entry = index[file.uri.toString()]
+        return files.map { file ->
+            val uri = PrivateRecordingStorage.uriFor(context, file)
+            val entry = index[uri.toString()]
             val number = entry?.phoneNumber?.ifBlank { null }
             // Look the contact up again by number: this picks up contacts saved or renamed after the call,
             // and Android's PhoneLookup matches numbers saved with or without the country code.
@@ -157,12 +249,12 @@ class RecordingsViewModel(app: Application) : AndroidViewModel(app) {
             val displayName = liveName
                 ?: entry?.callerName
                 ?: number
-                ?: if (entry != null) "Private / Unknown number" else file.name?.substringBeforeLast('.') ?: "Recording"
+                ?: if (entry != null) "Private / Unknown number" else file.nameWithoutExtension
 
             RecordingItem(
-                uri = file.uri,
-                fileName = file.name ?: "",
-                mimeType = file.type,
+                uri = uri,
+                fileName = file.name,
+                mimeType = PrivateRecordingStorage.mimeTypeFor(file),
                 displayName = displayName,
                 phoneNumber = number,
                 direction = entry?.direction,
@@ -171,24 +263,6 @@ class RecordingsViewModel(app: Application) : AndroidViewModel(app) {
                 sizeBytes = file.length()
             )
         }.sortedByDescending { it.timeMillis }
-
-        return items to false
-    }
-
-    private fun collectAudioFiles(dir: DocumentFile, out: MutableList<DocumentFile>, depth: Int) {
-        if (depth > 4) return
-        for (f in dir.listFiles()) {
-            if (f.isDirectory) {
-                collectAudioFiles(f, out, depth + 1)
-            } else if (f.isFile && f.length() > 0 && (f.type?.startsWith("audio/") == true || f.type?.startsWith("video/") == true || isAudioName(f.name))) {
-                out.add(f)
-            }
-        }
-    }
-
-    private fun isAudioName(name: String?): Boolean {
-        val n = name?.lowercase() ?: return false
-        return listOf(".ogg", ".opus", ".m4a", ".aac", ".mp4", ".amr", ".3gp", ".wav", ".mp3", ".flac", ".webm").any { n.endsWith(it) }
     }
 
     private fun lookupContactName(context: Context, number: String): String? = try {
@@ -209,10 +283,12 @@ fun RecordingsScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
+    val player by viewModel.player.collectAsState()
     var query by remember { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<RecordingItem?>(null) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stopPlayback() }
 
     val filtered = remember(state.items, query) {
         val q = query.trim()
@@ -269,16 +345,15 @@ fun RecordingsScreen(
                         CircularProgressIndicator()
                     }
                 }
-                state.folderMissing -> item {
-                    InfoText("No recordings folder selected yet. Open the Settings tab and choose a folder to save recordings in.")
-                }
                 filtered.isEmpty() -> item {
-                    InfoText(if (query.isBlank()) "No recordings yet. Calls will appear here after they end." else "No recordings match \"$query\".")
+                    InfoText(if (query.isBlank()) "No recordings yet. Every call you make or answer in your normal Phone app is recorded automatically and appears here when it ends." else "No recordings match \"$query\".")
                 }
                 else -> items(filtered, key = { it.uri.toString() }) { item ->
                     RecordingRow(
                         item = item,
-                        onPlay = { play(context, item) },
+                        player = if (player.uri == item.uri) player else null,
+                        onPlay = { viewModel.togglePlay(item) },
+                        onSeek = { viewModel.seekTo(it) },
                         onShare = { share(context, item) },
                         onDelete = { pendingDelete = item }
                     )
@@ -310,7 +385,9 @@ fun RecordingsScreen(
 @Composable
 private fun RecordingRow(
     item: RecordingItem,
+    player: PlayerState?,
     onPlay: () -> Unit,
+    onSeek: (Int) -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -319,6 +396,7 @@ private fun RecordingRow(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onPlay),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     ) {
+        Column {
         Row(
             modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -341,9 +419,28 @@ private fun RecordingRow(
                 }.joinToString("  ·  ")
                 Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
-            IconButton(onClick = onPlay) { Icon(Icons.Default.PlayArrow, contentDescription = "Play") }
+            IconButton(onClick = onPlay) {
+                if (player?.isPlaying == true) Icon(Icons.Default.Pause, contentDescription = "Pause")
+                else Icon(Icons.Default.PlayArrow, contentDescription = "Play")
+            }
             IconButton(onClick = onShare) { Icon(Icons.Default.Share, contentDescription = "Share") }
             IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+        }
+        if (player != null && player.durationMs > 0) {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(DateUtils.formatElapsedTime(player.positionMs / 1000L), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = player.positionMs.toFloat().coerceIn(0f, player.durationMs.toFloat()),
+                    onValueChange = { onSeek(it.toInt()) },
+                    valueRange = 0f..player.durationMs.toFloat(),
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                Text(DateUtils.formatElapsedTime(player.durationMs / 1000L), style = MaterialTheme.typography.labelSmall)
+            }
+        }
         }
     }
 }
@@ -398,14 +495,6 @@ private fun formatDate(context: Context, millis: Long): String =
         DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_ABBREV_MONTH or DateUtils.FORMAT_SHOW_YEAR
     )
 
-private fun play(context: Context, item: RecordingItem) {
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(item.uri, item.mimeType ?: "audio/*")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    launchSafely(context, Intent.createChooser(intent, "Play with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-}
-
 private fun share(context: Context, item: RecordingItem) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = item.mimeType ?: "audio/*"
@@ -435,6 +524,6 @@ private fun launchSafely(context: Context, intent: Intent) {
         context.startActivity(intent)
     } catch (e: Exception) {
         AppLogger.w("RecordingsScreen: no app could handle intent ${intent.action}", e)
-        android.widget.Toast.makeText(context, "No app found to open this", android.widget.Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "No app found to open this", Toast.LENGTH_SHORT).show()
     }
 }

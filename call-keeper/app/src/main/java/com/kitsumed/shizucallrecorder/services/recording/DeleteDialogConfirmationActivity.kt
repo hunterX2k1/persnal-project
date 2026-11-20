@@ -39,7 +39,7 @@ class DeleteDialogConfirmationActivity : AppCompatActivity() {
             .setMessage(getString(R.string.delete_recording_confirmation_message))
             .setPositiveButton(getString(R.string.general_delete)) { dialog, _ ->
                 try {
-                    val deleted = DocumentFile.fromSingleUri(this, fileUri)?.delete() == true
+                    val deleted = com.kitsumed.shizucallrecorder.system.storage.PrivateRecordingStorage.delete(this, fileUri)
                     if (deleted) {
                         Toast.makeText(this, getString(R.string.general_deleted), Toast.LENGTH_SHORT).show()
                         // Remove the notifications from the notification tray since file no longer exists

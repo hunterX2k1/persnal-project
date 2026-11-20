@@ -382,8 +382,7 @@ class RecordingForegroundService : Service() {
                 activeSession.initializationMetadata.let { metadata ->
 
                     // Ensure the file was written and exists
-                    val docFile = DocumentFile.fromSingleUri(applicationContext, filePathUri)
-                    if (docFile != null && docFile.exists() && docFile.length() > 0) {
+                    if (com.kitsumed.shizucallrecorder.system.storage.PrivateRecordingStorage.length(applicationContext, filePathUri) > 0) {
                         AppLogger.d("Showing post-recording notification for user actions.")
 
                         notificationHelper.showPostCallNotification(

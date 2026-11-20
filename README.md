@@ -2,20 +2,24 @@
 
 Automatic call recording on a **non-rooted** Android phone (built for a Moto Edge 60 Pro), recording **both sides** of every call.
 
+**It is not a dialer.** Keep making and answering calls in your normal Phone app. Call Keeper runs in the background,
+records every call automatically, and keeps the recordings in its own private library.
+
 > **Call Keeper is a FORK (edited clone) of [ShizuCallRecorder](https://github.com/kitsumed/ShizuCallRecorder) by kitsumed.**
 > It is not the original app. Licensed under GPL-3.0 with the original project's additional terms; see [`call-keeper/LICENSE`](call-keeper/LICENSE).
 
-- APK: [`apk/CallKeeper-2.0.0-callkeeper.1.apk`](apk/CallKeeper-2.0.0-callkeeper.1.apk)
+- APK: [`apk/CallKeeper-2.0.0-callkeeper.2.apk`](apk/CallKeeper-2.0.0-callkeeper.2.apk)
 - Source: [`call-keeper/`](call-keeper/), based on upstream release `v2.0.0`
 
 ## What's changed from the original
 
 | Change | Why |
 |---|---|
-| **Recordings tab** (new): every recording with contact name, number, incoming/outgoing, date, duration; search, play, share, delete | The original has no in-app list, and Google Phone's list loses contact names |
+| **Recordings tab** (new): a library of every recording with contact name, number, incoming/outgoing, date, duration; search, **built-in player** (play/pause, seek), share, delete | The original has no in-app list, and Google Phone's list loses contact names |
+| **Private storage**: recordings are kept inside the app, not in a phone folder. File managers, music apps and Google cloud backup can't see them; use *Share* to export one | A separate, private library. No folder to set up |
 | **Contact names stored per recording**, and re-looked-up live (matches numbers with or without `+91`) | Names show even if the contact was saved or renamed later |
 | **Auto-record every call ON by default** (incoming and outgoing, all contacts) | No more adding contacts one by one |
-| File names now include the contact name: `{date}_{caller_name}_{phone_number}_{direction}` | Easy to find recordings in a file manager too |
+| File names include the contact name: `{date}_{caller_name}_{phone_number}_{direction}` | Readable names when you share a recording |
 | **Red warning banner** when Shizuku isn't running | You know straight away when calls aren't being recorded (e.g. after a restart) |
 | New app name and package ID (`com.personal.callkeeper`), plus a fork notice | Required by the original license; it can be installed next to the original app |
 
@@ -28,8 +32,7 @@ Automatic call recording on a **non-rooted** Android phone (built for a Moto Edg
 4. In Shizuku's settings, turn on **Start on boot** and **Watchdog**.
 5. **Install Call Keeper**: copy the APK to the phone, open it, and allow "Install unknown apps" when asked.
 6. Open Call Keeper, accept the disclaimer and grant every permission it lists (Shizuku, phone, call log, contacts, notifications, battery).
-7. **Settings tab → choose a recordings folder** (e.g. `Recordings/Calls`).
-8. Make a **test call** and check that both voices come through in the **Recordings** tab.
+7. Make a **test call** from your normal Phone app and check that both voices come through in the **Recordings** tab.
 
 ## Good to know
 
@@ -37,7 +40,8 @@ Automatic call recording on a **non-rooted** Android phone (built for a Moto Edg
 - Keep **Developer options, USB debugging and Wireless debugging ON**; turning them off stops Shizuku.
 - Some banking/UPI apps complain while Developer options are on. Call Keeper's Settings has *Shizuku* security toggles that turn Shizuku on only while recording, which helps with this.
 - Recording quality depends on Motorola's audio drivers supporting the call-audio source. If a test call is silent or one-sided, try another *Audio source* in Settings.
-- Recordings made **before** installing Call Keeper (or by the original app) appear in the list using their file name, without contact details.
+- **Uninstalling Call Keeper deletes all recordings.** Share any you want to keep before uninstalling.
+- Recordings use internal phone storage: about 0.12 MB per minute with the default Opus codec (an hour of calls ≈ 7 MB), double that in stereo.
 - Recording laws vary; some places require telling the other person.
 
 ## Building it yourself

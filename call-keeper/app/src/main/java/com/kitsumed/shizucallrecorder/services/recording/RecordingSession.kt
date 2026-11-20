@@ -21,6 +21,7 @@ import com.kitsumed.shizucallrecorder.data.call.EnrichedCallData
 import com.kitsumed.shizucallrecorder.data.recording.RecordingFailure
 import com.kitsumed.shizucallrecorder.data.recording.RecordingPlan
 import com.kitsumed.shizucallrecorder.system.storage.SafHelper
+import com.kitsumed.shizucallrecorder.system.storage.PrivateRecordingStorage
 import com.kitsumed.shizucallrecorder.utils.AppLogger
 import com.kitsumed.shizucallrecorder.utils.RecordingFileNameFormatter
 
@@ -106,29 +107,19 @@ class RecordingSession(
     }
 
     init {
-        val folderUri = AppPreferences(context).getRecordingFolderUri()
-
-        if (!SafHelper.isFolderValid(context, folderUri)) {
-            throw InitializationException(
-                userFriendlyMessage = context.getString(R.string.recording_error_folder_missing),
-                technicalLogMessage = "Cannot start recording: selected output folder is missing, invalid, or inaccessible."
-            )
-        }
-
         val fileName = RecordingFileNameFormatter.formatFileName(
             context,
             initializationMetadata,
             plan.codec
         )
 
-        val safResult = SafHelper.createAudioFile(
+        // Call Keeper: recordings are always stored privately inside the app.
+        val safResult = PrivateRecordingStorage.createAudioFile(
             context,
-            folderUri,
-            fileName,
-            plan.codec.mimeType
+            fileName
         ) ?: throw InitializationException(
             userFriendlyMessage = context.getString(R.string.recording_error_file_creation),
-            technicalLogMessage = "Failed to create audio file in SAF storage."
+            technicalLogMessage = "Failed to create audio file in private app storage."
         )
 
         currentRecordingUri = safResult.uri
@@ -193,7 +184,7 @@ class RecordingSession(
         release()
         currentRecordingUri?.let { uri ->
             try {
-                DocumentFile.fromSingleUri(context, uri)?.delete()
+                PrivateRecordingStorage.delete(context, uri)
             } catch (e: Exception) {
                 AppLogger.w("Failed to delete incomplete recording file.", e)
             }

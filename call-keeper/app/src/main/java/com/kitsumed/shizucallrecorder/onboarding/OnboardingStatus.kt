@@ -85,7 +85,7 @@ object OnboardingStatus {
             notificationsGranted     = PermissionChecks.hasNotificationPermission(context),
             contactsGranted          = PermissionChecks.hasContactsPermission(context),
             batteryExempted          = PermissionChecks.hasBatteryExemption(context),
-            storageSelected          = SafHelper.isFolderValid(context, storageUri),
+            storageSelected          = true, // Call Keeper: recordings are stored privately inside the app, no folder needed.
             // Special check here, if the auto-manage option was enabled, users already passed this check, and we can assume app will be able to start/stop Shizuku as needed.
             shizukuRunning           = ShizukuConnectionManager.isAvailable() || preferences.isShizukuAutoManageEnabled(),
             // We provide the context to use the Android Permission system as a fallback. Since if isShizukuAutoManageEnabled is enabled, we can assume the
