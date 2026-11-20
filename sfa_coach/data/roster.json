@@ -1,0 +1,297 @@
+{
+  "source": "https://www.pocketgamer.com/shadow-fight-arena/character-tier-list",
+  "source_version": "1.9.85 (updated 2026-11-07)",
+  "note": "Public info, paraphrased. No frame data, weapons or skins in source; fill frame data in characters/<Name>.json.",
+  "heroes": [
+    {
+      "name": "Ling",
+      "rarity": "Rare",
+      "faction": "Heralds",
+      "difficulty": "Easy",
+      "abilities": [
+        "Slashing Strike",
+        "Ling's Flask"
+      ],
+      "playstyle": "Patient: block early, punish with quick neutral combos."
+    },
+    {
+      "name": "June",
+      "rarity": "Legendary",
+      "faction": "Dynasty",
+      "difficulty": "Hard",
+      "abilities": [
+        "Collapse Gauge",
+        "Control Form",
+        "Chaos Form"
+      ],
+      "playstyle": "Very strong block-breaking; needs practice."
+    },
+    {
+      "name": "Shang",
+      "rarity": "Common",
+      "faction": "Dynasty",
+      "difficulty": "Normal",
+      "abilities": [
+        "Shadow Energy Adept",
+        "Shadow Protection"
+      ],
+      "playstyle": "Long-reach weapon; zones with a projectile, goes Shadow form when cornered."
+    },
+    {
+      "name": "Kate",
+      "rarity": "Common",
+      "faction": "Legion",
+      "difficulty": "Easy",
+      "abilities": [
+        "Liquidator's Daughter",
+        "Experienced Soldier"
+      ],
+      "playstyle": "Short reach but fast, strong combos."
+    },
+    {
+      "name": "Ironclad",
+      "rarity": "Common",
+      "faction": "Legion",
+      "difficulty": "Easy",
+      "abilities": [
+        "Stubborn as a Mule",
+        "Non-stop"
+      ],
+      "playstyle": "Close-range rushdown; can push through projectiles."
+    },
+    {
+      "name": "Kibo",
+      "rarity": "Epic",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Shadow Onslaught",
+        "Perfection"
+      ],
+      "playstyle": "Loses Shadow energy without landing hits; wait for opponent mistakes."
+    },
+    {
+      "name": "Marcus",
+      "rarity": "Epic",
+      "faction": "Legion",
+      "difficulty": "Normal",
+      "abilities": [
+        "Through the Glitch"
+      ],
+      "playstyle": "Big and slow, much more agile with ability active."
+    },
+    {
+      "name": "Hong-Joo",
+      "rarity": "Rare",
+      "faction": "Dynasty",
+      "difficulty": "Normal",
+      "abilities": [
+        "Blazing Bite",
+        "Triumph Anticipation"
+      ],
+      "playstyle": "Traps opponents against walls for combos."
+    },
+    {
+      "name": "Fireguard",
+      "rarity": "Common",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Shadow Generator",
+        "Flamethrower",
+        "Countdown"
+      ],
+      "playstyle": "Shadow Generator refills Shadow energy, so specials come often."
+    },
+    {
+      "name": "Helga",
+      "rarity": "Rare",
+      "faction": "Legion",
+      "difficulty": "Easy",
+      "abilities": [
+        "Power of Light",
+        "Shield of Light",
+        "Smite"
+      ],
+      "playstyle": "Smite punishes Shadow form; gains Shining Dash by landing attacks."
+    },
+    {
+      "name": "Sarge",
+      "rarity": "Rare",
+      "faction": "Legion",
+      "difficulty": "Normal",
+      "abilities": [
+        "Shadow Squad Leader",
+        "Will Suppression",
+        "Old School"
+      ],
+      "playstyle": "Builds Shadow energy fast; invulnerable in Shadow form."
+    },
+    {
+      "name": "Azuma",
+      "rarity": "Common",
+      "faction": "Heralds",
+      "difficulty": "Hard",
+      "abilities": [
+        "Neutralization",
+        "Consequence Management"
+      ],
+      "playstyle": "Negates opponent Shadow energy; long reach."
+    },
+    {
+      "name": "Yukka",
+      "rarity": "Rare",
+      "faction": "Dynasty",
+      "difficulty": "Easy",
+      "abilities": [
+        "Open Wounds",
+        "Guillotine",
+        "Shade's Turn"
+      ],
+      "playstyle": "Summons a shade that attacks; best when summoning often."
+    },
+    {
+      "name": "Jack Bulwark",
+      "rarity": "Common",
+      "faction": "Legion",
+      "difficulty": "Hard",
+      "abilities": [
+        "Bone Break",
+        "Shadow Fortress"
+      ],
+      "playstyle": "Becomes invulnerable when opponent enters Shadow form."
+    },
+    {
+      "name": "Jet",
+      "rarity": "Rare",
+      "faction": "Dynasty",
+      "difficulty": "Hard",
+      "abilities": [
+        "Shadow Harmony"
+      ],
+      "playstyle": "Weak early; Shadow Harmony builds until combos break guard."
+    },
+    {
+      "name": "Emperor",
+      "rarity": "Epic",
+      "faction": "Dynasty",
+      "difficulty": "Hard",
+      "abilities": [
+        "Emperor's Curse",
+        "Shadow Beast",
+        "Predator Lunge",
+        "Sharp Ribs",
+        "Spike",
+        "From Below"
+      ],
+      "playstyle": "Dominant in Shadow Beast form after building energy."
+    },
+    {
+      "name": "Lynx",
+      "rarity": "Epic",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Hunter in the Shadows",
+        "Mark of the Order",
+        "Demonic Power"
+      ],
+      "playstyle": "Aggressive slasher attacking from the shadows."
+    },
+    {
+      "name": "Monkey King",
+      "rarity": "Legendary",
+      "faction": "Dynasty",
+      "difficulty": "Hard",
+      "abilities": [
+        "Ascension",
+        "Jingu Strike",
+        "Demonic Power"
+      ],
+      "playstyle": "Gets stronger the more damage he deals."
+    },
+    {
+      "name": "Midnight",
+      "rarity": "Epic",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Shadow Shift",
+        "Evasion Technique",
+        "Successful Experiment"
+      ],
+      "playstyle": "Teleports behind opponents for hard-hitting surprise attacks."
+    },
+    {
+      "name": "Cobra",
+      "rarity": "Rare",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Chargebite",
+        "Serpentoxin",
+        "Bomb Throw",
+        "Plant Bomb"
+      ],
+      "playstyle": "Pierces blocks; can reduce incoming damage."
+    },
+    {
+      "name": "King of the Legion",
+      "rarity": "Legendary",
+      "faction": "Legion",
+      "difficulty": "Hard",
+      "abilities": [
+        "Sacrificial Pact",
+        "Shadow Dominion",
+        "Dark Incarnation"
+      ],
+      "playstyle": "Heavy area attacks; spends health to charge Shadow energy."
+    },
+    {
+      "name": "Butcher",
+      "rarity": "Epic",
+      "faction": "Legion",
+      "difficulty": "Easy",
+      "abilities": [
+        "Meat Hook",
+        "Cattle Cage"
+      ],
+      "playstyle": "Cleaver user; mix kicks and cleaver, cage weakened foes."
+    },
+    {
+      "name": "Itu",
+      "rarity": "Legendary",
+      "faction": "Heralds",
+      "difficulty": "Hard",
+      "abilities": [
+        "Time Manipulation",
+        "Spacetime Slash"
+      ],
+      "playstyle": "Deflects ranged attacks; strong close up against ranged heroes."
+    },
+    {
+      "name": "Lord Gideon",
+      "rarity": "Epic",
+      "faction": "Legion",
+      "difficulty": "Normal",
+      "abilities": [
+        "Perfect Moment",
+        "Bounty Hunter",
+        "Guardian Specter"
+      ],
+      "playstyle": "Can't drop below 1 HP during an invulnerable window."
+    },
+    {
+      "name": "Raikichi",
+      "rarity": "Epic",
+      "faction": "Heralds",
+      "difficulty": "Normal",
+      "abilities": [
+        "Thunder Dial",
+        "Lightning Hyotan",
+        "Stunts to Dazzle Them"
+      ],
+      "playstyle": "Fast close-range fighter, mostly low hits; builds sparks to break defence; weak to jump-ins."
+    }
+  ]
+}
