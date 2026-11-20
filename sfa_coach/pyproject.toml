@@ -1,0 +1,16 @@
+[project]
+name = "sfa-coach"
+version = "0.1.0"
+description = "Frame-data lookups, replay analysis and practice suggestions for a 1v1 fighting game"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+video = ["opencv-python"]
+dev = ["pytest"]
+
+[project.scripts]
+sfa-coach = "sfa_coach.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

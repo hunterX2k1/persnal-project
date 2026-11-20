@@ -1,0 +1,15 @@
+{
+  "name": "CharacterName",
+  "moves": [
+    {
+      "name": "jab",
+      "startup": 6,
+      "active": 3,
+      "recovery": 10,
+      "reach": 1.2,
+      "damage": 5,
+      "on_block": 0,
+      "tags": []
+    }
+  ]
+}
