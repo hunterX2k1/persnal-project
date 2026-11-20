@@ -1,0 +1,91 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["Type: Bug","Waiting For Contributors Review"]
+assignees: []
+
+body:
+  - type: checkboxes
+    id: prechecks
+    attributes:
+      label: Checklist
+      description: Please confirm the following before continuing
+      options:
+        - label: I have read the application [docs](https://github.com/kitsumed/ShizuCallRecorder/blob/main/docs/SUPPORT.md), searched existing [issues](https://github.com/kitsumed/ShizuCallRecorder/issues) and [discussions](https://github.com/kitsumed/ShizuCallRecorder/discussions/categories/community-support) and this is not a duplicate
+          required: true
+        - label: I am using the latest version of the project
+          required: true
+        - label: I am reporting an issue with ShizuCallRecorder itself, NOT an issue about Shizuku or another app
+          required: true
+        - label: I have attached or pasted the required log files below (or explained why they are unavailable)
+          required: true
+
+  - type: input
+    id: appVersion
+    attributes:
+      label: ShizuCallRecorder Version
+      description: The version of your app. Please ensure you tried the latest version.
+      placeholder: e.g. v1.0.2
+    validations:
+      required: true
+
+  - type: input
+    id: shizukuVersion
+    attributes:
+      label: Shizuku Version
+      description: The version of your app and the url of the public repository. Please ensure you tried the latest version.
+      placeholder: e.g. v13.6.0.r1318 | https://github.com/thedjchi/Shizuku/
+    validations:
+      required: true
+
+  - type: input
+    id: androidVersion
+    attributes:
+      label: Android Version
+      description: The version of Android your phone is running.
+      placeholder: e.g. Android 16
+    validations:
+      required: true
+
+  - type: input
+    id: phoneModel
+    attributes:
+      label: The model of your device
+      description: The name and model of your device, with its version if possible.
+      placeholder: e.g. Samsung Galaxy S24 | One UI 8 | 
+    validations:
+      required: true
+      
+  - type: textarea
+    id: summary
+    attributes:
+      label: Explain the bug
+      description: Describe the issue
+      placeholder: A clear and concise description of the bug. What actually happened? What Should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+        Additionally, you can attach Screenshots or Videos here!
+    validations:
+      required: true
+
+  - type: upload
+    id: logs
+    attributes:
+      label: Logs
+      description: |        
+        ### 📥 How to get your logs:
+        1. **App Logs Exporter:** Open *ShizuCallRecorder*, go to the **Debug** section, and ensure **Log recording** is enabled. Replicate the bug, then export the file.
+        2. **Stuck On Permission Screen:** Long press on any of the permission cards, enable **Log recording**, restart the application, replicate the bug and export the file.
+        3. **System Logcat:** If the app crashes instantly, please capture a system logcat using a computer with [`adb logcat`](https://developer.android.com/tools/releases/platform-tools#downloads) or via a Shizuku-powered logcat tool. **You must capture logs by their tag `SCR:`**, do not target the package as it will cause some logs to be missing.
+    validations:
+      required: true

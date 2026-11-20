@@ -1,0 +1,41 @@
+# Gradle files
+.gradle/
+build/
+
+# Gradle Wrapper
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+gradlew.bat
+# We only commit the gradle wrapper properties file, which contains the gradle version to use
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log/OS Files
+*.log
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.aab
+*.apk
+output-metadata.json
+app/release/*
+
+# IntelliJ
+*.iml
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Keystore files
+*.jks
+*.keystore
+
+# Android Profiling
+*.hprof
+
+# Idk but I don't want to commit theses
+.kotlin/sessions/*

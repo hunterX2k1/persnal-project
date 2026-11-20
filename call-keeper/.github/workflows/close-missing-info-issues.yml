@@ -1,0 +1,29 @@
+name: Close Missing Information Inactive Issues
+
+on:
+  schedule:
+    # Runs once a week on Monday and Thursday at 02:00 UTC
+    # Run twice a week so cached pagination of issues is accessed once per week, preventing Github from deleting it
+    - cron: '0 2 * * 1,4'
+  workflow_dispatch: 
+
+permissions:
+  # Make the token only have write permissions for issues
+  issues: write
+
+jobs:
+  close-missing-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close inactive missing info issues
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 #v11.0.0
+        with:
+          only-labels: 'Missing Informations / Questions'
+          # 2 week
+          days-before-stale: 14
+          days-before-close: 0
+          stale-issue-message: ''
+          close-issue-message: 'This issue is being closed because **it has been inactive for 14 days** and **is missing requested information**. Feel free to reopen it if you can provide the missing details!'
+          close-issue-reason: 'not_planned'
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
