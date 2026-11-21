@@ -1,0 +1,4 @@
+psutil>=5.9
+cryptography>=42      # demo/crypto_target.py
+anthropic>=2.0        # optional: "explain" with --provider claude
+pytest>=8             # tests

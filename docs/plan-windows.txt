@@ -1,0 +1,217 @@
+=====================================================================
+ MEMORY EXPLORER — WINDOWS PC
+ Thesis lab tool: process memory + full RAM capture + forensics
+ Scope: a PC you own/administer. Inspect your own data and test apps.
+=====================================================================
+
+0. WHY WINDOWS IS THE EASIEST TARGET
+---------------------------------------------------------------------
+No per-app sandbox like Android. By default all your programs run as
+YOUR user account, so one program can read another same-user program's
+memory with a normal API — no root/admin needed for same-user targets.
+Admin lets you read almost everything and capture all physical RAM.
+This makes Windows the best platform for the "see and categorize all
+data" part of your thesis.
+
+
+1. TWO WAYS TO BUILD IT
+---------------------------------------------------------------------
+TRACK A — LIVE PROCESS READER (your own tool)
+    Reads a chosen running process's memory on demand.
+TRACK B — FULL RAM DUMP + OFFLINE ANALYSIS (forensics)
+    Capture all physical memory to a file, then analyse with Volatility.
+Do both: Track A teaches the API; Track B teaches real memory forensics.
+
+
+2. TRACK A — LIVE READER ARCHITECTURE
+---------------------------------------------------------------------
+Language: Python (fastest) or C#/C++ (closer to the API).
+
+  +-------------------------------------------------------+
+  |  UI (console first; later a small GUI)                |
+  |   - list processes (pick PID)                         |
+  |   - list memory regions of that PID                   |
+  |   - hex/ASCII dump of a region                        |
+  |   - search bytes / strings                            |
+  |   - "explain with AI" on a selected region            |
+  +-------------------------------------------------------+
+  |  Memory layer (Windows API)                           |
+  |   OpenProcess(PROCESS_VM_READ | QUERY_INFORMATION)    |
+  |   VirtualQueryEx  -> walk regions (base, size, prot)  |
+  |   ReadProcessMemory -> read bytes of a region         |
+  +-------------------------------------------------------+
+  |  Classifier (same idea as Android build)              |
+  |   region: image(code)/mapped/private(heap-stack)      |
+  |   bytes : text / zeros / key-like(entropy) / struct   |
+  +-------------------------------------------------------+
+  |  Crypto demo + AI module (reused design)              |
+  +-------------------------------------------------------+
+
+Key API notes:
+  - Same-user target: usually works without admin.
+  - System/other-user target: run your tool as Administrator, and for
+    some processes enable SeDebugPrivilege.
+  - VirtualQueryEx gives protection flags: PAGE_EXECUTE_READ = code,
+    PAGE_READWRITE = data/heap/stack. Use these to categorize.
+  - In Python: ctypes to call these, or the `pymem` library wraps them.
+
+
+3. TRACK B — FULL RAM DUMP (forensics path)
+---------------------------------------------------------------------
+Capture (needs admin):
+  - WinPMEM, Magnet RAM Capture, or DumpIt -> produces a .raw / .dmp
+    of all physical memory (several GB).
+Analyse offline with Volatility 3:
+  - windows.pslist      : processes that were running
+  - windows.cmdline     : command lines (often reveal args, paths)
+  - windows.dlllist     : loaded modules
+  - strings + grep      : find your planted markers, URLs, tokens
+  - windows.hashdump    : (shows how credential material sits in memory)
+This is exactly what incident-response teams do, and it is a strong,
+citable methodology chapter.
+
+
+4. STORAGE PART OF THE THESIS (RAM vs ROM/disk, and the leak files)
+---------------------------------------------------------------------
+Demonstrate the same data in several places:
+  - In a program variable (RAM).
+  - In a text file on disk (plaintext, persists).
+  - In an encrypted file using Windows DPAPI / a key in the TPM
+    (ciphertext on disk; key not in normal RAM).
+  - hiberfil.sys and pagefile.sys: RAM spilled to DISK. If BitLocker
+    is OFF these can be read offline and still contain secrets. With
+    BitLocker ON they are inside the encrypted volume. This is a great
+    concrete figure for the "ROM/persistence" chapter.
+
+
+5. CRYPTO DEMO MODULE (what to observe)
+---------------------------------------------------------------------
+- Small test program keeps: plaintext, AES key, IV, ciphertext in RAM.
+  Read it with Track A -> find all of them together.
+- Repeat with a key stored via DPAPI / TPM / CNG key storage ->
+  the key is not recoverable from the process RAM.
+- Add a wipe (SecureZeroMemory) and re-read -> zeros. Shows good
+  practice vs bad practice directly.
+
+
+6. THE HARDWARE/OS WALLS TO DOCUMENT (what stays hard)
+---------------------------------------------------------------------
+- TPM: BitLocker and Windows Hello keys live here, never in RAM.
+- LSASS + Credential Guard (VBS/VSM): when on, OS credentials are in a
+  virtualization-isolated space admin cannot read directly. When OFF,
+  tools can read lsass memory — show BOTH states as your contrast.
+- Protected Processes (PPL): some processes resist even admin reads.
+These are the Windows equivalents of Android's TEE; same thesis point.
+
+
+7. AI EXPLAIN MODULE (API integration)
+---------------------------------------------------------------------
+- Select a region/snippet -> build JSON:
+    { pid, region_base, size, protection, image_name,
+      hex_preview, ascii_preview, entropy, printable_ratio }
+- POST to the AI provider's endpoint; show the explanation.
+- Store the API key in an env var or a local config, never in shared code;
+  best is a settings prompt where the user pastes their own key.
+PRIVACY: a Windows dump very often contains real passwords/tokens.
+For any live demo to a cloud AI, only send snippets from YOUR OWN test
+program filled with fake data. For real dumps, use a LOCAL model.
+
+
+8. TOOLS / LIBRARIES
+---------------------------------------------------------------------
+- Build: Python + ctypes or `pymem`; or C# (System.Diagnostics +
+  P/Invoke ReadProcessMemory); or C++ (Win32 directly).
+- Ready-made to study first: Process Hacker / System Informer
+  (open any process -> Memory tab -> read live memory). Read its source
+  for a reference implementation.
+- Forensics: WinPMEM + Volatility 3.
+
+
+9. EXERCISES -> THESIS CHAPTERS
+---------------------------------------------------------------------
+1) Read your own test program; find planted string + key + cipher.
+2) Turn Credential Guard off/on; compare what lsass reveals.
+3) Capture full RAM; in Volatility, locate your marker and list procs.
+4) Read pagefile/hiberfil with BitLocker off, then on; compare.
+5) Have the AI module label 3 regions; measure accuracy.
+
+
+10. LEGAL/ETHICAL NOTE
+---------------------------------------------------------------------
+Only on machines you own or are authorized to test. Reading memory to
+pull other people's credentials, or to defeat another program's
+protection, is intrusion and is out of scope. The thesis goal is
+understanding storage and isolation, which own-machine work fully covers.
+
+
+11. WEB / NETWORK INSPECTION MODULE (your local dummy sites)
+---------------------------------------------------------------------
+Purpose: fetch/inspect your LAN test sites, watch the data in RAM, and
+capture traffic on the wire. Your sites, your network -> fine.
+
+In-app fetch (same idea as Android):
+  - Your tool GETs http(s)://<lan-host>; response lands in your process
+    RAM. Run the live reader on your own process to find it.
+  - HTTPS teaching point identical: wire is encrypted, but plaintext
+    exists in your process before/after TLS -> visible in its RAM.
+
+Wire-level capture (Windows tools):
+  - Wireshark: capture packets on the LAN interface. Plain HTTP shows
+    everything; HTTPS shows only encrypted bytes on the wire.
+  - mitmproxy / Fiddler: run as a LAN proxy with YOUR OWN CA installed
+    on a TEST machine, point your own browser/app at it, and read the
+    decrypted request/response. Only for sites/apps you control.
+  - To decrypt your OWN browser's TLS in Wireshark: set the SSLKEYLOGFILE
+    env var so the browser writes its session keys; Wireshark uses them.
+    (Works because you own the client — not a way into others' traffic.)
+
+Link to the memory thesis:
+  - Capture a response on the wire (encrypted) AND find the same content
+    in your client process RAM (plaintext). One figure, both sides of
+    the TLS boundary.
+AI + privacy rule from section 7 still holds: only your own test
+traffic goes to a cloud AI; real captures -> local model.
+
+
+12. READ A REAL BROWSER'S LIVE MEMORY (PC-only, gets "all the data")
+---------------------------------------------------------------------
+This is the capability a PC has that non-root Android does not: you can
+open your dummy site in a normal browser (Chrome/Edge/Firefox) and read
+THAT browser's memory from your tool. Everything the browser rendered —
+full HTML, JSON, decoded text, form values, cookies in memory — is
+reachable. Same user, usually no admin needed.
+
+How to target it (the only real trick is picking the right process):
+  1) Enumerate processes. A browser is MANY processes:
+       - 1 browser/main process
+       - several RENDERER processes (one per site/tab, sandboxed)
+       - GPU, network, utility processes
+     The PAGE content lives in the RENDERER for that tab.
+  2) Identify the renderer:
+       - Chrome/Edge: child processes with "--type=renderer" in their
+         command line. Match the tab by elimination (open only your
+         test tab) or by looking for your site's strings.
+       - Firefox: the "tab" content processes (type=tab / "Web Content").
+  3) Read it: OpenProcess(PROCESS_VM_READ|QUERY_INFORMATION) on that PID,
+     VirtualQueryEx to walk PAGE_READWRITE regions, ReadProcessMemory to
+     pull the bytes. Then run your existing classifier + string search.
+  4) Find your site's content: search for a known word from the page,
+     the JSON field names, your cookie names. All present in clear.
+
+Capture EVERYTHING for one page (the "all the data" workflow):
+  - Wire layer: Wireshark/mitmproxy -> bytes on the network.
+  - Process layer: read the renderer RAM -> rendered page in clear.
+  - Disk layer: browser cache + cookies DB on disk (SQLite) -> persisted.
+  - Combine the three in your report: same page seen on wire, in RAM,
+    and at rest. That is the complete data-lifecycle figure.
+
+What even this will NOT give you:
+  - Another site's renderer you didn't open (you can read it, but keep
+    to YOUR test sites — reading your bank tab's RAM is still your data,
+    but inspecting others' accounts/data is out of scope).
+  - Keys the OS holds in the TPM, and cookies a site marks so the
+    browser keeps them in a more protected store.
+  - A DRM video's decrypted frames (protected media path).
+Pick processes by command line, not by guessing PIDs; PIDs change every
+launch.
+=====================================================================
