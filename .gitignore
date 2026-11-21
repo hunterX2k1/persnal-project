@@ -6,3 +6,7 @@ __pycache__/
 *.mem
 out/
 .env
+build/
+dist/
+*.spec.bak
+packaging/memexplorer_entry.py.bak

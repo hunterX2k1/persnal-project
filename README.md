@@ -34,6 +34,7 @@ A Linux `/proc` backend is included so the code and tests also run on Linux.
 | `python -m memexplorer explain PID ADDR [-n 256] --provider print\|local\|claude` | "Explain with AI" (see privacy below) |
 | `python -m memexplorer analyse-dump IMAGE [--marker X [--hex] [--context N]] [--block MiB] [--json out]` | **Track B:** run the classifier/strings/artefacts/marker-search over a flat RAM dump — no external tool, any OS |
 | `python -m memexplorer volatility IMAGE [--plugin P] [--credentials] [--json out]` | **Track B:** drive Volatility 3 (pslist / cmdline / dlllist, +hashdump with `--credentials`) and collect a report |
+| `python -m memexplorer walls [--process NAME] [--json out]` | **§6 isolation walls:** Credential Guard/VBS + TPM status and the OpenProcess *access result* on protected processes (lsass, Defender, …) — reports the boundary, never reads contents |
 
 Classification: region level from the OS (`image` = code/modules, `mapped`, `private` =
 heap/stack; `R-X` code vs `RW-` data) and content level from bytes (zeros / text /
@@ -103,8 +104,9 @@ illustrating the OS wall, not attacking anyone's system.
 
 1. **Own test program:** `crypto_target.py`, then `search PID THESIS_MARKER_7f3a9c --utf16`,
    `search PID <keyhex> --hex`, `keys PID --address <key addr>`; wipe and repeat.
-2. **Credential Guard on/off:** document with `msinfo32` (VBS status) and observe that
-   protected processes deny `OpenProcess` — use the access result as data, not the contents.
+2. **Credential Guard on/off:** `python -m memexplorer walls --json walls_cg_on.json`, then toggle
+   Credential Guard and re-run to `walls_cg_off.json`. Compare the lsass access result in the two —
+   the boundary (openable vs denied, regions enumerable) is the data; contents are never read.
 3. **Full RAM (Track B):** capture with WinPMEM/DumpIt (admin), then
    `python -m memexplorer analyse-dump mem.raw --marker THESIS_MARKER_7f3a9c` for the
    categorised map + marker location, and `python -m memexplorer volatility mem.raw` for
@@ -145,6 +147,15 @@ Capture your own test traffic on the wire and find the same content in RAM, for 
 your own key log), found in clear in the client's RAM, and persisted in the browser cache /
 cookies SQLite on disk. The AI/privacy rule from section 7 still holds — only your own test
 traffic goes to a cloud model; real captures use the local provider.
+
+## Build a Windows .exe / installer
+
+```powershell
+packaging\build_exe.bat          # -> dist\memexplorer.exe (self-contained, no Python needed)
+iscc packaging\installer.iss     # optional -> dist\MemExplorerSetup.exe (double-click installer)
+```
+Must be built on Windows (a .exe can't be cross-built from Linux/macOS). Full steps and notes:
+[`packaging/README.md`](packaging/README.md).
 
 ## Tests
 

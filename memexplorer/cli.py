@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 
 import psutil
 
-from . import ai_explain, volatility
+from . import ai_explain, volatility, walls
 from .backends import enable_debug_privilege, open_process
 from .classify import (RegionReport, classify_bytes, find_artefacts, key_candidates,
                        region_category)
@@ -261,6 +261,32 @@ def cmd_volatility(args):
         print(f"\nwrote {args.json}")
 
 
+def cmd_walls(args):
+    rep = walls.survey(args.process or None)
+    cg = rep["credential_guard"]
+    print("=== OS / hardware isolation walls (access results only; no contents read) ===\n")
+    if cg.get("available"):
+        print(f"Credential Guard: {'ON' if cg['credential_guard'] else 'OFF'}   "
+              f"HVCI: {'on' if cg.get('hvci') else 'off'}")
+        print(f"  {cg['note']}")
+    else:
+        print(f"Credential Guard: {cg['note']}")
+    tpm = rep["tpm"]
+    print(f"TPM: {tpm.get('tpm_present') if tpm.get('available') else tpm['note']}")
+    if tpm.get("available"):
+        print(f"  {tpm['note']}")
+    print("\nProtected-process probe:")
+    for p in rep["processes"]:
+        pids = ",".join(map(str, p["pids"])) or "-"
+        state = {True: "OPENABLE", False: "DENIED", None: "n/a"}[p["openable"]]
+        print(f"  {p['name']:<16} pid={pids:<12} {state:<9} {p['note']}")
+    print(f"\n{rep['disclaimer']}")
+    if args.json:
+        with open(args.json, "w") as f:
+            json.dump(rep, f, indent=2)
+        print(f"wrote {args.json}")
+
+
 def cmd_explain(args):
     with open_process(args.pid) as proc:
         region = _find_region(proc, args.address)
@@ -358,6 +384,11 @@ def build_parser():
     s.add_argument("--timeout", type=int, default=1800)
     s.add_argument("--json")
     s.set_defaults(fn=cmd_volatility)
+
+    s = sub.add_parser("walls", help="document OS/hardware isolation walls (Credential Guard/PPL/TPM)")
+    s.add_argument("--process", action="append", help="process name to probe (repeatable)")
+    s.add_argument("--json")
+    s.set_defaults(fn=cmd_walls)
 
     s = pid_cmd("explain", cmd_explain, "explain a snippet with AI")
     s.add_argument("address", type=_int)
