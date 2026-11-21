@@ -49,6 +49,12 @@ size-normalised Shannon entropy and printable ratios.
   process, no key; decrypting brings plaintext back into RAM.
 * `demo/web_fetch_target.py URL` — fetch your own LAN test site; the decrypted HTTPS body is
   findable in RAM while Wireshark shows only ciphertext.
+* `demo/storage_target.py [--outdir out]` — **section 4 storage chapter.** Writes the same fake
+  secret into every layer (RAM variable, plaintext file, encrypted file) and prints a
+  data-lifecycle table + the on-disk plaintext-vs-ciphertext contrast. The encrypted file uses
+  **DPAPI on Windows** (key held by the OS/TPM, not in the process) and an AES stand-in with a
+  separate key file elsewhere. It also locates `pagefile.sys` / `hiberfil.sys` (or `/proc/swaps`)
+  and reports BitLocker state — the RAM-spilled-to-disk layer you then read offline.
 
 ## Track B — full RAM dump + offline forensics
 
@@ -111,6 +117,34 @@ illustrating the OS wall, not attacking anyone's system.
 Browser renderer workflow (section 12): open only your test tab,
 `ps --renderers --cmdline`, then `search PID "<word from page>" --utf16 --writable --context 128`
 and `scan PID --writable --csv renderer.csv`.
+
+## Wire vs RAM — the TLS boundary (section 11)
+
+Capture your own test traffic on the wire and find the same content in RAM, for the
+"both sides of the TLS boundary" figure. **Your sites / your network only.**
+
+* **Wireshark** on the LAN interface: plain HTTP shows everything; HTTPS shows only
+  encrypted bytes.
+* **mitmproxy / Fiddler**: run as a LAN proxy with *your own* CA installed on a *test*
+  machine, point your own browser/app at it, read the decrypted request/response.
+* **Decrypt your own browser's TLS in Wireshark with `SSLKEYLOGFILE`** — works because you
+  own the client, not a way into anyone else's traffic:
+  1. Set the env var *before* launching the browser so it logs its session keys:
+     ```powershell
+     setx SSLKEYLOGFILE "%USERPROFILE%\tls-keys.log"   # new shell, then launch Chrome/Edge/Firefox
+     ```
+     ```bash
+     export SSLKEYLOGFILE=~/tls-keys.log && firefox   # Linux/macOS
+     ```
+  2. Wireshark → *Preferences → Protocols → TLS → (Pre)-Master-Secret log filename* →
+     point at that file. HTTPS frames now decrypt in the capture.
+  3. Load your test site, then run `demo/web_fetch_target.py` (or read the browser renderer
+     per section 12) and `search` the process RAM for a word from the page.
+
+**One figure, three layers:** the same page captured encrypted on the wire (or decrypted via
+your own key log), found in clear in the client's RAM, and persisted in the browser cache /
+cookies SQLite on disk. The AI/privacy rule from section 7 still holds — only your own test
+traffic goes to a cloud model; real captures use the local provider.
 
 ## Tests
 
