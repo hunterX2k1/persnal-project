@@ -9,10 +9,11 @@ from collections import Counter, defaultdict
 
 import psutil
 
-from . import ai_explain
+from . import ai_explain, volatility
 from .backends import enable_debug_privilege, open_process
 from .classify import (RegionReport, classify_bytes, find_artefacts, key_candidates,
                        region_category)
+from .dumpfile import DumpFile
 from .processes import list_processes
 from .search import build_pattern, extract_strings, hexdump, iter_region_chunks, search_process
 
@@ -189,6 +190,77 @@ def cmd_keys(args):
                     return
 
 
+def cmd_analyse_dump(args):
+    with DumpFile(args.image) as d:
+        print(f"{args.image}: {d.size / 2**30:.2f} GiB physical image\n")
+
+        if args.marker:
+            pat = build_pattern(args.marker, "hex" if args.hex else "text", utf16=not args.hex)
+            n = 0
+            for m in search_process(d, pat, list(d.regions()), args.max):
+                n += 1
+                print(f"  marker @ file offset {m.address:#014x} (len {m.length})")
+                if args.context:
+                    start = max(m.address - args.context // 2, 0)
+                    print(hexdump(d.read(start, args.context), start), "\n")
+            print(f"{n} marker hit(s)\n")
+
+        print("Memory map (content label by MiB):")
+        totals = d.label_totals(args.block * 2**20)
+        for label, size in totals.most_common():
+            print(f"  {label:<40} {size / 2**20:>10,.1f} MiB  ({100 * size / d.size:4.1f}%)")
+
+        print("\nArtefacts carved from the image:")
+        counts = Counter()
+        samples = defaultdict(list)
+        for off, kind, text in d.carve_artefacts(max_per_kind=args.max):
+            counts[kind] += 1
+            if len(samples[kind]) < 3:
+                samples[kind].append((off, text))
+        for kind, c in counts.most_common():
+            print(f"  {kind:<16} {c}")
+            for off, text in samples[kind]:
+                print(f"      {off:#014x}  {text[:80]}")
+
+    if args.json:
+        with open(args.json, "w") as f:
+            json.dump({"image": args.image,
+                       "labels": {k: v for k, v in totals.items()},
+                       "artefacts": dict(counts)}, f, indent=2)
+        print(f"\nwrote {args.json}")
+
+
+def cmd_volatility(args):
+    try:
+        if args.plugin:
+            rows = volatility.run_plugin(args.image, args.plugin, timeout=args.timeout)
+            print(json.dumps(rows, indent=2))
+            return
+        report = volatility.collect(args.image, include_credentials=args.credentials, timeout=args.timeout)
+    except volatility.VolatilityNotFound as e:
+        raise SystemExit(str(e))
+
+    for plugin, rows in report["plugins"].items():
+        print(f"\n=== {plugin} ({len(rows)} rows) ===")
+        for row in rows[: args.limit]:
+            if plugin == "windows.pslist":
+                print(f"  PID {row.get('PID'):>7}  PPID {row.get('PPID'):>7}  {row.get('ImageFileName')}")
+            elif plugin == "windows.cmdline":
+                print(f"  PID {row.get('PID'):>7}  {str(row.get('Args'))[:160]}")
+            elif plugin == "windows.dlllist":
+                print(f"  PID {row.get('PID'):>7}  {row.get('Name')}  {row.get('Path')}")
+            else:
+                print(f"  {row}")
+        if len(rows) > args.limit:
+            print(f"  ... {len(rows) - args.limit} more")
+    for plugin, err in report["errors"].items():
+        print(f"\n!!! {plugin}: {err}")
+    if args.json:
+        with open(args.json, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"\nwrote {args.json}")
+
+
 def cmd_explain(args):
     with open_process(args.pid) as proc:
         region = _find_region(proc, args.address)
@@ -265,6 +337,27 @@ def build_parser():
     s.add_argument("--window", type=int, default=32)
     s.add_argument("--max", type=int, default=50)
     s.add_argument("--kind", default=None)
+
+    # --- Track B: offline dump analysis ---
+    s = sub.add_parser("analyse-dump", help="analyse a flat RAM dump (.raw/.mem/.dmp) offline")
+    s.add_argument("image")
+    s.add_argument("--marker", help="text (or hex with --hex) to locate in the image")
+    s.add_argument("--hex", action="store_true")
+    s.add_argument("--context", type=int, default=0, help="bytes of hexdump around each marker hit")
+    s.add_argument("--block", type=int, default=1, help="memory-map block size in MiB")
+    s.add_argument("--max", type=int, default=500, help="cap per artefact kind / marker hits")
+    s.add_argument("--json")
+    s.set_defaults(fn=cmd_analyse_dump)
+
+    s = sub.add_parser("volatility", help="drive Volatility 3 over a dump (pslist/cmdline/dlllist)")
+    s.add_argument("image")
+    s.add_argument("--plugin", help="run a single plugin and print raw JSON (e.g. windows.netscan)")
+    s.add_argument("--credentials", action="store_true",
+                   help="also run windows.hashdump (own test machine only)")
+    s.add_argument("--limit", type=int, default=40, help="rows to print per plugin")
+    s.add_argument("--timeout", type=int, default=1800)
+    s.add_argument("--json")
+    s.set_defaults(fn=cmd_volatility)
 
     s = pid_cmd("explain", cmd_explain, "explain a snippet with AI")
     s.add_argument("address", type=_int)

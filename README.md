@@ -1,9 +1,9 @@
 # Memory Explorer — Windows thesis lab tool
 
 Reads, searches and categorises the **live memory of a process on a machine you own**,
-for a thesis on where data lives (RAM vs disk) and what the OS/hardware isolates.
-Implements **Track A** of [`docs/plan-windows.txt`](docs/plan-windows.txt); Track B
-(full-RAM capture + Volatility) uses existing tools — commands are listed below.
+and analyses **full physical-RAM dumps offline**, for a thesis on where data lives
+(RAM vs disk) and what the OS/hardware isolates. Implements **Track A** (live reader)
+and **Track B** (dump capture + forensics) of [`docs/plan-windows.txt`](docs/plan-windows.txt).
 
 Scope: your own PC and your own test programs/sites. The tool is deliberately a
 reader/classifier; it contains no LSASS/credential extraction or protection bypass.
@@ -32,6 +32,8 @@ A Linux `/proc` backend is included so the code and tests also run on Linux.
 | `python -m memexplorer scan PID [--writable] [--csv out.csv] [--json out.json]` | Classify every region → summary of MiB per category/content label, artefact counts (URLs, e-mails, JWTs, JSON, cookies, PEM, hex/base64 blobs) and key-like windows |
 | `python -m memexplorer keys PID [--address ADDR --radius 256]` | High-entropy windows that look like keys |
 | `python -m memexplorer explain PID ADDR [-n 256] --provider print\|local\|claude` | "Explain with AI" (see privacy below) |
+| `python -m memexplorer analyse-dump IMAGE [--marker X [--hex] [--context N]] [--block MiB] [--json out]` | **Track B:** run the classifier/strings/artefacts/marker-search over a flat RAM dump — no external tool, any OS |
+| `python -m memexplorer volatility IMAGE [--plugin P] [--credentials] [--json out]` | **Track B:** drive Volatility 3 (pslist / cmdline / dlllist, +hashdump with `--credentials`) and collect a report |
 
 Classification: region level from the OS (`image` = code/modules, `mapped`, `private` =
 heap/stack; `R-X` code vs `RW-` data) and content level from bytes (zeros / text /
@@ -47,6 +49,37 @@ size-normalised Shannon entropy and printable ratios.
   process, no key; decrypting brings plaintext back into RAM.
 * `demo/web_fetch_target.py URL` — fetch your own LAN test site; the decrypted HTTPS body is
   findable in RAM while Wireshark shows only ciphertext.
+
+## Track B — full RAM dump + offline forensics
+
+Capture all physical memory (needs admin), then analyse the image. Two analysers:
+
+**1. Built-in offline analyser (`analyse-dump`)** — the same classifier, string
+extractor, artefact detector and marker search used on live processes, run directly
+over the flat image. Pure Python on a file: no admin, no OS, works on a dump from any
+machine. Produces the categorised "how much of RAM is code / text / zeros / key
+material" figure (as % and MiB), carves URLs / e-mails / JWTs / cookies / JSON / PEM /
+hex & base64 blobs with their file offsets, and locates planted markers.
+
+```powershell
+# capture (pick one; all need admin)
+winpmem.exe mem.raw           # or: DumpIt.exe / Magnet RAM Capture
+python -m memexplorer analyse-dump mem.raw --marker THESIS_MARKER_7f3a9c --context 64 --json dump.json
+```
+
+**2. Volatility 3 driver (`volatility`)** — orchestrates the standard forensics
+framework for OS-structure reconstruction (not reimplemented). Install separately:
+
+```bash
+pip install volatility3
+python -m memexplorer volatility mem.raw --json vol.json      # pslist + cmdline + dlllist
+python -m memexplorer volatility mem.raw --credentials        # + windows.hashdump (own machine only)
+python -m memexplorer volatility mem.raw --plugin windows.netscan   # any single plugin, raw JSON
+```
+
+If Volatility isn't installed the command says so with the install hint. `hashdump` is
+included to *document how credential material sits in memory* on your own test machine —
+illustrating the OS wall, not attacking anyone's system.
 
 ## AI explain — privacy rules enforced in code
 
@@ -66,9 +99,10 @@ size-normalised Shannon entropy and printable ratios.
    `search PID <keyhex> --hex`, `keys PID --address <key addr>`; wipe and repeat.
 2. **Credential Guard on/off:** document with `msinfo32` (VBS status) and observe that
    protected processes deny `OpenProcess` — use the access result as data, not the contents.
-3. **Full RAM (Track B):** capture with WinPMEM/DumpIt (admin), then Volatility 3:
-   `vol -f mem.raw windows.pslist`, `windows.cmdline`, `windows.dlllist`, and
-   `strings -el mem.raw | findstr THESIS_MARKER` (plus plain `strings`) to locate your marker.
+3. **Full RAM (Track B):** capture with WinPMEM/DumpIt (admin), then
+   `python -m memexplorer analyse-dump mem.raw --marker THESIS_MARKER_7f3a9c` for the
+   categorised map + marker location, and `python -m memexplorer volatility mem.raw` for
+   the process list / command lines / loaded DLLs.
 4. **pagefile/hiberfil, BitLocker off vs on:** examine on a test machine from offline media;
    search for the marker the demo left behind.
 5. **AI labelling:** run `explain` on 3+ regions of the demo process, compare `LABEL:` with
