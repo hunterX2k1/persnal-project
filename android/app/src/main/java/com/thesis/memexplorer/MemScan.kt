@@ -72,6 +72,30 @@ object MemScan {
         }
     }
 
+    /**
+     * Sliding-window entropy scan (plan §4): offsets whose [window]-byte entropy
+     * is near the ceiling for that size — how forensic tools flag keys/IVs with
+     * no label. For 32 bytes the ceiling is log2(32)=5 bits; AES keys sit ~4.8+.
+     */
+    fun keyCandidates(data: ByteArray, window: Int = 32, step: Int = 8): List<Int> {
+        val out = ArrayList<Int>()
+        val minE = log2(window.toDouble()) - 0.35
+        val buf = ByteArray(window)
+        var off = 0
+        var lastEnd = -1
+        while (off + window <= data.size) {
+            System.arraycopy(data, off, buf, 0, window)
+            var zeros = 0
+            for (b in buf) if (b.toInt() == 0) zeros++
+            if (zeros <= 2 && entropy(buf) >= minE) {
+                if (off >= lastEnd) out.add(off)
+                lastEnd = off + window
+            }
+            off += step
+        }
+        return out
+    }
+
     fun readMaps(): List<Region> {
         val out = ArrayList<Region>()
         java.io.File("/proc/self/maps").forEachLine { line ->

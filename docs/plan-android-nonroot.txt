@@ -1,0 +1,206 @@
+=====================================================================
+ MEMORY EXPLORER — ANDROID (NON-ROOT)
+ Thesis lab tool: how data lives in RAM, and how it is stored/encrypted
+ Scope: YOUR OWN APP'S PROCESS ONLY. This is the safe, legal baseline.
+=====================================================================
+
+0. THE ONE RULE THAT SHAPES EVERYTHING
+---------------------------------------------------------------------
+On a non-rooted Android phone, an app can read the memory of exactly
+one process: itself. Each app is a separate Linux user (UID) and
+SELinux blocks reading /proc/<other-pid>/mem. So this tool is built
+as an app that INSPECTS ITSELF. That is enough to study every concept
+in your thesis: layout, storage, strings, keys, encryption before/after.
+
+
+1. GOAL OF THIS BUILD
+---------------------------------------------------------------------
+- Put known data into RAM (text, numbers, a fake "key", an encrypted blob).
+- Read your own live memory and show it as a hex + ASCII dump.
+- Categorize what is found (code / heap / stack / strings / zeros / key-like).
+- Optionally send a SELECTED, SAFE snippet to an AI API for explanation.
+
+
+2. HIGH-LEVEL ARCHITECTURE
+---------------------------------------------------------------------
+Language: Kotlin (native app) — or Python inside Termux for a quick start.
+
+  +-------------------------------------------------------+
+  |  UI layer (Jetpack Compose or simple Views)           |
+  |   - "Plant data" screen: type text, numbers, keys     |
+  |   - "Scan memory" button                              |
+  |   - Hex/ASCII dump view with colour categories        |
+  |   - "Explain this region with AI" button              |
+  +-------------------------------------------------------+
+  |  Memory layer                                         |
+  |   - MapsReader   -> parses /proc/self/maps            |
+  |   - MemReader    -> reads /proc/self/mem (seek+read)  |
+  |   - Scanner      -> search bytes, find your markers   |
+  +-------------------------------------------------------+
+  |  Classifier                                           |
+  |   - tags each region: code / heap / stack / anon      |
+  |   - tags bytes: printable string / zeros / high-      |
+  |     entropy (key-like) / structured                   |
+  +-------------------------------------------------------+
+  |  Crypto demo module                                   |
+  |   - generates AES key, encrypts a sample string       |
+  |   - keeps key + plaintext + ciphertext in RAM so you  |
+  |     can find all three in the dump                    |
+  +-------------------------------------------------------+
+  |  AI explain module (optional, network)                |
+  |   - sends ONLY a chosen snippet + its metadata        |
+  +-------------------------------------------------------+
+
+
+3. HOW MEMORY IS ACCESSED (the core APIs)
+---------------------------------------------------------------------
+- /proc/self/maps   : a text list of every memory region of your app.
+    Each line: start-end  perms  offset dev inode  pathname
+    perms "rw-p" = readable/writable private (your data lives here).
+    pathname tells you what it is: a .so file = code, [stack], [heap],
+    [anon:...] = anonymous (often heap/JIT), blank = app data.
+- /proc/self/mem    : the actual bytes. Open it, seek() to a region's
+    start address, read (end - start) bytes. That block is real RAM.
+- You do NOT need root for self. You WILL hit a few unreadable regions
+  (guard pages) — catch the error and skip them.
+
+Native Kotlin can open these files directly (they are just files).
+No special permission in the manifest is needed for self inspection.
+
+
+4. WHAT YOU WILL SEE, AND HOW TO CATEGORIZE IT
+---------------------------------------------------------------------
+Region categories (from maps):
+  CODE      r-xp, backed by a .so / .oat / .dex file  -> instructions
+  RODATA    r--p, backed by a file                    -> constants, strings
+  DATA/HEAP rw-p, [heap] or [anon]                     -> your live objects
+  STACK     [stack]                                    -> call frames, locals
+  SYSTEM    linker, fonts, ART runtime                 -> ignore for thesis
+
+Byte categories (inside a region):
+  TEXT      runs of printable ASCII (32..126)          -> your strings, JSON
+  ZEROS     long runs of 0x00                          -> unused / wiped
+  KEY-LIKE  short block, very high randomness (entropy)-> possible key/IV
+  STRUCT    repeating patterns, pointers (8-byte,      -> objects, arrays
+            values near other region addresses)
+
+Entropy tip for "key-like": compute Shannon entropy over a sliding
+32-byte window. Normal text ~3-4 bits/byte; a real key ~7.5-8. That
+spike is how forensic tools flag keys without any label.
+
+
+5. THE DATA-STORAGE PART OF YOUR THESIS (RAM vs ROM)
+---------------------------------------------------------------------
+Add a second screen that writes the SAME data three ways, so you can
+compare "in RAM" vs "on ROM/flash":
+  a) In a variable (RAM only)        -> gone on app kill
+  b) SharedPreferences / a file      -> flash (ROM), survives restart
+  c) Encrypted file (Jetpack Security / EncryptedSharedPreferences)
+                                     -> flash, but bytes are ciphertext
+Then:
+  - Dump RAM: find plaintext (a).
+  - Open the saved file from (b) on disk: plaintext again.
+  - Open the file from (c): random-looking bytes; the key is held by
+    Android Keystore (the TEE) and never appears in your dump.
+This single comparison demonstrates your whole thesis in one figure.
+
+
+6. CRYPTO DEMO MODULE (what to observe)
+---------------------------------------------------------------------
+- Generate AES-256 key with a normal library (keep it in a variable).
+- Encrypt "Andaman-test-2026" -> show plaintext, key, IV, ciphertext.
+- Scan RAM: you should find plaintext AND key AND ciphertext together.
+- Then repeat using a key from Android Keystore (TEE-backed):
+    the cipher works, but the KEY is NOT findable in RAM -> prove the
+    hardware boundary you studied.
+- Add a "wipe" button that overwrites the key variable with zeros and
+  re-scan: show it is gone. (Demonstrates why good code wipes secrets.)
+
+
+7. AI EXPLAIN MODULE (API integration)
+---------------------------------------------------------------------
+Purpose: paste a region/snippet and ask an AI "what is this?".
+
+Design:
+  - User selects a region or a highlighted byte range in the dump.
+  - Build a compact payload:
+        { offset, length, perms, pathname_guess,
+          hex_preview (first 256 bytes), ascii_preview,
+          entropy, printable_ratio }
+  - POST as JSON to the AI provider's chat/completions endpoint.
+  - Show the model's explanation under the dump.
+
+Keys/secrets handling:
+  - Put the API key in local.properties / BuildConfig, NOT in code you
+    share. Better: a settings screen where the user pastes their own key.
+  - NETWORK + INTERNET permission in the manifest for this module only.
+
+PRIVACY WARNING (write this in your thesis too):
+  A real memory dump can contain real passwords, tokens, cookies.
+  NEVER send a full dump to a cloud AI. Send only short, self-created
+  TEST snippets, or run a LOCAL model (your phone-cluster project could
+  host one) so nothing leaves the device.
+
+
+8. SUGGESTED LIBRARIES / TOOLS
+---------------------------------------------------------------------
+- Native: Kotlin, Jetpack Compose, Jetpack Security (crypto).
+- Quick start: Termux + Python (the /proc/self script we built).
+- Hex view: render yourself (simple) or use a monospace Text grid.
+- Entropy: 10 lines of math, no library needed.
+
+
+9. LEARNING EXERCISES (map these to thesis chapters)
+---------------------------------------------------------------------
+1) Find your typed string in RAM; note its address changes each run
+   (ASLR — address space layout randomization).
+2) Save it to a file; find it on flash; compare.
+3) Encrypt it; find key+plaintext+cipher together in RAM.
+4) Switch to Keystore key; show the key is absent from RAM.
+5) Wipe and re-scan; show zeros.
+6) Ask the AI module to label three regions; check its accuracy.
+
+
+10. WHAT THIS BUILD CANNOT DO (state honestly in the thesis)
+---------------------------------------------------------------------
+- Cannot read other apps' memory (sandbox).
+- Cannot read Keystore/TEE keys (hardware).
+- Cannot see WebView page content (separate renderer process).
+These limits ARE the result — they prove the isolation model works.
+
+
+11. WEB / NETWORK INSPECTION MODULE (your local dummy sites)
+---------------------------------------------------------------------
+Purpose: fetch a site on your LAN (e.g. http://192.168.1.x or a
+box in your phone-cluster), watch the data arrive, categorize it,
+then find that same data in your app's RAM dump. Legal because the
+sites and the network are yours.
+
+Components:
+  - HttpClient (OkHttp): GET/POST your local URL. The raw response
+    (headers, cookies, HTML, JSON) lands in YOUR app's RAM.
+  - Capture view: show request line, response headers, body.
+  - Categorizer (reuse): tag parts as headers / cookies / HTML /
+    JSON / JS / binary.
+  - Link-to-RAM: after fetching, run the memory scanner and locate
+    the response bytes in the heap -> proves network data becomes
+    RAM bytes you can read.
+
+HTTP vs HTTPS on your own sites:
+  - Plain HTTP: you see everything in clear (and in Wireshark/PCAPdroid
+    on the wire). Good first demo.
+  - HTTPS with YOUR OWN test certificate: the wire is encrypted, BUT
+    inside your own app the plaintext exists before TLS encrypts it and
+    after it decrypts it -> find it in your process RAM. This is the
+    key teaching point: TLS protects the WIRE, not your own process.
+
+Whole-device traffic (still non-root):
+  - PCAPdroid (app) uses Android VPNService to capture all traffic to
+    a .pcap with no root. Open in Wireshark. Use it only on your test
+    device / your sites. To see HTTPS plaintext, install your OWN CA on
+    a TEST device and point apps you wrote at it (mitmproxy as a LAN
+    proxy). Never do this to other people's apps/accounts.
+
+Exercise: GET a local JSON page -> find a field value in the dump ->
+repeat over HTTPS -> show plaintext still appears in your own RAM.
+=====================================================================

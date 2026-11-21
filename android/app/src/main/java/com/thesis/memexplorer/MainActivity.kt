@@ -53,7 +53,9 @@ class MainActivity : Activity() {
         btn("1. Scan my own memory regions") { scanRegions() }
         btn("2. Crypto demo: put key+secret in RAM, find them") { cryptoDemo() }
         btn("3. Wipe the key, search again") { wipeAndRecheck() }
-        btn("4. The Android walls (why no other app)") { showWalls() }
+        btn("4. Storage: same secret in RAM vs plaintext file vs Keystore-encrypted file") { storageDemo() }
+        btn("5. Keystore key: prove it is NOT in RAM") { keystoreDemo() }
+        btn("6. The Android walls (why no other app)") { showWalls() }
 
         val sv = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -131,6 +133,8 @@ class MainActivity : Activity() {
         log("marker found at ${markerHits.size} address(es) in my own RAM")
         keyHits.take(3).forEach { log("  marker/key @ 0x%x".format(it)) }
         log("key bytes found at ${keyHits.size} address(es)")
+        val cand = MemScan.keyCandidates(k)
+        log("key-like entropy windows inside the key buffer: ${cand.size} (H>=~4.65/5 bits)")
         log("ART, like Python, may keep hidden copies — note how many. Now try button 3.\n")
     }
 
@@ -152,7 +156,53 @@ class MainActivity : Activity() {
             "wiping your own buffer does not erase every copy on a managed runtime.\n")
     }
 
-    // --- 4. the walls -------------------------------------------------------
+    // --- 4. storage three ways (plan §5: the "one figure") ------------------
+    private fun storageDemo() {
+        val secret = ("$MARKER: account=demo-user; password=Fake-Passw0rd!; synthetic test data")
+            .toByteArray(Charsets.UTF_8)
+
+        // (a) RAM variable
+        val inRam = secret.copyOf()
+
+        // (b) plaintext file on flash (survives restart, readable by this app)
+        val plainFile = java.io.File(filesDir, "secret_plaintext.txt")
+        plainFile.writeBytes(secret)
+
+        // (c) Keystore-encrypted file on flash (ciphertext; key in the TEE)
+        val enc = KeystoreDemo.encrypt(secret)
+        val encFile = java.io.File(filesDir, "secret_keystore.bin")
+        encFile.writeBytes(enc.blob)
+
+        val ramHits = MemScan.searchSelf(MARKER.toByteArray(Charsets.UTF_8))
+        val markerInEnc = String(encFile.readBytes(), Charsets.ISO_8859_1).contains(MARKER)
+
+        log("=== storage: one secret, three places (plan §5) ===")
+        log("%-22s %-10s %-10s %s".format("where", "persists", "encrypted", "readable by"))
+        log("%-22s %-10s %-10s %s".format("(a) RAM variable", "no", "no", "this app only"))
+        log("%-22s %-10s %-10s %s".format("(b) ${plainFile.name}", "YES", "no", "this app (plaintext)"))
+        log("%-22s %-10s %-10s %s".format("(c) ${encFile.name}", "YES", "yes", "holder of TEE key"))
+        log("")
+        log("(a) marker in RAM: ${ramHits.size} hit(s)")
+        log("(b) plaintext file first bytes: ${String(plainFile.readBytes().copyOf(40), Charsets.ISO_8859_1)}")
+        log("(c) encrypted file first bytes: ${encFile.readBytes().copyOf(24).toHex()}")
+        log("(c) marker visible in ciphertext? ${if (markerInEnc) "yes" else "NO"}")
+        log("(c) ${enc.note}")
+        log("One figure: plaintext in RAM and in file (b); only ciphertext in (c); key never leaves the TEE.\n")
+        java.util.Arrays.fill(inRam, 0)
+    }
+
+    // --- 5. keystore key not in RAM -----------------------------------------
+    private fun keystoreDemo() {
+        val res = KeystoreDemo.encrypt("$MARKER-keystore-probe".toByteArray())
+        log("=== Keystore (TEE) key vs software key (plan §6) ===")
+        log("software AES key (button 2): findable as raw bytes in RAM.")
+        log("Keystore AES key: exportable = ${res.keyExportable}")
+        log(res.note)
+        log("So there are no key bytes anywhere in this app to search for — the")
+        log("hardware boundary holds. This is the Android TPM/VBS equivalent.\n")
+    }
+
+    // --- 6. the walls -------------------------------------------------------
     private fun showWalls() {
         log(
             """

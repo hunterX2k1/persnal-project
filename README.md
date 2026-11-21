@@ -148,6 +148,27 @@ your own key log), found in clear in the client's RAM, and persisted in the brow
 cookies SQLite on disk. The AI/privacy rule from section 7 still holds — only your own test
 traffic goes to a cloud model; real captures use the local provider.
 
+## Android app (non-root, self-inspection)
+
+`android/` is the Android analogue (Kotlin), built to [`docs/plan-android-nonroot.txt`](docs/plan-android-nonroot.txt).
+Without root an app can read only **its own** process, so the app inspects itself:
+
+* **Scan my regions** — parse `/proc/self/maps`, sample `/proc/self/mem`, classify by the same
+  entropy/printable rules as the Python tool.
+* **Crypto demo** — plant an AES key + marked plaintext + ciphertext in RAM, locate them, count
+  key-like entropy windows, then **wipe** and re-scan (shows ART's hidden copies).
+* **Storage (§5 "one figure")** — the same secret in RAM, in a plaintext file, and in a
+  Keystore-encrypted file: plaintext is found in the first two, only ciphertext in the third.
+* **Keystore (§6)** — a TEE-backed AES key whose bytes are not exportable (`getEncoded()==null`),
+  so they never appear in RAM — the Android equivalent of the Windows TPM/VBS wall.
+* **Walls** — a screen explaining the UID sandbox, SELinux, `ptrace_scope`, Keystore/TEE/StrongBox.
+
+Build the APK on CI (no local Android SDK needed) via `.github/workflows/build-apk.yml`, or locally:
+
+```bash
+cd android && ./gradlew assembleDebug    # -> app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Build a Windows .exe / installer
 
 ```powershell
