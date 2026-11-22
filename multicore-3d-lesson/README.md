@@ -1,15 +1,16 @@
-# Multi-Core Architecture in 3D
+# Multi-Core Bites
 
-An unofficial, narrated 3D study companion that follows the 12-week NPTEL course plan for
-*Multi-Core Computer Architecture* (Prof. John Jose, IIT Guwahati). Each week and syllabus topic
-title is shown exactly as written in the official course plan; the explanations, narration and
-3D model are original.
+An unofficial, ADHD-friendly study companion for the NPTEL / YouTube course
+*Multi-Core Computer Architecture* (Prof. John Jose, IIT Guwahati).
 
-Open `index.html` in a browser and press **Play lesson**. The browser's built-in voice reads each
-step while the 3D chip animates. Drag to orbit, Space to play/pause, ←/→ to change steps.
+- One **bite per lecture** in the playlist (49 bites across the 12 course weeks).
+- Each bite: a one-line **hook**, 2–4 short **narrated 3D scenes**, then **one quiz question** with instant feedback.
+- **XP, streaks and a progress bar**, saved in your browser.
+- **10-minute focus sprints** with a break reminder.
+- "Full lecture ↗" opens the matching YouTube video when you want the deep dive.
 
-Weeks: 1 Basic Computer Organization · 2 Instruction Pipeline Principles · 3 Pipeline Hazards and
-Branch Prediction Techniques · 4 Pipeline Scheduling and Speculative execution · 5 Superscalar
-Processors and GPU architectures · 6 Cache Memory Principles · 7 Cache Memory Optimizations ·
-8 Cache Coherence Protocols · 9 Primary Storage Systems · 10 Tiled Chip Multi-Core Processors &
-Network-on-Chip · 11 Energy Efficient NoCs · 12 Quality of Service for TCMPs
+Open `index.html` in a browser and press **Play bite**.
+
+The narration is written from the lecture titles and the official syllabus, not from the lecture audio.
+To align it with what the professor actually says, run `get_transcripts.sh` on your own computer
+(YouTube blocks caption downloads from cloud servers) and share the resulting `transcripts` folder.
