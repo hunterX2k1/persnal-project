@@ -1,0 +1,684 @@
+<title>Multi-Core Architecture in 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed 3D die on the left, a narrated "lesson rail" on the right (stacks under the scene on phones). Single dark lab look, chosen on purpose. */
+:root{
+  --bg:#0b0f13; --panel:#11171e; --raise:#18212b; --line:#233040;
+  --fg:#e3e8ee; --muted:#8c99a8; --copper:#e39159; --teal:#5fd3c6; --red:#ff6b5e;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-display:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.5;overflow:hidden}
+.app{display:flex;height:100%;min-height:0}
+.stage{position:relative;flex:1;min-width:0;min-height:0}
+.stage canvas{display:block;width:100%;height:100%;outline:none}
+.hint{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));font:500 11px/1.3 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:color-mix(in srgb,var(--bg) 70%,transparent);padding:6px 9px;border:1px solid var(--line);border-radius:4px;pointer-events:none}
+.loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font:500 12px var(--font-mono);letter-spacing:.08em;text-transform:uppercase}
+.panel{width:380px;flex:none;display:flex;flex-direction:column;gap:18px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding-block:22px;padding-left:20px;padding-right:max(20px,env(safe-area-inset-right,0px))}
+.eyebrow{margin:0;font:500 11px/1.4 var(--font-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h1{margin:4px 0 0;font:600 26px/1.1 var(--font-display);letter-spacing:-.01em;text-wrap:balance}
+h1 span{color:var(--copper)}
+h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
+.now{display:flex;flex-direction:column;gap:10px;background:var(--raise);border:1px solid var(--line);border-radius:6px;padding:14px 14px 16px}
+.dots{display:flex;gap:6px;align-items:center}
+.dots button{width:22px;height:6px;border-radius:3px;border:0;padding:0;background:var(--line);cursor:pointer}
+.dots button.on{background:var(--teal)}
+.dots button.done{background:color-mix(in srgb,var(--teal) 40%,var(--line))}
+.dots .count{margin-left:auto;font:500 11px var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.caption{margin:0;font-size:15px;line-height:1.6;color:var(--muted);min-height:7.5em}
+.caption span{transition:color .25s}
+.caption span.on{color:var(--fg)}
+.caption span.said{color:color-mix(in srgb,var(--fg) 72%,var(--muted))}
+.controls{display:flex;gap:8px}
+.btn{font:500 14px var(--font-ui);color:var(--fg);background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:9px 12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn:hover{border-color:#3a4b5f}
+.btn:focus-visible,.dots button:focus-visible,select:focus-visible,.lessons button:focus-visible,input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.btn.play{flex:1;background:var(--copper);border-color:var(--copper);color:#1a0f07;font-weight:600}
+.btn.play:hover{filter:brightness(1.07)}
+.btn svg{width:16px;height:16px;fill:currentColor}
+.settings{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:13px;color:var(--muted)}
+.settings label{font:500 11px var(--font-mono);letter-spacing:.07em;text-transform:uppercase}
+.settings select{min-width:0;width:100%;font:13px var(--font-ui);color:var(--fg);background:var(--raise);border:1px solid var(--line);border-radius:4px;padding:6px 8px}
+.toggle{display:flex;align-items:center;gap:8px;color:var(--fg);font:13px var(--font-ui)!important;text-transform:none!important;letter-spacing:0!important}
+.toggle input{accent-color:var(--teal);width:16px;height:16px}
+.voice-note{grid-column:1/-1;margin:0;font-size:12px;color:var(--muted)}
+.lessons ol{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.lessons button{width:100%;display:grid;grid-template-columns:28px 1fr auto;align-items:baseline;gap:6px;text-align:left;background:none;border:0;border-radius:4px;padding:7px 8px;color:var(--muted);font:14px var(--font-ui);cursor:pointer}
+.lessons button:hover{background:var(--raise);color:var(--fg)}
+.lessons button.on{background:var(--raise);color:var(--fg)}
+.lessons .n{font:500 12px var(--font-mono);color:var(--copper);font-variant-numeric:tabular-nums}
+.lessons .s{font:12px var(--font-mono);color:var(--muted)}
+.foot{margin:auto 0 0;font-size:12px;color:var(--muted)}
+@media (max-width:820px){
+  .app{flex-direction:column}
+  .stage{flex:1 1 52%}
+  .panel{width:auto;flex:1 1 48%;border-left:0;border-top:1px solid var(--line);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px;gap:14px}
+  .caption{min-height:0}
+  h1{font-size:21px}
+}
+@media (prefers-reduced-motion:reduce){.caption span{transition:none}}
+</style>
+
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="loading" id="loading">Building the chip…</div>
+    <div class="hint">Drag to orbit · scroll or pinch to zoom</div>
+  </div>
+  <aside class="panel">
+    <header>
+      <p class="eyebrow">Narrated 3D lesson · 8 parts</p>
+      <h1>Multi-Core Architecture <span>in 3D</span></h1>
+    </header>
+
+    <section class="now" aria-live="polite">
+      <p class="eyebrow" id="lessonNum">Lesson 1 of 8</p>
+      <h2 id="lessonTitle">Why multicore?</h2>
+      <div class="dots" id="dots"></div>
+      <p class="caption" id="caption"></p>
+    </section>
+
+    <div class="controls">
+      <button class="btn" id="prev" aria-label="Previous step"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button class="btn play" id="play"><svg viewBox="0 0 24 24" id="playIcon"><path d="M7 4v16l13-8z"/></svg><span id="playLabel">Play lesson</span></button>
+      <button class="btn" id="next" aria-label="Next step"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    </div>
+
+    <div class="settings">
+      <label for="voiceOn">Voice</label>
+      <span class="toggle"><input type="checkbox" id="voiceOn" checked> Voice-over on</span>
+      <label for="voiceSel">Narrator</label>
+      <select id="voiceSel"><option>Default voice</option></select>
+      <label for="rate">Speed</label>
+      <select id="rate"><option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option></select>
+      <p class="voice-note" id="voiceNote">Narration uses your browser's built-in speech voices.</p>
+    </div>
+
+    <nav class="lessons" aria-label="Lessons">
+      <p class="eyebrow">Lessons</p>
+      <ol id="lessonList"></ol>
+    </nav>
+
+    <p class="foot">Keyboard: Space plays or pauses, ← and → move between steps.</p>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ---------------------------------------------------------------- lessons */
+const LESSONS = [
+ {title:"Why multicore?", steps:[
+  {cam:"wide", focus:[], anim:"ring", text:"Welcome. This lesson tours a modern multi-core processor using a 3D model of a four-core chip. Drag to orbit the model at any time, and use the arrows to move between steps."},
+  {cam:"heat", focus:["core0"], glow:"#ff5a2a", anim:"heat", tags:[{at:"core0", t:"1 core · 4 GHz · ~130 W", dy:1.4, c:"#ff8a5c"}],
+   text:"For decades, performance came from making one core faster, with higher clock speeds and more tricks per cycle. Around 2005 that stopped working. Dynamic power grows with capacitance, times voltage squared, times frequency. Chips hit a power wall: they could no longer be cooled."},
+  {cam:"mem", focus:["dram","mc"], anim:"slowMem", tags:[{at:"dram", t:"Memory wall", dy:1.3}, {at:"core0.stages", t:"ILP wall", dy:1.0}],
+   text:"Two more walls arrived at the same time. The instruction-level parallelism wall: a program only has so many independent instructions to overlap. And the memory wall: DRAM latency improved far more slowly than processor speed."},
+  {cam:"wide", focus:["cores"], glow:"#5fd3c6", anim:"ring", tags:[{at:[0,1.7,0], t:"4 cores · ~3 GHz · same power budget"}],
+   text:"The answer was to spend the extra transistors from Moore's law on several simpler cores at a moderate clock and voltage. Four cool cores can do more total work than one hot core for the same power, as long as the software is parallel."}
+ ]},
+ {title:"Inside a core: pipelining", steps:[
+  {cam:"core0", focus:["core0.stages"], anim:"none",
+   text:"Let's zoom into core zero. Every instruction passes through five stages: instruction fetch, decode, execute, memory access, and write-back."},
+  {cam:"pipe", focus:["core0.stages"], anim:"pipe",
+   text:"Pipelining overlaps these stages like an assembly line. While one instruction executes, the next is being decoded and the one after that is being fetched. Ideally, one instruction completes every clock cycle."},
+  {cam:"pipe", focus:["core0.stages"], anim:"pipeStall", tags:[{at:"core0.stages", t:"grey = bubble (stall)", dy:1.05}],
+   text:"Hazards break that ideal. A data hazard occurs when an instruction needs a result that is not ready yet. Forwarding paths send results straight back to the execute stage. When that is not enough, the pipeline inserts a stall, called a bubble."},
+  {cam:"pipe", focus:["core0.stages"], anim:"pipeFlush", tags:[{at:"core0.stages", t:"gold = branch · red = flushed", dy:1.05}],
+   text:"Control hazards come from branches. The core predicts which way a branch will go and fetches ahead speculatively. A wrong guess flushes the younger instructions, which is why accurate branch predictors matter so much."}
+ ]},
+ {title:"Instruction-level parallelism", steps:[
+  {cam:"pipe", focus:["core0.stages"], anim:"pipeSuper", tags:[{at:"core0.stages", t:"2-wide superscalar", dy:1.05}],
+   text:"A superscalar core issues more than one instruction per cycle by duplicating its execution units. Here, two instructions move through each stage together."},
+  {cam:"core0", focus:["core0.stages","core0.L1D"], anim:"pipeSuper",
+   text:"Out-of-order execution goes further. Instructions wait in a reservation station and run as soon as their operands are ready, not in program order. Register renaming removes false dependences, and a reorder buffer retires results in the original order, so exceptions stay precise."},
+  {cam:"wide", focus:["cores"], glow:"#5fd3c6", anim:"ring",
+   text:"These techniques are powerful, but they cost a lot of area and energy, and the returns keep shrinking. That is the ILP wall from lesson one, and it is why designers turned to thread-level parallelism across many cores."}
+ ]},
+ {title:"The memory hierarchy", steps:[
+  {cam:"cache", focus:["core0.L1I","core0.L1D"], anim:"none", tags:[{at:"core0.L1D", t:"32 KB · ~4 cycles", dy:0.95}],
+   text:"Every core needs data fast, but a trip to DRAM can take a few hundred cycles. So the chip uses a hierarchy of caches. Each core has small private level-one caches, one for instructions and one for data, about thirty-two kilobytes each, answering in around four cycles."},
+  {cam:"cache", focus:["core0.L1D","core0.L2","L3"], anim:"hit", tags:[{at:"core0.L2", t:"L2 · 1 MB · ~12 cycles", dy:0.9}, {at:"L3", t:"Shared L3 · ~40 cycles", dy:1.0}],
+   text:"Behind it sits a private level-two cache, larger and slower at around twelve cycles. All cores share a large last-level cache, split here into slices around the ring. A hit in level one returns almost immediately."},
+  {cam:"mem", focus:["core0.L1D","core0.L2","L3","mc","dram"], anim:"miss", tags:[{at:"dram", t:"DRAM · 200+ cycles", dy:1.3}],
+   text:"On a miss, the request walks down the hierarchy: level one, level two, the shared level three, and finally the memory controller and DRAM. A whole cache line, usually sixty-four bytes, comes back and is filled into each level on the way."},
+  {cam:"cache", focus:["core0.L1D","core0.L2"], anim:"hit", tags:[{at:[-3.4,1.6,-1], t:"AMAT = hit time + miss rate × miss penalty"}],
+   text:"Caches work because of locality. Temporal locality means recently used data is likely to be used again. Spatial locality means nearby addresses are likely to be used soon. The average memory access time equals the hit time, plus the miss rate times the miss penalty."}
+ ]},
+ {title:"Cache coherence (MESI)", steps:[
+  {cam:"coh", focus:["L1D"], anim:"none", mesi:{pre:["I","I"]},
+   text:"Private caches create a problem. If two cores cache the same address and one of them writes it, the other holds a stale copy. A coherence protocol keeps every copy consistent. The common one is MESI: Modified, Exclusive, Shared, and Invalid."},
+  {cam:"coh", focus:["core0.L1D"], anim:"mesi", mesi:{pre:["I","I"], post:["E","I"], run:"read0"},
+   text:"Core zero reads address X. No other cache holds it, so the line arrives in the Exclusive state. Core zero may later write it without telling anyone."},
+  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["E","I"], post:["S","S"], run:"read1"},
+   text:"Now core one reads X. Core zero's cache sees the request, so both copies become Shared. Shared lines are read-only."},
+  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["S","S"], post:["M","I"], run:"write0"},
+   text:"Core zero writes X. First it sends an invalidation. Core one's copy becomes Invalid, and core zero's becomes Modified. It is now the only valid copy, and memory is out of date."},
+  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["M","I"], post:["S","S"], run:"read1b"},
+   text:"When core one reads X again, it misses. Core zero supplies the modified data and writes it back, and both copies return to Shared. Snooping like this works for a few cores. Larger chips use a directory that records which cores hold each line."},
+  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"falseShare", mesi:{pre:["M","I"]}, tags:[{at:[0,1.6,-3.4], t:"one 64-byte line, two variables"}],
+   text:"One practical warning. Coherence works on whole cache lines. If two threads write different variables that happen to share a line, the line bounces between cores on every write. This is called false sharing, and padding the data onto separate lines fixes it."}
+ ]},
+ {title:"On-chip interconnect", steps:[
+  {cam:"ring", focus:["ring"], glow:"#f0b85a", anim:"ring",
+   text:"Cores, cache slices, and the memory controller talk over an on-chip network. This chip uses a ring. Each stop forwards messages to its neighbour, and traffic flows in both directions."},
+  {cam:"ring", focus:["ring","L3"], glow:"#f0b85a", anim:"ring",
+   text:"A shared bus is simpler, but only one transfer can happen at a time, so it stops scaling after a handful of cores. A ring adds bandwidth, but its latency grows with the number of stops."},
+  {cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"mesh", tags:[{at:[14,1.2,-5.2], t:"4×4 mesh · XY routing"}],
+   text:"Chips with dozens of cores use a two-dimensional mesh instead. Each tile has a router, and packets hop from router to router, first along X, then along Y. Designers trade off latency, bandwidth, area, and power when choosing a topology."}
+ ]},
+ {title:"Hardware multithreading", steps:[
+  {cam:"pipe", focus:["core0.stages"], anim:"pipeSMT", tags:[{at:"core0.stages", t:"teal = thread A · copper = thread B", dy:1.05}],
+   text:"A single thread often leaves the pipeline idle while it waits for memory. Hardware multithreading keeps several thread contexts in one core, each with its own registers and program counter."},
+  {cam:"pipe", focus:["core0.stages"], anim:"pipeSMT",
+   text:"Coarse-grained multithreading switches threads on a long stall, such as a cache miss. Fine-grained multithreading switches every cycle. Simultaneous multithreading, which Intel calls Hyper-Threading, issues instructions from several threads in the same cycle, filling empty slots in a superscalar core."},
+  {cam:"core0", focus:["core0"], glow:"#5fd3c6", anim:"pipeSMT",
+   text:"The threads share the caches and execution units. So multithreading raises the core's total throughput, but each individual thread may run a little slower."}
+ ]},
+ {title:"Synchronization & consistency", steps:[
+  {cam:"wide", focus:["L1D"], anim:"lock",
+   text:"Parallel threads must coordinate. A lock protects shared data so that only one core changes it at a time. The hardware provides atomic instructions, such as compare-and-swap, or load-linked and store-conditional, to build locks."},
+  {cam:"wide", focus:["ring"], glow:"#f0b85a", anim:"lock",
+   text:"Watch the gold lock move between cores. Each acquire is a write, so the cache line holding the lock travels across the chip through the coherence protocol. A heavily contended lock therefore costs a lot of traffic."},
+  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"none", tags:[{at:"core0", t:"x = 1;  r1 = y", dy:1.5, c:"#5fd3c6"}, {at:"core1", t:"y = 1;  r2 = x", dy:1.5, c:"#e39159"}],
+   text:"A memory consistency model defines the order in which one core's writes become visible to others. Sequential consistency is the simplest to reason about. Real processors use relaxed models. Under total store order, used by x86, both reads in this test can return zero, because each store can wait in a store buffer. Programmers use fences to enforce order where it matters."},
+  {cam:"wide", focus:["cores","ring","L3"], glow:"#5fd3c6", anim:"ring",
+   text:"That completes the tour. Power limits pushed designs to many cores. Each core uses pipelining and instruction-level parallelism. Caches hide memory latency, coherence keeps copies correct, the interconnect carries the traffic, and synchronization lets software use it all. Pick any lesson to replay it."}
+ ]}
+];
+
+/* ---------------------------------------------------------------- dom */
+const $ = id => document.getElementById(id);
+const stageEl = $("stage");
+const synth = window.speechSynthesis || null;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------------------------------------------------------------- three setup */
+const V = (x,y,z) => new THREE.Vector3(x,y,z);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f13);
+scene.fog = new THREE.Fog(0x0b0f13, 34, 70);
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+stageEl.prepend(renderer.domElement);
+renderer.domElement.setAttribute("tabindex","-1");
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.maxPolarAngle = 1.45; controls.minDistance = 2.5; controls.maxDistance = 45;
+
+scene.add(new THREE.HemisphereLight(0xc4dcff, 0x20160f, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.85); sun.position.set(8,16,7); scene.add(sun);
+const fill = new THREE.DirectionalLight(0x8fb4ff, 0.3); fill.position.set(-10,6,-8); scene.add(fill);
+const grid = new THREE.GridHelper(80, 80, 0x1b2531, 0x131a22); grid.position.y = -0.62; scene.add(grid);
+
+const HL = [];           // highlightable meshes
+const R = {};            // name -> meshes
+function reg(name, m){ (R[name] = R[name] || []).push(m); }
+function box(w,h,d,color,x,y,z,parent,opts){
+  opts = opts || {};
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+    new THREE.MeshStandardMaterial({color, roughness:opts.rough ?? 0.55, metalness:opts.metal ?? 0.25, emissive:0x000000}));
+  m.position.set(x,y,z); (parent || scene).add(m);
+  if (opts.hl !== false) HL.push(m);
+  return m;
+}
+function link(a,b,r,color,parent){
+  const dir = new THREE.Vector3().subVectors(b,a); const len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,10),
+    new THREE.MeshStandardMaterial({color, roughness:0.4, metalness:0.6, emissive:0x000000}));
+  m.position.copy(a).addScaledVector(dir,0.5);
+  m.quaternion.setFromUnitVectors(V(0,1,0), dir.normalize());
+  (parent || scene).add(m); HL.push(m); return m;
+}
+
+/* labels as canvas sprites */
+const ALL_LABELS = [];
+function makeLabel(text, opts){
+  opts = opts || {};
+  const c = document.createElement("canvas"); c.width = 1024; c.height = 128;
+  const tex = new THREE.CanvasTexture(c); tex.anisotropy = 4;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, depthTest:false, transparent:true}));
+  s.renderOrder = 10; s.userData = {c, tex, h: opts.h || 0.34};
+  setLabel(s, text, opts); ALL_LABELS.push(s);
+  return s;
+}
+function setLabel(s, text, opts){
+  opts = opts || {};
+  s.userData.text = text; s.userData.opts = opts;
+  const {c, tex, h} = s.userData; const g = c.getContext("2d");
+  const fs = 64; g.font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
+  const w = Math.min(1000, Math.ceil(g.measureText(text).width) + 56);
+  g.clearRect(0,0,c.width,c.height);
+  const x0 = (c.width - w)/2;
+  if (opts.badge !== false){
+    g.fillStyle = opts.bg || "rgba(11,15,19,0.82)";
+    roundRect(g, x0, 14, w, 100, 18); g.fill();
+    g.strokeStyle = opts.c || "rgba(140,153,168,0.55)"; g.lineWidth = 4; roundRect(g, x0, 14, w, 100, 18); g.stroke();
+  }
+  g.fillStyle = opts.c || "#e3e8ee"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, c.width/2, 66);
+  tex.needsUpdate = true;
+  s.scale.set(h * c.width / c.height, h, 1);
+}
+function roundRect(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+
+/* ---------------------------------------------------------------- chip model */
+box(16,0.4,16,0x16231e,0,-0.4,0,null,{hl:false, rough:0.8, metal:0.1});         // package substrate
+for (let i=0;i<28;i++){ // gold pads along package edges
+  const t = -7.2 + i*0.533;
+  box(0.22,0.05,0.5,0xc79a45, t,-0.18,7.55,null,{hl:false,metal:0.9,rough:0.3});
+  box(0.22,0.05,0.5,0xc79a45, t,-0.18,-7.55,null,{hl:false,metal:0.9,rough:0.3});
+}
+box(12,0.2,12,0x222b36,0,-0.1,0,null,{hl:false, rough:0.35, metal:0.5});           // silicon die
+
+const RING_R = 1.3, RING_Y = 0.2;
+const ringPoint = a => V(RING_R*Math.cos(a), RING_Y+0.06, RING_R*Math.sin(a));
+const cores = [];
+const coreXZ = [[-1,-1],[1,-1],[-1,1],[1,1]];
+coreXZ.forEach(([sx,sz], i) => {
+  const g = new THREE.Group(); g.position.set(sx*3.4, 0, sz*3.4);
+  if (sz > 0) g.rotation.y = Math.PI;      // L2 faces the ring for every core
+  scene.add(g);
+  const base = box(3.8,0.12,3.8,0x323d4a,0,0.06,0,g);
+  const stages = [];
+  for (let k=0;k<5;k++) stages.push(box(0.56,0.28,0.7,0xb5713f,-1.36+k*0.68,0.26,-1.15,g,{metal:0.55,rough:0.4}));
+  const L1I = box(1.55,0.22,0.75,0x3b8a9b,-0.92,0.23,0.05,g);
+  const L1D = box(1.55,0.22,0.75,0x3b8a9b, 0.92,0.23,0.05,g);
+  const L2  = box(3.3,0.26,0.8,0x2c6178,0,0.25,1.15,g);
+  const all = [base, ...stages, L1I, L1D, L2];
+  all.forEach(m => { reg("core"+i, m); reg("cores", m); });
+  stages.forEach(m => reg("core"+i+".stages", m));
+  reg("core"+i+".L1I", L1I); reg("core"+i+".L1D", L1D); reg("core"+i+".L2", L2);
+  reg("L1D", L1D); reg("L1", L1I); reg("L1", L1D); reg("L2", L2);
+  const name = makeLabel("CORE "+i, {h:0.36, c:"#e39159"}); name.position.set(0,0.9,-1.98); g.add(name);
+  cores.push({g, base, stages, L1I, L1D, L2, angle: Math.atan2(sz, sx)});
+});
+scene.updateMatrixWorld(true);
+const wp = m => m.getWorldPosition(new THREE.Vector3());
+const topOf = (m, dy) => { const p = wp(m); m.geometry.computeBoundingBox(); p.y += m.geometry.boundingBox.max.y + (dy ?? 0.12); return p; };
+
+/* core 0 internals labels */
+["IF","ID","EX","MEM","WB"].forEach((t,k) => { const s = makeLabel(t,{h:0.26}); s.position.copy(topOf(cores[0].stages[k],0.62)); scene.add(s); });
+[["L1-I",cores[0].L1I],["L1-D",cores[0].L1D],["L2",cores[0].L2]].forEach(([t,m]) => { const s = makeLabel(t,{h:0.26}); s.position.copy(topOf(m,0.22)); scene.add(s); });
+
+/* ring + L3 slices */
+const ring = new THREE.Mesh(new THREE.TorusGeometry(RING_R,0.055,10,120),
+  new THREE.MeshStandardMaterial({color:0xcf9a3e, metalness:0.8, roughness:0.3, emissive:0x000000}));
+ring.rotation.x = Math.PI/2; ring.position.y = RING_Y; scene.add(ring); HL.push(ring); reg("ring", ring);
+const sliceAngles = [0, Math.PI/2, Math.PI, -Math.PI/2];
+const slices = sliceAngles.map(a => {
+  const m = box(0.5,0.32,0.5,0x5361a0, 0.6*Math.cos(a), 0.16, 0.6*Math.sin(a)); reg("L3", m);
+  reg("ring", link(V(0.85*Math.cos(a),RING_Y,0.85*Math.sin(a)), V(1.26*Math.cos(a),RING_Y,1.26*Math.sin(a)), 0.03, 0xcf9a3e));
+  return m;
+});
+const l3label = makeLabel("SHARED L3",{h:0.26}); l3label.position.set(0,0.62,0); scene.add(l3label);
+cores.forEach((c,i) => reg("ring", link(ringPoint(c.angle).setY(RING_Y), (()=>{const p=wp(c.L2); p.y=RING_Y; return p;})(), 0.035, 0xcf9a3e)));
+
+/* memory controller, I/O, DRAM */
+const mc = box(2.4,0.3,1.0,0x7559a6,0,0.15,-4.4); reg("mc", mc);
+reg("ring", link(V(0,RING_Y,-RING_R), V(0,RING_Y,-3.9), 0.035, 0xcf9a3e));
+const mcl = makeLabel("MEMORY CTRL",{h:0.28}); mcl.position.set(0,0.7,-4.4); scene.add(mcl);
+const io = box(2.4,0.3,1.0,0x45505e,0,0.15,4.4); reg("io", io);
+reg("ring", link(V(0,RING_Y,RING_R), V(0,RING_Y,3.9), 0.035, 0xcf9a3e));
+const iol = makeLabel("I/O",{h:0.28}); iol.position.set(0,0.7,4.4); scene.add(iol);
+for (let k=-2;k<=2;k++){ // DDR traces
+  const x = k*0.28;
+  link(V(x,0.02,-4.95), V(x,0.02,-6.0), 0.025, 0xb08a4a);
+  link(V(x,0.02,-6.0), V(x,-0.18,-8.0), 0.025, 0xb08a4a);
+  link(V(x,-0.18,-8.0), V(x,-0.58,-10.3), 0.025, 0xb08a4a);
+}
+const dramG = new THREE.Group(); dramG.position.set(0,0,-11); scene.add(dramG);
+[-0.45,0.45].forEach(z => {
+  const b = box(5.2,1.25,0.1,0x1e5a40,0,0.03,z,dramG,{metal:0.2,rough:0.7}); reg("dram", b);
+  for (let k=0;k<8;k++){ const ch = box(0.5,0.55,0.08,0x14181d,-2.2+k*0.63,0.1,z+(z<0?-0.08:0.08),dramG,{hl:false,metal:0.3,rough:0.5}); }
+});
+const draml = makeLabel("DRAM",{h:0.34}); draml.position.set(0,1.15,-11); scene.add(draml);
+scene.updateMatrixWorld(true);
+const dramTop = V(0,0.75,-11);
+
+/* mesh-network demo (shown only in its step) */
+const meshDemo = new THREE.Group(); meshDemo.position.set(14,0,-2); scene.add(meshDemo); meshDemo.visible = false;
+const MESH_N = 4, MESH_S = 1.5;
+const routerPos = (x,y) => V(14 + (x-1.5)*MESH_S, 0.4, -2 + (y-1.5)*MESH_S);
+box(6.6,0.16,6.6,0x222b36,0,-0.08,0,meshDemo,{hl:false,metal:0.5,rough:0.35});
+for (let x=0;x<MESH_N;x++) for (let y=0;y<MESH_N;y++){
+  const lp = V((x-1.5)*MESH_S, 0.12, (y-1.5)*MESH_S);
+  const r = box(0.62,0.24,0.62,0x323d4a,lp.x,lp.y,lp.z,meshDemo); reg("meshDemo", r);
+  box(0.3,0.1,0.3,0xb5713f,lp.x,lp.y+0.17,lp.z,meshDemo,{hl:false,metal:0.55,rough:0.4});
+  if (x<MESH_N-1) reg("meshDemo", link(V(lp.x+0.31,0.12,lp.z), V(lp.x+MESH_S-0.31,0.12,lp.z), 0.04, 0xcf9a3e, meshDemo));
+  if (y<MESH_N-1) reg("meshDemo", link(V(lp.x,0.12,lp.z+0.31), V(lp.x,0.12,lp.z+MESH_S-0.31), 0.04, 0xcf9a3e, meshDemo));
+}
+scene.updateMatrixWorld(true);
+
+/* MESI state badges */
+const MESI_C = {M:"#ff7a5c", E:"#7fe08a", S:"#5fd3c6", I:"#7d8896"};
+const mesiLabels = [0,1].map(i => { const s = makeLabel("I",{h:0.42}); s.position.copy(topOf(cores[i].L1D,1.0)); s.visible=false; scene.add(s); return s; });
+function setMesi(i, st){ setLabel(mesiLabels[i], (i===0?"core 0 · ":"core 1 · ") + st + " · X", {c: MESI_C[st]}); }
+
+/* ---------------------------------------------------------------- tiny engine: tweens, timers, packets */
+const now = () => performance.now();
+let tweens = [];
+function tween(dur, fn, done, owned){ tweens.push({t0:now(), dur:Math.max(1,dur), fn, done, owned: owned !== false}); }
+const ease = k => k<0.5 ? 2*k*k : 1-Math.pow(-2*k+2,2)/2;
+let timers = [];
+function after(ms, fn){ const id = setTimeout(fn, ms); timers.push(id); return id; }
+function every(ms, fn){ const id = setInterval(fn, ms); timers.push(id); fn(); return id; }
+let stepObjs = [];
+function own(o){ scene.add(o); stepObjs.push(o); return o; }
+const flashes = new Map();
+function flash(mesh, color, dur){ flashes.set(mesh, {c:new THREE.Color(color), t0:now(), dur:dur||900}); }
+
+const pGeo = new THREE.SphereGeometry(0.13, 16, 12);
+function packet(pts, color, speed, onDone, size){
+  const m = own(new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({color})));
+  if (size) m.scale.setScalar(size);
+  const seg = []; let L = 0;
+  for (let i=1;i<pts.length;i++){ const d = pts[i].distanceTo(pts[i-1]); seg.push(d); L += d; }
+  m.position.copy(pts[0]);
+  const dur = (L / (speed || 5)) * 1000;
+  tween(dur, k => {
+    let d = k*L, i = 0;
+    while (i < seg.length-1 && d > seg[i]) { d -= seg[i]; i++; }
+    m.position.lerpVectors(pts[i], pts[i+1] || pts[i], seg[i] ? Math.min(1,d/seg[i]) : 1);
+  }, () => { remove(m); onDone && onDone(); });
+  return dur;
+}
+function remove(o){ scene.remove(o); stepObjs = stepObjs.filter(x => x !== o); }
+function clearStep(){
+  timers.forEach(id => { clearTimeout(id); clearInterval(id); }); timers = [];
+  tweens = tweens.filter(t => !t.owned);
+  stepObjs.forEach(o => scene.remove(o)); stepObjs = [];
+  flashes.clear();
+  mesiLabels.forEach(s => s.visible = false);
+  meshDemo.visible = false;
+}
+
+/* routes */
+function arc(a, b){
+  let d = b - a; while (d > Math.PI) d -= 2*Math.PI; while (d < -Math.PI) d += 2*Math.PI;
+  const n = Math.max(1, Math.ceil(Math.abs(d) / 0.15)); const out = [];
+  for (let i=1;i<=n;i++) out.push(ringPoint(a + d*i/n));
+  return out;
+}
+const toRing = i => [topOf(cores[i].L1D), topOf(cores[i].L2), ringPoint(cores[i].angle)];
+const fromRing = i => toRing(i).reverse();
+const coreToCore = (i,j) => [...toRing(i), ...arc(cores[i].angle, cores[j].angle), ...fromRing(j).slice(1)];
+const SLICE_MC = -Math.PI/2; // slice nearest the memory controller
+const coreToSlice = (i, a) => [...toRing(i), ...arc(cores[i].angle, a), topOf(slices[sliceAngles.indexOf(a)])];
+const sliceToCore = (a, i) => coreToSlice(i, a).reverse();
+const coreToDram = i => [topOf(cores[i].stages[3]), ...coreToSlice(i, Math.PI).slice(0), ringPoint(Math.PI), ...arc(Math.PI, SLICE_MC), V(0,0.42,-3.9), topOf(mc), V(0,0.25,-6), V(0,0.05,-8), dramTop];
+
+/* ---------------------------------------------------------------- step animations */
+const TOK = {teal:0x5fd3c6, copper:0xe39159, grey:0x58626e, red:0xff5a4e, gold:0xf2c14e, white:0xe9eef3, violet:0xa98bea};
+const tokGeo = new THREE.BoxGeometry(0.2,0.2,0.2);
+function pipeline(mode){
+  const st = cores[0].stages.map(m => topOf(m, 0.16));
+  const lanes = (mode==="super"||mode==="smt") ? [-0.17,0.17] : [0];
+  let toks = [], cycle = 0;
+  const pos = (s, lane) => st[s].clone().add(V(0,0,lanes[lane]));
+  const mk = (color, lane) => {
+    const m = own(new THREE.Mesh(tokGeo, new THREE.MeshBasicMaterial({color})));
+    const t = {m, s:0, lane}; m.position.copy(pos(0,lane)); m.scale.setScalar(0.01);
+    tween(250, k => m.scale.setScalar(Math.max(0.01,k))); return t;
+  };
+  const fade = t => { const m = t.m; tween(300, k => m.scale.setScalar(Math.max(0.01,1-k)), () => remove(m)); };
+  const move = t => { const from = t.m.position.clone(), to = pos(t.s, t.lane); tween(330, k => t.m.position.lerpVectors(from,to,ease(k))); };
+  const palette = [TOK.teal, 0x7fb6ff, 0xb4e07f, 0xf0d070, 0xd99cf0];
+  every(reduceMotion ? 1100 : 780, () => {
+    cycle++;
+    toks.filter(t => t.s >= 4).forEach(fade); toks = toks.filter(t => t.s < 4);
+    const stall = mode==="stall" && cycle % 6 === 0;
+    const flushNow = mode==="flush" && cycle % 7 === 0;
+    if (flushNow){
+      toks.filter(t => t.s === 2).forEach(t => t.m.material.color.setHex(TOK.gold));
+      toks.filter(t => t.s <= 1).forEach(t => { t.m.material.color.setHex(TOK.red); fade(t); });
+      toks = toks.filter(t => t.s > 1);
+    }
+    toks.forEach(t => { if (stall && t.s <= 1) return; t.s++; move(t); });
+    if (stall){ const b = mk(TOK.grey, 0); b.s = 2; b.m.position.copy(pos(2,0)); toks.push(b); return; }
+    lanes.forEach((_, lane) => {
+      let color = palette[(cycle + lane) % palette.length];
+      if (mode==="smt") color = Math.random() < 0.5 ? TOK.teal : TOK.copper;
+      if (mode==="smt" && Math.random() < 0.12) return;   // occasional empty slot
+      toks.push(mk(color, lane));
+    });
+  });
+}
+function ringTraffic(){
+  const stops = [...cores.map(c=>c.angle), ...sliceAngles];
+  every(380, () => {
+    const a = stops[Math.floor(Math.random()*stops.length)];
+    let b = stops[Math.floor(Math.random()*stops.length)]; if (b === a) b = a + Math.PI;
+    packet([ringPoint(a), ...arc(a,b)], Math.random()<0.5 ? TOK.teal : TOK.copper, 3.2, null, 0.8);
+  });
+}
+const ANIMS = {
+  none(){},
+  ring: ringTraffic,
+  heat(){ every(260, () => { const p = wp(cores[0].base).add(V((Math.random()-0.5)*3,0.3,(Math.random()-0.5)*3));
+    const m = own(new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({color:0xff6a3a, transparent:true})));
+    m.position.copy(p); m.scale.setScalar(0.6);
+    tween(1600, k => { m.position.y = p.y + k*2.2; m.material.opacity = 1-k; }, () => remove(m)); }); },
+  slowMem(){ every(5200, () => { packet(coreToDram(0), TOK.teal, 2.2, () => after(500, () => packet(coreToDram(0).reverse(), TOK.copper, 2.2))); }); },
+  pipe(){ pipeline("basic"); }, pipeStall(){ pipeline("stall"); }, pipeFlush(){ pipeline("flush"); },
+  pipeSuper(){ pipeline("super"); }, pipeSMT(){ pipeline("smt"); },
+  hit(){ every(1500, () => { const a = topOf(cores[0].stages[3]), b = topOf(cores[0].L1D);
+    packet([a,b], TOK.teal, 4, () => { flash(cores[0].L1D, 0x7fe08a, 500); packet([b,a], TOK.copper, 4); }); }); },
+  miss(){ every(7000, () => {
+    const path = coreToDram(0);
+    packet(path, TOK.teal, 4.2, () => { flash(R.dram[0], 0xffd27a, 700); flash(R.dram[1], 0xffd27a, 700);
+      after(450, () => packet(path.slice().reverse(), TOK.copper, 4.2, () => flash(cores[0].L1D, 0x7fe08a, 600))); });
+  }); },
+  mesh(){ meshDemo.visible = true; every(420, () => {
+    const s = [Math.floor(Math.random()*4), Math.floor(Math.random()*4)], d = [Math.floor(Math.random()*4), Math.floor(Math.random()*4)];
+    if (s[0]===d[0] && s[1]===d[1]) return;
+    const pts = [routerPos(s[0],s[1])]; let x = s[0], y = s[1];
+    while (x !== d[0]){ x += Math.sign(d[0]-x); pts.push(routerPos(x,y)); }
+    while (y !== d[1]){ y += Math.sign(d[1]-y); pts.push(routerPos(x,y)); }
+    packet(pts, Math.random()<0.5 ? TOK.teal : TOK.copper, 2.6, null, 0.9);
+  }); },
+  lock(){
+    let holder = 0; const tag = own(makeLabel("holds lock",{h:0.3, c:"#f2c14e"}));
+    const place = () => tag.position.copy(topOf(cores[holder].L1D, 0.8));
+    place(); flash(cores[holder].L1D, TOK.gold, 1200);
+    every(2600, () => {
+      let next = Math.floor(Math.random()*4); if (next === holder) next = (holder+1)%4;
+      tag.visible = false;
+      packet(coreToCore(holder, next), TOK.gold, 3.4, () => { holder = next; place(); tag.visible = true; flash(cores[holder].L1D, TOK.gold, 1200); }, 1.25);
+    });
+  },
+  mesi(step){
+    const M = step.mesi; const loop = () => {
+      setMesi(0, M.pre[0]); setMesi(1, M.pre[1]);
+      after(700, () => MESI_RUN[M.run](() => { setMesi(0, M.post[0]); setMesi(1, M.post[1]); }));
+    };
+    loop(); timers.push(setInterval(loop, 7000));
+  },
+  falseShare(){
+    let owner = 0;
+    every(1900, () => {
+      const from = owner, to = 1-owner;
+      packet(coreToCore(from, to), TOK.copper, 4.2, () => { owner = to; setMesi(to, "M"); setMesi(from, "I"); flash(cores[to].L1D, 0xff7a5c, 500); });
+    });
+  }
+};
+const MESI_RUN = {
+  read0(done){ packet(coreToSlice(0, SLICE_MC), TOK.teal, 3.4, () => packet(sliceToCore(SLICE_MC, 0), TOK.copper, 3.4, () => { flash(cores[0].L1D,0x7fe08a,700); done(); })); },
+  read1(done){
+    packet(coreToSlice(1, SLICE_MC), TOK.teal, 3.4, () => {
+      packet([ringPoint(SLICE_MC), ...arc(SLICE_MC, cores[0].angle), ...fromRing(0).slice(1)], TOK.white, 3.4, () => flash(cores[0].L1D, 0x5fd3c6, 700));
+      packet(sliceToCore(SLICE_MC, 1), TOK.copper, 3.4, () => { flash(cores[1].L1D,0x5fd3c6,700); done(); });
+    });
+  },
+  write0(done){
+    packet(coreToCore(0,1), TOK.red, 3.4, () => { flash(cores[1].L1D, 0xff3b30, 900); setMesi(1, "I");
+      packet(coreToCore(1,0), TOK.white, 3.4, () => { flash(cores[0].L1D, 0xff7a5c, 700); done(); }); });
+  },
+  read1b(done){
+    packet(coreToCore(1,0), TOK.teal, 3.4, () => {
+      packet(coreToSlice(0, SLICE_MC), TOK.violet, 3.4);
+      packet(coreToCore(0,1), TOK.copper, 3.4, () => { flash(cores[1].L1D,0x5fd3c6,700); done(); });
+    });
+  }
+};
+
+/* ---------------------------------------------------------------- highlight + camera */
+let focusSet = new Set(), glowColor = new THREE.Color("#e39159");
+function resolveAt(at){
+  if (Array.isArray(at)) return V(at[0],at[1],at[2]);
+  const ms = R[at] || []; if (!ms.length) return V(0,1,0);
+  const c = V(0,0,0); ms.forEach(m => c.add(topOf(m,0))); return c.multiplyScalar(1/ms.length);
+}
+const CAMS = {
+  wide:{p:[0,15,13.5], t:[0,0,-1.6]}, heat:{p:[-7.5,6.5,2], t:[-3.4,0.4,-3.4]},
+  core0:{p:[-3.4,4.6,0.6], t:[-3.4,0.2,-3.5]}, pipe:{p:[-3.4,4.3,0.2], t:[-3.4,0.3,-4.3]},
+  cache:{p:[-0.8,6.5,1.8], t:[-2,0,-2.6]}, mem:{p:[8,9.5,0], t:[-0.5,0,-5.6]},
+  coh:{p:[0,11.5,5.2], t:[0,0,-2.6]}, ring:{p:[0,5.2,4.2], t:[0,0,0]}, mesh:{p:[14,7.5,5.8], t:[14,0,-2]}
+};
+let camTw = null;
+function flyTo(name){
+  const c = CAMS[name]; const t = V(...c.t); let p = V(...c.p);
+  const aspect = camera.aspect; if (aspect < 1.1) p = t.clone().add(p.clone().sub(t).multiplyScalar(1 + (1.1-aspect)*1.1));
+  if (reduceMotion){ camera.position.copy(p); controls.target.copy(t); controls.update(); return; }
+  camTw = {p0:camera.position.clone(), t0:controls.target.clone(), p, t, s:now(), dur:1600};
+}
+controls.addEventListener("start", () => { camTw = null; });
+
+/* ---------------------------------------------------------------- lesson state + narration */
+let L = 0, S = 0, playing = false, gen = 0, sentIdx = 0, sentences = [], narrTimer = null, utter = null;
+const voiceOn = $("voiceOn"), rateSel = $("rate"), voiceSel = $("voiceSel");
+let voices = [];
+function loadVoices(){
+  if (!synth) return;
+  voices = synth.getVoices().filter(v => /^en/i.test(v.lang));
+  if (!voices.length) return;
+  const pref = voices.findIndex(v => /natural|neural|google us|samantha|aria|jenny/i.test(v.name));
+  voiceSel.innerHTML = voices.map((v,i) => `<option value="${i}">${v.name.replace(/</g,"")}</option>`).join("");
+  voiceSel.value = String(pref >= 0 ? pref : 0);
+}
+if (synth){ loadVoices(); synth.addEventListener ? synth.addEventListener("voiceschanged", loadVoices) : (synth.onvoiceschanged = loadVoices); }
+else { voiceOn.checked = false; voiceOn.disabled = true; voiceSel.disabled = true; $("voiceNote").textContent = "This browser has no speech voices, so captions advance on a timer instead."; }
+
+const splitSentences = t => t.match(/[^.!?]+[.!?]+(\s|$)/g)?.map(s => s.trim()) || [t];
+
+function renderStep(){
+  const lesson = LESSONS[L], step = lesson.steps[S];
+  $("lessonNum").textContent = `Lesson ${L+1} of ${LESSONS.length}`;
+  $("lessonTitle").textContent = lesson.title;
+  sentences = splitSentences(step.text);
+  $("caption").innerHTML = sentences.map((s,i) => `<span data-i="${i}">${s} </span>`).join("");
+  const dots = $("dots"); dots.innerHTML = "";
+  lesson.steps.forEach((_,i) => { const b = document.createElement("button"); b.className = i===S ? "on" : i<S ? "done" : "";
+    b.setAttribute("aria-label", `Step ${i+1}`); b.onclick = () => goTo(L,i); dots.appendChild(b); });
+  const cnt = document.createElement("span"); cnt.className = "count"; cnt.textContent = `Step ${S+1} / ${lesson.steps.length}`; dots.appendChild(cnt);
+  document.querySelectorAll(".lessons button").forEach((b,i) => b.classList.toggle("on", i===L));
+}
+function markSentence(i){
+  document.querySelectorAll("#caption span").forEach(sp => { const k = +sp.dataset.i; sp.className = k===i ? "on" : k<i ? "said" : ""; });
+}
+function applyVisuals(){
+  clearStep();
+  const step = LESSONS[L].steps[S];
+  focusSet = new Set(); (step.focus || []).forEach(n => (R[n]||[]).forEach(m => focusSet.add(m)));
+  glowColor = new THREE.Color(step.glow || "#e39159");
+  flyTo(step.cam || "wide");
+  (step.tags || []).forEach(tg => { const s = own(makeLabel(tg.t, {h:0.34, c:tg.c || "#e3e8ee"})); s.position.copy(resolveAt(tg.at)).add(V(0, tg.dy ?? 0, 0)); });
+  if (step.mesi){ mesiLabels.forEach(s => s.visible = true); setMesi(0, step.mesi.pre[0]); setMesi(1, step.mesi.pre[1]); }
+  (ANIMS[step.anim] || ANIMS.none)(step);
+}
+function stopSpeech(){ gen++; if (synth) synth.cancel(); clearTimeout(narrTimer); narrTimer = null; }
+function speakFrom(i){
+  const my = gen; sentIdx = i;
+  if (i >= sentences.length){ markSentence(sentences.length); narrTimer = setTimeout(() => { if (my===gen && playing) advance(); }, 1100); return; }
+  markSentence(i);
+  const text = sentences[i], rate = parseFloat(rateSel.value) || 1;
+  const est = (text.split(/\s+/).length * 400) / rate + 500;
+  const nextS = () => { if (my !== gen) return; clearTimeout(narrTimer); speakFrom(i+1); };
+  if (voiceOn.checked && synth){
+    utter = new SpeechSynthesisUtterance(text);
+    utter.rate = rate; utter.lang = "en-US";
+    const v = voices[+voiceSel.value]; if (v) utter.voice = v;
+    utter.onend = nextS; utter.onerror = nextS;
+    synth.speak(utter);
+    narrTimer = setTimeout(nextS, est * 2.2 + 4000);   // safety net if onend never fires
+  } else {
+    narrTimer = setTimeout(nextS, est);
+  }
+}
+function advance(){
+  const lesson = LESSONS[L];
+  if (S < lesson.steps.length-1) goTo(L, S+1);
+  else if (L < LESSONS.length-1) goTo(L+1, 0);
+  else { setPlaying(false); markSentence(sentences.length); }
+}
+function goTo(l, s){
+  stopSpeech(); L = l; S = s;
+  renderStep(); applyVisuals();
+  if (playing) speakFrom(0); else markSentence(-1);
+}
+function setPlaying(p){
+  playing = p;
+  $("playLabel").textContent = p ? "Pause" : (sentIdx > 0 && sentIdx < sentences.length ? "Resume" : "Play lesson");
+  $("playIcon").innerHTML = p ? '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' : '<path d="M7 4v16l13-8z"/>';
+}
+$("play").onclick = () => {
+  if (playing){ stopSpeech(); setPlaying(false); }
+  else { setPlaying(true); stopSpeech(); speakFrom(sentIdx >= sentences.length ? 0 : sentIdx); }
+};
+$("next").onclick = () => { if (S < LESSONS[L].steps.length-1) goTo(L,S+1); else if (L < LESSONS.length-1) goTo(L+1,0); };
+$("prev").onclick = () => { if (S > 0) goTo(L,S-1); else if (L > 0) goTo(L-1, LESSONS[L-1].steps.length-1); };
+voiceOn.onchange = () => { if (playing){ stopSpeech(); speakFrom(sentIdx); } };
+rateSel.onchange = voiceOn.onchange; voiceSel.onchange = voiceOn.onchange;
+document.addEventListener("keydown", e => {
+  if (e.target.closest("select,input")) return;
+  if (e.key === " " && !e.target.closest("button")){ e.preventDefault(); $("play").click(); }
+  if (e.key === "ArrowRight") $("next").click();
+  if (e.key === "ArrowLeft") $("prev").click();
+});
+$("lessonList").innerHTML = LESSONS.map((l,i) => `<li><button data-l="${i}"><span class="n">${String(i+1).padStart(2,"0")}</span><span>${l.title}</span><span class="s">${l.steps.length} steps</span></button></li>`).join("");
+document.querySelectorAll(".lessons button").forEach(b => b.onclick = () => goTo(+b.dataset.l, 0));
+
+/* ---------------------------------------------------------------- loop */
+function resize(){
+  const w = stageEl.clientWidth || 1, h = stageEl.clientHeight || 1;
+  renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stageEl); resize();
+const black = new THREE.Color(0);
+function frame(){
+  const t = now();
+  for (let i = tweens.length-1; i >= 0; i--){
+    const tw = tweens[i]; const k = Math.min(1, (t - tw.t0) / tw.dur);
+    tw.fn(k); if (k >= 1){ tweens.splice(i,1); tw.done && tw.done(); }
+  }
+  if (camTw){
+    const k = ease(Math.min(1, (t - camTw.s) / camTw.dur));
+    camera.position.lerpVectors(camTw.p0, camTw.p, k); controls.target.lerpVectors(camTw.t0, camTw.t, k);
+    if (k >= 1) camTw = null;
+  }
+  const pulse = 0.28 + 0.18*Math.sin(t/260);
+  for (const m of HL){
+    const f = flashes.get(m);
+    if (f){ const k = (t - f.t0)/f.dur; if (k >= 1) flashes.delete(m); else { m.material.emissive.copy(f.c).multiplyScalar(0.9*(1-k)); continue; } }
+    if (focusSet.has(m)) m.material.emissive.copy(glowColor).multiplyScalar(pulse); else m.material.emissive.copy(black);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+/* start: fonts first so canvas labels use the right face */
+const start = () => { ALL_LABELS.forEach(l => setLabel(l, l.userData.text, l.userData.opts)); $("loading").hidden = true; const p = CAMS.wide; camera.position.set(...p.p); controls.target.set(...p.t); renderStep(); applyVisuals(); markSentence(-1); frame(); };
+let started = false; const go = () => { if (!started){ started = true; start(); } };
+(document.fonts ? Promise.race([document.fonts.load('500 64px "IBM Plex Mono"'), new Promise(r => setTimeout(r, 1500))]) : Promise.resolve()).then(go, go);
+})();
+</script>
