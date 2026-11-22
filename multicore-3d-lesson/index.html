@@ -31,6 +31,8 @@ h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
 .dots button.on{background:var(--teal)}
 .dots button.done{background:color-mix(in srgb,var(--teal) 40%,var(--line))}
 .dots .count{margin-left:auto;font:500 11px var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.topic{margin:0;font:500 12.5px/1.45 var(--font-mono);color:var(--teal)}
+.topic::before{content:"Syllabus · ";color:var(--muted)}
 .caption{margin:0;font-size:15px;line-height:1.6;color:var(--muted);min-height:7.5em}
 .caption span{transition:color .25s}
 .caption span.on{color:var(--fg)}
@@ -49,7 +51,7 @@ h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
 .toggle input{accent-color:var(--teal);width:16px;height:16px}
 .voice-note{grid-column:1/-1;margin:0;font-size:12px;color:var(--muted)}
 .lessons ol{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
-.lessons button{width:100%;display:grid;grid-template-columns:28px 1fr auto;align-items:baseline;gap:6px;text-align:left;background:none;border:0;border-radius:4px;padding:7px 8px;color:var(--muted);font:14px var(--font-ui);cursor:pointer}
+.lessons button{width:100%;display:grid;grid-template-columns:30px 1fr auto;align-items:baseline;gap:6px;text-align:left;background:none;border:0;border-radius:4px;padding:7px 8px;color:var(--muted);font:14px var(--font-ui);cursor:pointer}
 .lessons button:hover{background:var(--raise);color:var(--fg)}
 .lessons button.on{background:var(--raise);color:var(--fg)}
 .lessons .n{font:500 12px var(--font-mono);color:var(--copper);font-variant-numeric:tabular-nums}
@@ -72,13 +74,14 @@ h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
   </div>
   <aside class="panel">
     <header>
-      <p class="eyebrow">Narrated 3D lesson · 8 parts</p>
+      <p class="eyebrow">Narrated 3D course · 12 weeks</p>
       <h1>Multi-Core Architecture <span>in 3D</span></h1>
     </header>
 
     <section class="now" aria-live="polite">
-      <p class="eyebrow" id="lessonNum">Lesson 1 of 8</p>
-      <h2 id="lessonTitle">Why multicore?</h2>
+      <p class="eyebrow" id="lessonNum">Week 1 of 12</p>
+      <h2 id="lessonTitle">Basic Computer Organization</h2>
+      <p class="topic" id="topic"></p>
       <div class="dots" id="dots"></div>
       <p class="caption" id="caption"></p>
     </section>
@@ -100,11 +103,11 @@ h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
     </div>
 
     <nav class="lessons" aria-label="Lessons">
-      <p class="eyebrow">Lessons</p>
+      <p class="eyebrow">Course plan</p>
       <ol id="lessonList"></ol>
     </nav>
 
-    <p class="foot">Keyboard: Space plays or pauses, ← and → move between steps.</p>
+    <p class="foot">Unofficial study companion. Week and topic titles follow the NPTEL course plan for <em>Multi-Core Computer Architecture</em> (Prof. John Jose, IIT Guwahati); explanations, narration and 3D model are original. Keyboard: Space plays or pauses, ← and → change steps.</p>
   </aside>
 </div>
 
@@ -116,82 +119,131 @@ h2{margin:2px 0 0;font:600 20px/1.2 var(--font-display);text-wrap:balance}
 
 /* ---------------------------------------------------------------- lessons */
 const LESSONS = [
- {title:"Why multicore?", steps:[
-  {cam:"wide", focus:[], anim:"ring", text:"Welcome. This lesson tours a modern multi-core processor using a 3D model of a four-core chip. Drag to orbit the model at any time, and use the arrows to move between steps."},
-  {cam:"heat", focus:["core0"], glow:"#ff5a2a", anim:"heat", tags:[{at:"core0", t:"1 core · 4 GHz · ~130 W", dy:1.4, c:"#ff8a5c"}],
-   text:"For decades, performance came from making one core faster, with higher clock speeds and more tricks per cycle. Around 2005 that stopped working. Dynamic power grows with capacitance, times voltage squared, times frequency. Chips hit a power wall: they could no longer be cooled."},
-  {cam:"mem", focus:["dram","mc"], anim:"slowMem", tags:[{at:"dram", t:"Memory wall", dy:1.3}, {at:"core0.stages", t:"ILP wall", dy:1.0}],
-   text:"Two more walls arrived at the same time. The instruction-level parallelism wall: a program only has so many independent instructions to overlap. And the memory wall: DRAM latency improved far more slowly than processor speed."},
-  {cam:"wide", focus:["cores"], glow:"#5fd3c6", anim:"ring", tags:[{at:[0,1.7,0], t:"4 cores · ~3 GHz · same power budget"}],
-   text:"The answer was to spend the extra transistors from Moore's law on several simpler cores at a moderate clock and voltage. Four cool cores can do more total work than one hot core for the same power, as long as the software is parallel."}
+ {title:"Basic Computer Organization", steps:[
+  {topic:"Review of Basic Computer Organization", cam:"wide", focus:["cores","mc","io"], glow:"#5fd3c6", anim:"ring",
+   text:"Week one reviews basic computer organization. A computer has a processor, memory, and input-output devices, linked by buses or an on-chip network. In this model, four processor cores share a last-level cache, a memory controller that leads to DRAM, and an I/O block."},
+  {topic:"Basic operational concepts", cam:"core0", focus:["core0.L1I","core0.stages"], anim:"fetchExec",
+   text:"The processor fetches instructions from memory one after another. The program counter holds the address of the next instruction, and the instruction register holds the one being executed. Operands come from registers or memory, and results are written back to registers or memory."},
+  {topic:"fundamental of program execution", cam:"pipe", focus:["core0.stages"], anim:"pipeSerial",
+   text:"Executing one instruction takes several steps. Fetch the instruction, decode it and read registers, execute in the ALU, access memory if needed, and write the result back. Here each instruction finishes all five steps before the next one starts. Later weeks overlap these steps."},
+  {topic:"memory and I/O addressing", cam:"wide", focus:["mc","io"], anim:"memIO", tags:[{at:"mc", t:"memory", dy:0.9, c:"#5fd3c6"}, {at:"io", t:"I/O", dy:0.9, c:"#e39159"}],
+   text:"The processor reaches memory and devices through addresses. With memory-mapped I/O, device registers share the address space with memory and are reached with ordinary loads and stores. With isolated I/O, special instructions address a separate I/O space. Here, teal requests go to memory and copper requests go to the I/O block."},
+  {topic:"Instruction set architecture- addressing modes", cam:"isa", focus:["core0.stages"], anim:"none",
+   tags:[{at:[-3.4,2.3,-3.4], h:0.3, t:"ADD R1, R2, R3 · register"}, {at:[-3.4,1.85,-3.4], h:0.3, t:"ADDI R1, R2, #4 · immediate"}, {at:[-3.4,1.4,-3.4], h:0.3, t:"LW R1, 8(R2) · displacement"}],
+   text:"The instruction set architecture is the contract between software and hardware. Addressing modes say where an operand lives. Register mode uses a register. Immediate mode puts a constant inside the instruction. Displacement mode adds an offset to a base register to form a memory address. Other modes include register indirect, indexed, absolute, and PC-relative."},
+  {topic:"instruction set, instruction encoding and formats", cam:"isa", focus:["core0.stages"], anim:"none",
+   tags:[{at:[-3.4,2.3,-3.4], h:0.3, t:"R | op 6 | rs 5 | rt 5 | rd 5 | sh 5 | fn 6"}, {at:[-3.4,1.85,-3.4], h:0.3, t:"I | op 6 | rs 5 | rt 5 | immediate 16"}, {at:[-3.4,1.4,-3.4], h:0.3, t:"J | op 6 | address 26"}],
+   text:"The instruction set lists the operations: data transfer, arithmetic and logic, control flow, and system instructions. Each instruction is encoded in binary using a fixed format. In MIPS, every instruction is thirty-two bits long, in three formats. R-type is for register operations. I-type is for immediates, loads, stores, and branches. J-type is for jumps."},
+  {topic:"CISC vs RISC ISA", cam:"pipe", focus:["core0.stages"], anim:"pipe",
+   text:"A CISC instruction set, such as x86, has many complex instructions, variable-length encodings, and memory operands inside arithmetic instructions. A RISC instruction set, such as MIPS or RISC-V, uses simple fixed-length instructions and a load-store design, where only loads and stores touch memory. RISC instructions are easy to decode and pipeline. That is why modern x86 cores translate their instructions into RISC-like micro-operations internally."}
  ]},
- {title:"Inside a core: pipelining", steps:[
-  {cam:"core0", focus:["core0.stages"], anim:"none",
-   text:"Let's zoom into core zero. Every instruction passes through five stages: instruction fetch, decode, execute, memory access, and write-back."},
-  {cam:"pipe", focus:["core0.stages"], anim:"pipe",
-   text:"Pipelining overlaps these stages like an assembly line. While one instruction executes, the next is being decoded and the one after that is being fetched. Ideally, one instruction completes every clock cycle."},
-  {cam:"pipe", focus:["core0.stages"], anim:"pipeStall", tags:[{at:"core0.stages", t:"grey = bubble (stall)", dy:1.05}],
-   text:"Hazards break that ideal. A data hazard occurs when an instruction needs a result that is not ready yet. Forwarding paths send results straight back to the execute stage. When that is not enough, the pipeline inserts a stall, called a bubble."},
-  {cam:"pipe", focus:["core0.stages"], anim:"pipeFlush", tags:[{at:"core0.stages", t:"gold = branch · red = flushed", dy:1.05}],
-   text:"Control hazards come from branches. The core predicts which way a branch will go and fetches ahead speculatively. A wrong guess flushes the younger instructions, which is why accurate branch predictors matter so much."}
+ {title:"Instruction Pipeline Principles", steps:[
+  {topic:"Performance Evaluation Methods", cam:"wide", focus:["cores"], glow:"#5fd3c6", anim:"ring", tags:[{at:[0,1.9,0], t:"CPU time = IC × CPI × clock cycle time"}],
+   text:"How do we compare processors? Execution time is the true measure. CPU time equals instruction count, times cycles per instruction, times clock cycle time. Benchmark suites such as SPEC provide standard workloads. Amdahl's law reminds us that speeding up one part helps only in proportion to the time that part takes."},
+  {topic:"Introduction to RISC Instruction Pipeline", cam:"pipe", focus:["core0.stages"], anim:"pipe",
+   text:"The classic RISC pipeline has five stages: instruction fetch, instruction decode and register read, execute, memory access, and write-back. Pipeline registers between the stages hold each instruction's state, so a new instruction can enter every cycle."},
+  {topic:"Instruction Pipeline and Performance", cam:"pipe", focus:["core0.stages"], anim:"pipe", tags:[{at:"core0.stages", t:"ideal speedup ≈ number of stages", dy:1.05}],
+   text:"Pipelining does not make a single instruction faster. It raises throughput. With five balanced stages, the ideal speedup approaches five, and the ideal CPI is one. In practice, pipeline register overhead, unbalanced stages, and hazards reduce that gain."},
+  {topic:"Pipeline Hazards and Analysis", cam:"pipe", focus:["core0.stages"], anim:"pipeStall", tags:[{at:"core0.stages", t:"grey = bubble (stall)", dy:1.05}],
+   text:"Hazards stop the next instruction from entering on time. Structural hazards come from two instructions needing the same hardware. Data hazards come from dependences between instructions. Control hazards come from branches. Each stall cycle adds to the CPI, so the pipelined CPI equals one plus the stall cycles per instruction."}
  ]},
- {title:"Instruction-level parallelism", steps:[
-  {cam:"pipe", focus:["core0.stages"], anim:"pipeSuper", tags:[{at:"core0.stages", t:"2-wide superscalar", dy:1.05}],
-   text:"A superscalar core issues more than one instruction per cycle by duplicating its execution units. Here, two instructions move through each stage together."},
-  {cam:"core0", focus:["core0.stages","core0.L1D"], anim:"pipeSuper",
-   text:"Out-of-order execution goes further. Instructions wait in a reservation station and run as soon as their operands are ready, not in program order. Register renaming removes false dependences, and a reorder buffer retires results in the original order, so exceptions stay precise."},
-  {cam:"wide", focus:["cores"], glow:"#5fd3c6", anim:"ring",
-   text:"These techniques are powerful, but they cost a lot of area and energy, and the returns keep shrinking. That is the ILP wall from lesson one, and it is why designers turned to thread-level parallelism across many cores."}
+ {title:"Pipeline Hazards and Branch Prediction Techniques", steps:[
+  {topic:"Pipeline Hazards Management Techniques", cam:"pipe", focus:["core0.stages"], anim:"pipeStall", tags:[{at:"core0.stages", t:"grey = load-use bubble", dy:1.05}],
+   text:"Data hazards are handled with forwarding, also called bypassing, which sends an ALU result straight to the next instruction. A load followed immediately by a use of its result still needs one stall, shown as a grey bubble. Compilers can reorder instructions to fill those slots, and structural hazards are removed by duplicating or pipelining resources."},
+  {topic:"Branch Prediction", cam:"pipe", focus:["core0.stages"], anim:"pipeFlush", tags:[{at:"core0.stages", t:"gold = branch · red = flushed", dy:1.05}],
+   text:"Branches decide the next instruction late in the pipeline. Static methods always predict taken or not taken, or use a delayed branch. Dynamic predictors learn from history. A two-bit saturating counter changes its prediction only after two wrong guesses. Correlating predictors use the outcomes of recent branches, and a branch target buffer supplies the target address at fetch. On a wrong guess, the gold branch flushes the red instructions behind it."},
+  {topic:"MIPS Pipeline for Multi-Cycle Operations", cam:"pipe", focus:["core0.stages"], anim:"pipeMulti", tags:[{at:"core0.stages", t:"violet = floating-point op, extra EX cycles", dy:1.05}],
+   text:"Floating-point operations cannot finish in one cycle. The MIPS pipeline adds separate functional units: an integer unit, a pipelined floating-point adder and multiplier, and a divider that is not pipelined. Long latencies cause more stalls, structural hazards on the register write port, write-after-write hazards, and instructions that complete out of order."}
  ]},
- {title:"The memory hierarchy", steps:[
-  {cam:"cache", focus:["core0.L1I","core0.L1D"], anim:"none", tags:[{at:"core0.L1D", t:"32 KB · ~4 cycles", dy:0.95}],
-   text:"Every core needs data fast, but a trip to DRAM can take a few hundred cycles. So the chip uses a hierarchy of caches. Each core has small private level-one caches, one for instructions and one for data, about thirty-two kilobytes each, answering in around four cycles."},
-  {cam:"cache", focus:["core0.L1D","core0.L2","L3"], anim:"hit", tags:[{at:"core0.L2", t:"L2 · 1 MB · ~12 cycles", dy:0.9}, {at:"L3", t:"Shared L3 · ~40 cycles", dy:1.0}],
-   text:"Behind it sits a private level-two cache, larger and slower at around twelve cycles. All cores share a large last-level cache, split here into slices around the ring. A hit in level one returns almost immediately."},
-  {cam:"mem", focus:["core0.L1D","core0.L2","L3","mc","dram"], anim:"miss", tags:[{at:"dram", t:"DRAM · 200+ cycles", dy:1.3}],
-   text:"On a miss, the request walks down the hierarchy: level one, level two, the shared level three, and finally the memory controller and DRAM. A whole cache line, usually sixty-four bytes, comes back and is filled into each level on the way."},
-  {cam:"cache", focus:["core0.L1D","core0.L2"], anim:"hit", tags:[{at:[-3.4,1.6,-1], t:"AMAT = hit time + miss rate × miss penalty"}],
-   text:"Caches work because of locality. Temporal locality means recently used data is likely to be used again. Spatial locality means nearby addresses are likely to be used soon. The average memory access time equals the hit time, plus the miss rate times the miss penalty."}
+ {title:"Pipeline Scheduling and Speculative execution", steps:[
+  {topic:"Compiler Techniques to Explore Instruction Level Parallelism", cam:"pipe", focus:["core0.stages"], anim:"pipe", tags:[{at:"core0.stages", t:"unroll × 4 · rename · schedule", dy:1.05}],
+   text:"The compiler can expose parallelism before the program runs. Loop unrolling copies the loop body several times, giving fewer branches and more independent instructions. The compiler then renames registers and schedules instructions to hide latencies, at the cost of larger code and more registers."},
+  {topic:"Dynamic Scheduling with Tomasulo’s Algorithm", cam:"pipe", focus:["core0.stages"], anim:"pipeSuper", tags:[{at:"core0.stages", t:"reservation stations · common data bus", dy:1.05}],
+   text:"Tomasulo's algorithm lets the hardware schedule instructions at run time. Instructions issue to reservation stations, where they wait until their operands are available. Results are broadcast on the common data bus to every waiting station. Renaming registers to reservation station tags removes write-after-read and write-after-write hazards."},
+  {topic:"Speculative Execution", cam:"pipe", focus:["core0.stages"], anim:"pipeFlush", tags:[{at:"core0.stages", t:"reorder buffer commits in order", dy:1.05}],
+   text:"Hardware speculation executes instructions past a branch before the branch is resolved. Tomasulo's design is extended with a reorder buffer. Instructions execute out of order but commit in order, so a mispredicted path is simply discarded, and exceptions remain precise."}
  ]},
- {title:"Cache coherence (MESI)", steps:[
-  {cam:"coh", focus:["L1D"], anim:"none", mesi:{pre:["I","I"]},
-   text:"Private caches create a problem. If two cores cache the same address and one of them writes it, the other holds a stale copy. A coherence protocol keeps every copy consistent. The common one is MESI: Modified, Exclusive, Shared, and Invalid."},
-  {cam:"coh", focus:["core0.L1D"], anim:"mesi", mesi:{pre:["I","I"], post:["E","I"], run:"read0"},
-   text:"Core zero reads address X. No other cache holds it, so the line arrives in the Exclusive state. Core zero may later write it without telling anyone."},
-  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["E","I"], post:["S","S"], run:"read1"},
-   text:"Now core one reads X. Core zero's cache sees the request, so both copies become Shared. Shared lines are read-only."},
-  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["S","S"], post:["M","I"], run:"write0"},
-   text:"Core zero writes X. First it sends an invalidation. Core one's copy becomes Invalid, and core zero's becomes Modified. It is now the only valid copy, and memory is out of date."},
-  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["M","I"], post:["S","S"], run:"read1b"},
-   text:"When core one reads X again, it misses. Core zero supplies the modified data and writes it back, and both copies return to Shared. Snooping like this works for a few cores. Larger chips use a directory that records which cores hold each line."},
-  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"falseShare", mesi:{pre:["M","I"]}, tags:[{at:[0,1.6,-3.4], t:"one 64-byte line, two variables"}],
-   text:"One practical warning. Coherence works on whole cache lines. If two threads write different variables that happen to share a line, the line bounces between cores on every write. This is called false sharing, and padding the data onto separate lines fixes it."}
+ {title:"Superscalar Processors and GPU architectures", steps:[
+  {topic:"Advanced Pipelining", cam:"pipe", focus:["core0.stages"], anim:"pipeSuper",
+   text:"Advanced pipelines issue several instructions per cycle. Statically scheduled designs, such as VLIW processors, rely on the compiler to package independent operations together. Dynamically scheduled designs find independent instructions in hardware. Deeper pipelines raise the clock rate but make branch mispredictions more expensive."},
+  {topic:"Multithreading and Hyperthreading", cam:"pipe", focus:["core0.stages"], anim:"pipeSMT", tags:[{at:"core0.stages", t:"teal = thread A · copper = thread B", dy:1.05}],
+   text:"Multithreading shares one core between several threads, each with its own registers and program counter. Fine-grained multithreading switches threads every cycle. Coarse-grained multithreading switches on long stalls. Simultaneous multithreading, which Intel calls Hyper-Threading, issues from several threads in the same cycle. Here, teal and copper instructions come from two threads."},
+  {topic:"Superscalar Processors", cam:"pipe", focus:["core0.stages"], anim:"pipeSuper", tags:[{at:"core0.stages", t:"2-wide superscalar", dy:1.05}],
+   text:"A superscalar processor fetches, decodes, and issues several instructions every cycle, and its hardware checks the dependences between them. It combines multiple issue, dynamic scheduling, and speculation. Its width is limited by the available parallelism, branch prediction accuracy, register file ports, and the complexity of the issue logic."},
+  {topic:"GPU Architectures", cam:"gpu", focus:["gpuDemo"], glow:"#2c6178", anim:"gpu", tags:[{at:[-14,1.1,-5.6], t:"one row = one warp, lockstep (SIMT)"}],
+   text:"A GPU takes a different path. Instead of a few complex cores, it has many simple lanes grouped into streaming multiprocessors. Threads run in groups called warps that execute the same instruction in lockstep. This is called SIMT. When a warp waits on memory, the scheduler switches to another warp, hiding latency with massive parallelism instead of large caches."}
  ]},
- {title:"On-chip interconnect", steps:[
-  {cam:"ring", focus:["ring"], glow:"#f0b85a", anim:"ring",
-   text:"Cores, cache slices, and the memory controller talk over an on-chip network. This chip uses a ring. Each stop forwards messages to its neighbour, and traffic flows in both directions."},
-  {cam:"ring", focus:["ring","L3"], glow:"#f0b85a", anim:"ring",
-   text:"A shared bus is simpler, but only one transfer can happen at a time, so it stops scaling after a handful of cores. A ring adds bandwidth, but its latency grows with the number of stops."},
-  {cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"mesh", tags:[{at:[14,1.2,-5.2], t:"4×4 mesh · XY routing"}],
-   text:"Chips with dozens of cores use a two-dimensional mesh instead. Each tile has a router, and packets hop from router to router, first along X, then along Y. Designers trade off latency, bandwidth, area, and power when choosing a topology."}
+ {title:"Cache Memory Principles", steps:[
+  {topic:"Introduction to Cache Memory", cam:"cache", focus:["core0.L1I","core0.L1D"], anim:"hit", tags:[{at:"core0.L1D", t:"tag | index | offset", dy:0.95}],
+   text:"A cache is a small, fast memory that keeps copies of recently used data close to the processor. It works because of temporal and spatial locality. A block can be placed by direct mapping, set-associative mapping, or fully associative mapping. The address splits into tag, index, and block offset, and the stored tag is compared to decide a hit or a miss."},
+  {topic:"Block Replacement Techniques and Write Strategy", cam:"cache", focus:["core0.L1D","core0.L2"], anim:"evict", tags:[{at:"core0.L2", t:"violet = dirty block written back", dy:0.9}],
+   text:"When a set is full, one block must be replaced. Common policies are least recently used, first in first out, and random. On a write, write-through updates the next level every time, while write-back updates it only when a dirty block is evicted. On a write miss, write-allocate brings the block in, and no-write-allocate writes around the cache."},
+  {topic:"Design Concepts in Cache Memory", cam:"mem", focus:["core0.L1D","core0.L2","L3"], anim:"miss",
+   text:"Cache design balances size, block size, associativity, and the number of levels. Misses fall into the three Cs. Compulsory misses happen on first access. Capacity misses happen when the cache is too small. Conflict misses happen when blocks compete for the same set. Multilevel caches let a small first level stay fast while a larger second level catches most of its misses."}
  ]},
- {title:"Hardware multithreading", steps:[
-  {cam:"pipe", focus:["core0.stages"], anim:"pipeSMT", tags:[{at:"core0.stages", t:"teal = thread A · copper = thread B", dy:1.05}],
-   text:"A single thread often leaves the pipeline idle while it waits for memory. Hardware multithreading keeps several thread contexts in one core, each with its own registers and program counter."},
-  {cam:"pipe", focus:["core0.stages"], anim:"pipeSMT",
-   text:"Coarse-grained multithreading switches threads on a long stall, such as a cache miss. Fine-grained multithreading switches every cycle. Simultaneous multithreading, which Intel calls Hyper-Threading, issues instructions from several threads in the same cycle, filling empty slots in a superscalar core."},
-  {cam:"core0", focus:["core0"], glow:"#5fd3c6", anim:"pipeSMT",
-   text:"The threads share the caches and execution units. So multithreading raises the core's total throughput, but each individual thread may run a little slower."}
+ {title:"Cache Memory Optimizations", steps:[
+  {topic:"Design issues for improving memory access time", cam:"cache", focus:["core0.L1D","core0.L2"], anim:"hit", tags:[{at:[-3.4,1.6,-1], t:"AMAT = hit time + miss rate × miss penalty"}],
+   text:"Average memory access time equals the hit time, plus the miss rate times the miss penalty. Every cache optimization reduces one of these three terms. Cache bandwidth also matters when several accesses arrive in the same cycle."},
+  {topic:"Basic and Advanced Optimization Techniques in Cache Memory", cam:"mem", focus:["core0.L1D","core0.L2","L3"], anim:"miss",
+   text:"The six basic optimizations are these. Larger block sizes, larger caches, and higher associativity cut the miss rate. Multilevel caches, and giving read misses priority over writes, cut the miss penalty. Avoiding address translation during cache indexing cuts the hit time."},
+  {topic:"Basic and Advanced Optimization Techniques in Cache Memory", cam:"mem", focus:["core0.L1D","dram"], anim:"prefetch", tags:[{at:"core0.L1D", t:"prefetched lines", dy:1.0, c:"#e39159"}],
+   text:"Advanced optimizations include small and simple first-level caches, way prediction, pipelined and multibanked caches, and non-blocking caches that keep serving hits during a miss. Critical word first and early restart return the needed word sooner. A merging write buffer combines writes. Compiler optimizations such as loop interchange and blocking improve locality, and hardware or compiler prefetching fetches data before it is needed."}
  ]},
- {title:"Synchronization & consistency", steps:[
-  {cam:"wide", focus:["L1D"], anim:"lock",
-   text:"Parallel threads must coordinate. A lock protects shared data so that only one core changes it at a time. The hardware provides atomic instructions, such as compare-and-swap, or load-linked and store-conditional, to build locks."},
-  {cam:"wide", focus:["ring"], glow:"#f0b85a", anim:"lock",
-   text:"Watch the gold lock move between cores. Each acquire is a write, so the cache line holding the lock travels across the chip through the coherence protocol. A heavily contended lock therefore costs a lot of traffic."},
-  {cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"none", tags:[{at:"core0", t:"x = 1;  r1 = y", dy:1.5, c:"#5fd3c6"}, {at:"core1", t:"y = 1;  r2 = x", dy:1.5, c:"#e39159"}],
-   text:"A memory consistency model defines the order in which one core's writes become visible to others. Sequential consistency is the simplest to reason about. Real processors use relaxed models. Under total store order, used by x86, both reads in this test can return zero, because each store can wait in a store buffer. Programmers use fences to enforce order where it matters."},
-  {cam:"wide", focus:["cores","ring","L3"], glow:"#5fd3c6", anim:"ring",
-   text:"That completes the tour. Power limits pushed designs to many cores. Each core uses pipelining and instruction-level parallelism. Caches hide memory latency, coherence keeps copies correct, the interconnect carries the traffic, and synchronization lets software use it all. Pick any lesson to replay it."}
+ {title:"Cache Coherence Protocols", steps:[
+  {topic:"Cache coherence and memory consistency", cam:"coh", focus:["L1D"], anim:"none", mesi:{pre:["I","I"]},
+   text:"In a multicore chip, each core has private caches, so the same address can live in several caches at once. Coherence guarantees that all cores see one up-to-date value for each location. Writes propagate to other cores, and writes to the same location are seen in the same order. Consistency is a separate question: in what order do writes to different locations become visible?"},
+  {topic:"Cache coherence and memory consistency", cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"none", tags:[{at:"core0", t:"x = 1;  r1 = y", dy:1.5, c:"#5fd3c6"}, {at:"core1", t:"y = 1;  r2 = x", dy:1.5, c:"#e39159"}],
+   text:"Sequential consistency requires the result to look like one interleaving of all cores' operations, each in program order. Real processors relax this. Under total store order, used by x86, each core's stores can wait in a store buffer, so in this test both reads may return zero. Programmers restore order with fence instructions and synchronization."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["core0.L1D"], anim:"mesi", mesi:{pre:["I","I"], post:["E","I"], run:"read0"},
+   text:"Snooping protocols broadcast every miss on a shared bus or ring, and every cache controller watches, or snoops, that traffic. The MESI protocol gives each line one of four states: Modified, Exclusive, Shared, or Invalid. Core zero reads X. No other cache has it, so the line enters the Exclusive state."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["E","I"], post:["S","S"], run:"read1"},
+   text:"Core one reads X. Core zero's controller snoops the request, and both copies become Shared."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["S","S"], post:["M","I"], run:"write0"},
+   text:"Core zero writes X. It broadcasts an invalidation. Core one's copy becomes Invalid, and core zero's becomes Modified."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["M","I"], post:["S","S"], run:"read1b"},
+   text:"Core one reads X again and misses. Core zero snoops the request, supplies the modified data, and writes it back. Both copies become Shared."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["L3","core0.L1D","core1.L1D"], anim:"mesi", mesi:{pre:["M","I"], post:["S","S"], run:"dir"}, tags:[{at:"L3", t:"directory: X → owner core 0", dy:1.0, c:"#a98bea"}],
+   text:"Broadcasting does not scale to many cores. A directory protocol keeps, at each line's home node, the line's state and a bit vector of its sharers. Here, core one's request goes to the home directory in the L3 slice, which forwards it only to core zero, the owner. Messages travel point to point instead of to every core."},
+  {topic:"Snoop Based and Directory Based Cache coherence Protocols", cam:"coh", focus:["core0.L1D","core1.L1D"], anim:"falseShare", mesi:{pre:["M","I"]}, tags:[{at:[0,1.6,-3.4], t:"one 64-byte line, two variables"}],
+   text:"Coherence is tracked per cache line. When two cores write different variables in the same line, the line bounces between them on every write. This false sharing hurts performance, and padding the data onto separate lines removes it."}
+ ]},
+ {title:"Primary Storage Systems", steps:[
+  {topic:"Introduction to DRAM System", cam:"mem", focus:["dram","mc"], anim:"slowMem",
+   text:"Main memory is built from DRAM. Each bit is stored as charge on a tiny capacitor with one access transistor, which makes DRAM dense and cheap, but slower than on-chip SRAM. The capacitors leak, so every row must be refreshed every few tens of milliseconds."},
+  {topic:"DRAM organization", cam:"dram", focus:["dramChips"], glow:"#5fd3c6", anim:"dram", tags:[{at:"dram", t:"channel › rank › chip › bank › row › column", dy:1.3}],
+   text:"A DRAM system is organized as channels, ranks, chips, banks, rows, and columns. A memory module holds one or more ranks of chips that work together on each access. Inside each chip, banks operate independently. An access activates a row, copying it into the row buffer, then reads columns from it. A hit in an open row buffer is fast. A row conflict needs a precharge and a new activate."},
+  {topic:"DRAM Controllers and Address Mapping", cam:"mem", focus:["mc"], anim:"miss", tags:[{at:"mc", t:"address → row | bank | column | channel", dy:0.9}],
+   text:"The memory controller turns cache misses into DRAM commands: activate, read, write, precharge, and refresh, while obeying the timing constraints. Scheduling policies such as first-ready, first-come-first-served prefer row-buffer hits. Address mapping decides which address bits select the channel, bank, row, and column, spreading accesses across banks to increase parallelism."}
+ ]},
+ {title:"Tiled Chip Multi-Core Processors & Network-on-Chip", steps:[
+  {topic:"Tiled Chip Multicore Processors (TCMP)", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"mesh", tags:[{at:[14,1.2,-5.2], t:"tile = core + caches + L3 slice + router"}],
+   text:"As core counts grow, chips are built from identical tiles. Each tile in a tiled chip multicore processor holds a core, its private caches, a slice of the shared last-level cache, and a router. The tiles are replicated in a grid, which simplifies design and scales to many cores."},
+  {topic:"Network on Chips (NoC)", cam:"ring", focus:["ring"], glow:"#f0b85a", anim:"ring",
+   text:"A network on chip replaces shared buses with packet-switched links and routers. Common topologies include the ring used in our four-core chip, the two-dimensional mesh, the torus, and the flattened butterfly. Designers compare them by hop count, bisection bandwidth, latency, area, and power."},
+  {topic:"Routing Algorithms", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"mesh", tags:[{at:[14,1.2,-5.2], t:"XY routing: X first, then Y"}],
+   text:"The routing algorithm chooses each packet's path. Dimension-order XY routing travels fully along X, then along Y. It is simple and deadlock-free. Adaptive routing can choose among several productive paths to avoid congestion, but it needs turn restrictions or virtual channels to avoid deadlock."},
+  {topic:"NoC router – architecture", cam:"router", focus:["meshDemo"], glow:"#f0b85a", anim:"mesh", tags:[{at:[14,1.5,-3.2], t:"5 ports: N · S · E · W · local"}, {at:[14,1.05,-3.2], t:"input buffers · VCs · crossbar"}],
+   text:"A mesh router has five ports: north, south, east, west, and the local tile. Each input port has buffers organized into virtual channels. A packet moves through the router pipeline: buffer write, route computation, virtual channel allocation, switch allocation, and switch traversal across the crossbar, followed by link traversal to the next router."},
+  {topic:"Routing and flow control", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"meshFlits", tags:[{at:[14,1.2,-5.2], t:"gold head flit · teal body · copper tail"}],
+   text:"Packets are split into flits. The head flit carries the routing information, and the body and tail flits follow it. With wormhole flow control, flits move as soon as the next router has buffer space, so one packet can stretch across several routers. Credit-based flow control tells each upstream router how many free buffers remain downstream."}
+ ]},
+ {title:"Energy Efficient NoCs", steps:[
+  {topic:"Introduction to deflection routing", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"meshDeflect", tags:[{at:[14,1.2,-5.2], t:"red = deflected flit"}],
+   text:"Router buffers take a large share of network power and area. Deflection routing removes them. Every flit that arrives must leave in the next cycle. If two flits want the same output port, one wins and the other is deflected to a different port, even if that port leads away from its destination."},
+  {topic:"Energy Efficient Buffer-less NoC Routers", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"meshDeflect",
+   text:"Bufferless routers, such as BLESS and CHIPPER, are built on this idea. They save significant energy and area at low and medium load. Their cost is the extra hops caused by deflections, which raise latency and dynamic energy as the network gets busy. They also need oldest-first arbitration to avoid livelock."},
+  {topic:"Side-buffered Deflection Routers", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"meshSide", tags:[{at:[14,1.2,-5.2], t:"gold flash = flit held in side buffer"}],
+   text:"Side-buffered deflection routers add a small buffer beside the router. When a flit would be deflected, it can be pulled into the side buffer and reinjected later, instead of being sent the wrong way. A few buffer slots cut deflections sharply, keeping most of the bufferless energy savings while improving performance under load."}
+ ]},
+ {title:"Quality of Service for TCMPs", steps:[
+  {topic:"QoS of NoC and Caches in TCMPs", cam:"mesh", focus:["meshDemo"], glow:"#f0b85a", anim:"meshQoS", tags:[{at:[14,1.2,-5.2], t:"gold = high-priority traffic"}],
+   text:"When many applications share a tiled chip, one of them can slow the others by flooding the network or filling the shared cache. Quality of service mechanisms keep performance fair and predictable. In the network, priority arbitration and bandwidth reservation let critical traffic through first. In the caches, way partitioning and smart insertion policies stop one application from evicting everyone else's data."},
+  {topic:"Emerging Trends in Network On Chips", cam:"mesh", focus:["meshDemo"], glow:"#5fd3c6", anim:"mesh",
+   text:"Emerging network-on-chip designs include three-dimensional stacked networks with vertical links, photonic interconnects that carry data on light, wireless on-chip links for long distances, chiplet systems joined through interposers, and networks that adapt to faults and security threats."},
+  {topic:"Domain Specific Accelerators", cam:"gpu", focus:[], anim:"systolic", tags:[{at:[-14,1.1,-5.6], t:"systolic array of multiply-accumulate units"}],
+   text:"General-purpose cores are not efficient for every task. Domain specific accelerators are built for one class of work, such as neural networks. A systolic array, like the one in Google's TPU, passes data in a wave between simple multiply-accumulate units, reusing each value many times and saving the energy of repeated memory accesses."},
+  {topic:"Course summary", cam:"wide", focus:["cores","ring","L3"], glow:"#5fd3c6", anim:"ring",
+   text:"That completes the twelve weeks: basic organization and pipelines, instruction-level parallelism, superscalar cores and GPUs, caches and their optimizations, coherence, DRAM, networks on chip, energy-efficient routers, quality of service, and accelerators. Choose any week to replay it."}
  ]}
 ];
 
@@ -244,7 +296,7 @@ function link(a,b,r,color,parent){
 const ALL_LABELS = [];
 function makeLabel(text, opts){
   opts = opts || {};
-  const c = document.createElement("canvas"); c.width = 1024; c.height = 128;
+  const c = document.createElement("canvas"); c.width = 256; c.height = 128;
   const tex = new THREE.CanvasTexture(c); tex.anisotropy = 4;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, depthTest:false, transparent:true}));
   s.renderOrder = 10; s.userData = {c, tex, h: opts.h || 0.34};
@@ -255,8 +307,9 @@ function setLabel(s, text, opts){
   opts = opts || {};
   s.userData.text = text; s.userData.opts = opts;
   const {c, tex, h} = s.userData; const g = c.getContext("2d");
-  const fs = 64; g.font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
-  const w = Math.min(1000, Math.ceil(g.measureText(text).width) + 56);
+  const fs = 64, font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`; g.font = font;
+  const w = Math.ceil(g.measureText(text).width) + 56;
+  c.width = Math.max(256, w + 16); g.font = font;   // resizing the canvas resets its state
   g.clearRect(0,0,c.width,c.height);
   const x0 = (c.width - w)/2;
   if (opts.badge !== false){
@@ -336,10 +389,11 @@ for (let k=-2;k<=2;k++){ // DDR traces
   link(V(x,0.02,-6.0), V(x,-0.18,-8.0), 0.025, 0xb08a4a);
   link(V(x,-0.18,-8.0), V(x,-0.58,-10.3), 0.025, 0xb08a4a);
 }
+const dramChips = [];
 const dramG = new THREE.Group(); dramG.position.set(0,0,-11); scene.add(dramG);
 [-0.45,0.45].forEach(z => {
   const b = box(5.2,1.25,0.1,0x1e5a40,0,0.03,z,dramG,{metal:0.2,rough:0.7}); reg("dram", b);
-  for (let k=0;k<8;k++){ const ch = box(0.5,0.55,0.08,0x14181d,-2.2+k*0.63,0.1,z+(z<0?-0.08:0.08),dramG,{hl:false,metal:0.3,rough:0.5}); }
+  for (let k=0;k<8;k++){ const ch = box(0.5,0.55,0.08,0x14181d,-2.2+k*0.63,0.1,z+(z<0?-0.08:0.08),dramG,{metal:0.3,rough:0.5}); reg("dramChips", ch); dramChips.push(ch); }
 });
 const draml = makeLabel("DRAM",{h:0.34}); draml.position.set(0,1.15,-11); scene.add(draml);
 scene.updateMatrixWorld(true);
@@ -347,16 +401,23 @@ const dramTop = V(0,0.75,-11);
 
 /* mesh-network demo (shown only in its step) */
 const meshDemo = new THREE.Group(); meshDemo.position.set(14,0,-2); scene.add(meshDemo); meshDemo.visible = false;
-const MESH_N = 4, MESH_S = 1.5;
+const MESH_N = 4, MESH_S = 1.5; const routers = [];
 const routerPos = (x,y) => V(14 + (x-1.5)*MESH_S, 0.4, -2 + (y-1.5)*MESH_S);
 box(6.6,0.16,6.6,0x222b36,0,-0.08,0,meshDemo,{hl:false,metal:0.5,rough:0.35});
 for (let x=0;x<MESH_N;x++) for (let y=0;y<MESH_N;y++){
   const lp = V((x-1.5)*MESH_S, 0.12, (y-1.5)*MESH_S);
-  const r = box(0.62,0.24,0.62,0x323d4a,lp.x,lp.y,lp.z,meshDemo); reg("meshDemo", r);
+  const r = box(0.62,0.24,0.62,0x323d4a,lp.x,lp.y,lp.z,meshDemo); reg("meshDemo", r); (routers[x] = routers[x] || [])[y] = r;
   box(0.3,0.1,0.3,0xb5713f,lp.x,lp.y+0.17,lp.z,meshDemo,{hl:false,metal:0.55,rough:0.4});
   if (x<MESH_N-1) reg("meshDemo", link(V(lp.x+0.31,0.12,lp.z), V(lp.x+MESH_S-0.31,0.12,lp.z), 0.04, 0xcf9a3e, meshDemo));
   if (y<MESH_N-1) reg("meshDemo", link(V(lp.x,0.12,lp.z+0.31), V(lp.x,0.12,lp.z+MESH_S-0.31), 0.04, 0xcf9a3e, meshDemo));
 }
+scene.updateMatrixWorld(true);
+
+/* GPU / accelerator demo (shown only in its steps) */
+const gpuDemo = new THREE.Group(); gpuDemo.position.set(-14,0,-2); scene.add(gpuDemo); gpuDemo.visible = false;
+box(6.9,0.16,6.9,0x222b36,0,-0.08,0,gpuDemo,{hl:false,metal:0.5,rough:0.35});
+const gpuCells = [];
+for (let y=0;y<8;y++) for (let x=0;x<8;x++){ const c = box(0.6,0.22,0.6,0x2c6178,(x-3.5)*0.8,0.11,(y-3.5)*0.8,gpuDemo); reg("gpuDemo", c); gpuCells[y*8+x] = c; }
 scene.updateMatrixWorld(true);
 
 /* MESI state badges */
@@ -399,7 +460,7 @@ function clearStep(){
   stepObjs.forEach(o => scene.remove(o)); stepObjs = [];
   flashes.clear();
   mesiLabels.forEach(s => s.visible = false);
-  meshDemo.visible = false;
+  meshDemo.visible = false; gpuDemo.visible = false;
 }
 
 /* routes */
@@ -416,6 +477,22 @@ const SLICE_MC = -Math.PI/2; // slice nearest the memory controller
 const coreToSlice = (i, a) => [...toRing(i), ...arc(cores[i].angle, a), topOf(slices[sliceAngles.indexOf(a)])];
 const sliceToCore = (a, i) => coreToSlice(i, a).reverse();
 const coreToDram = i => [topOf(cores[i].stages[3]), ...coreToSlice(i, Math.PI).slice(0), ringPoint(Math.PI), ...arc(Math.PI, SLICE_MC), V(0,0.42,-3.9), topOf(mc), V(0,0.25,-6), V(0,0.05,-8), dramTop];
+
+/* mesh routing helper: XY with optional random deflections */
+const rnd2 = () => [Math.floor(Math.random()*4), Math.floor(Math.random()*4)];
+function meshPath(s, d, pDef){
+  let x = s[0], y = s[1]; const pts = [routerPos(x,y)], coords = [[x,y]], defl = []; let hops = 0;
+  while ((x !== d[0] || y !== d[1]) && hops < 14){
+    hops++; let nx = x, ny = y;
+    if (x !== d[0]) nx += Math.sign(d[0]-x); else ny += Math.sign(d[1]-y);
+    if (pDef && Math.random() < pDef){
+      const opts = [[x+1,y],[x-1,y],[x,y+1],[x,y-1]].filter(([a,b]) => a>=0 && a<4 && b>=0 && b<4 && !(a===nx && b===ny));
+      if (opts.length){ [nx,ny] = opts[Math.floor(Math.random()*opts.length)]; defl.push(coords.length-1); }
+    }
+    x = nx; y = ny; pts.push(routerPos(x,y)); coords.push([x,y]);
+  }
+  return {pts, coords, defl};
+}
 
 /* ---------------------------------------------------------------- step animations */
 const TOK = {teal:0x5fd3c6, copper:0xe39159, grey:0x58626e, red:0xff5a4e, gold:0xf2c14e, white:0xe9eef3, violet:0xa98bea};
@@ -436,6 +513,9 @@ function pipeline(mode){
   every(reduceMotion ? 1100 : 780, () => {
     cycle++;
     toks.filter(t => t.s >= 4).forEach(fade); toks = toks.filter(t => t.s < 4);
+    if (mode==="serial"){ toks.forEach(t => { t.s++; move(t); }); if (!toks.length) toks.push(mk(palette[cycle % palette.length], 0)); return; }
+    const held = toks.find(t => t.s === 2 && t.hold > 0);
+    if (held){ held.hold--; toks.forEach(t => { if (t.s > 2){ t.s++; move(t); } }); return; }
     const stall = mode==="stall" && cycle % 6 === 0;
     const flushNow = mode==="flush" && cycle % 7 === 0;
     if (flushNow){
@@ -449,7 +529,9 @@ function pipeline(mode){
       let color = palette[(cycle + lane) % palette.length];
       if (mode==="smt") color = Math.random() < 0.5 ? TOK.teal : TOK.copper;
       if (mode==="smt" && Math.random() < 0.12) return;   // occasional empty slot
-      toks.push(mk(color, lane));
+      const t = mk(color, lane);
+      if (mode==="multi" && cycle % 5 === 0){ t.m.material.color.setHex(TOK.violet); t.hold = 3; }
+      toks.push(t);
     });
   });
 }
@@ -469,7 +551,32 @@ const ANIMS = {
     m.position.copy(p); m.scale.setScalar(0.6);
     tween(1600, k => { m.position.y = p.y + k*2.2; m.material.opacity = 1-k; }, () => remove(m)); }); },
   slowMem(){ every(5200, () => { packet(coreToDram(0), TOK.teal, 2.2, () => after(500, () => packet(coreToDram(0).reverse(), TOK.copper, 2.2))); }); },
-  pipe(){ pipeline("basic"); }, pipeStall(){ pipeline("stall"); }, pipeFlush(){ pipeline("flush"); },
+  pipe(){ pipeline("basic"); }, pipeSerial(){ pipeline("serial"); }, pipeMulti(){ pipeline("multi"); },
+  fetchExec(){ pipeline("serial"); every(2600, () => packet([topOf(cores[0].L1I), topOf(cores[0].stages[0])], TOK.white, 3, null, 0.8)); },
+  memIO(){ let k = 0; every(1700, () => { k++;
+    if (k % 2) packet([...toRing(0), ...arc(cores[0].angle, -Math.PI/2), V(0,0.42,-3.9), topOf(mc)], TOK.teal, 4, () => flash(mc, 0x5fd3c6, 600));
+    else packet([...toRing(0), ...arc(cores[0].angle, Math.PI/2), V(0,0.42,3.9), topOf(io)], TOK.copper, 4, () => flash(io, 0xe39159, 600)); }); },
+  evict(){ every(3200, () => { const a = topOf(cores[0].L1D), b = topOf(cores[0].L2);
+    packet([a,b], TOK.violet, 2.5, () => { flash(cores[0].L2, 0xa98bea, 600); after(250, () => packet([b,a], TOK.copper, 2.5, () => flash(cores[0].L1D, 0x7fe08a, 600))); }); }); },
+  prefetch(){ every(4200, () => { const path = coreToDram(0).reverse(); [0,260,520].forEach(d => after(d, () => packet(path, TOK.copper, 5, () => flash(cores[0].L1D, 0x7fe08a, 400), 0.8))); }); },
+  dram(){ let k = 0; every(1100, () => { const bank = k++ % 8;
+    packet([topOf(mc), V(0,0.25,-6), V(0,0.05,-8), dramTop], TOK.teal, 6, () => { flash(dramChips[bank], 0x5fd3c6, 900); flash(dramChips[8+bank], 0x5fd3c6, 900); }); }); },
+  gpu(){ gpuDemo.visible = true; let k = 0; every(520, () => { const r = k++ % 8; for (let x=0;x<8;x++) flash(gpuCells[r*8+x], 0x5fd3c6, 480); }); },
+  systolic(){ gpuDemo.visible = true; let k = 0; every(170, () => { const d = k++ % 16; for (let y=0;y<8;y++) for (let x=0;x<8;x++) if (x+y === d) flash(gpuCells[y*8+x], 0xe39159, 650); }); },
+  meshFlits(){ meshDemo.visible = true; every(1700, () => { const {pts} = meshPath(rnd2(), rnd2(), 0); if (pts.length < 3) return;
+    [TOK.gold, TOK.teal, TOK.teal, TOK.copper].forEach((c,i) => after(i*170, () => packet(pts, c, 2.6, null, 0.75))); }); },
+  meshDeflect(){ meshDemo.visible = true; every(420, () => { const {pts, defl} = meshPath(rnd2(), rnd2(), 0.3); if (pts.length < 2) return;
+    packet(pts, defl.length ? TOK.red : TOK.teal, 2.6, null, 0.85); }); },
+  meshSide(){ meshDemo.visible = true; every(520, () => {
+    const s = rnd2(), d = rnd2(); const {pts, coords, defl} = meshPath(s, d, 0.3); if (pts.length < 2) return;
+    if (!defl.length){ packet(pts, TOK.teal, 2.6, null, 0.85); return; }
+    const i = defl[0], c = coords[i];   // instead of deflecting here, wait in the side buffer, then go on by XY
+    packet(pts.slice(0, i+1).length > 1 ? pts.slice(0, i+1) : [pts[0], pts[0]], TOK.teal, 2.6, () => {
+      flash(routers[c[0]][c[1]], 0xf2c14e, 650);
+      after(600, () => { const rest = meshPath(c, d, 0).pts; if (rest.length > 1) packet(rest, TOK.gold, 2.6, null, 0.85); });
+    }, 0.85); }); },
+  meshQoS(){ meshDemo.visible = true; every(330, () => { const hi = Math.random() < 0.3; const {pts} = meshPath(rnd2(), rnd2(), 0); if (pts.length < 2) return;
+    packet(pts, hi ? TOK.gold : TOK.teal, hi ? 4 : 1.6, null, hi ? 1.1 : 0.75); }); }, pipeStall(){ pipeline("stall"); }, pipeFlush(){ pipeline("flush"); },
   pipeSuper(){ pipeline("super"); }, pipeSMT(){ pipeline("smt"); },
   hit(){ every(1500, () => { const a = topOf(cores[0].stages[3]), b = topOf(cores[0].L1D);
     packet([a,b], TOK.teal, 4, () => { flash(cores[0].L1D, 0x7fe08a, 500); packet([b,a], TOK.copper, 4); }); }); },
@@ -478,14 +585,8 @@ const ANIMS = {
     packet(path, TOK.teal, 4.2, () => { flash(R.dram[0], 0xffd27a, 700); flash(R.dram[1], 0xffd27a, 700);
       after(450, () => packet(path.slice().reverse(), TOK.copper, 4.2, () => flash(cores[0].L1D, 0x7fe08a, 600))); });
   }); },
-  mesh(){ meshDemo.visible = true; every(420, () => {
-    const s = [Math.floor(Math.random()*4), Math.floor(Math.random()*4)], d = [Math.floor(Math.random()*4), Math.floor(Math.random()*4)];
-    if (s[0]===d[0] && s[1]===d[1]) return;
-    const pts = [routerPos(s[0],s[1])]; let x = s[0], y = s[1];
-    while (x !== d[0]){ x += Math.sign(d[0]-x); pts.push(routerPos(x,y)); }
-    while (y !== d[1]){ y += Math.sign(d[1]-y); pts.push(routerPos(x,y)); }
-    packet(pts, Math.random()<0.5 ? TOK.teal : TOK.copper, 2.6, null, 0.9);
-  }); },
+  mesh(){ meshDemo.visible = true; every(420, () => { const {pts} = meshPath(rnd2(), rnd2(), 0); if (pts.length < 2) return;
+    packet(pts, Math.random()<0.5 ? TOK.teal : TOK.copper, 2.6, null, 0.9); }); },
   lock(){
     let holder = 0; const tag = own(makeLabel("holds lock",{h:0.3, c:"#f2c14e"}));
     const place = () => tag.position.copy(topOf(cores[holder].L1D, 0.8));
@@ -523,6 +624,12 @@ const MESI_RUN = {
     packet(coreToCore(0,1), TOK.red, 3.4, () => { flash(cores[1].L1D, 0xff3b30, 900); setMesi(1, "I");
       packet(coreToCore(1,0), TOK.white, 3.4, () => { flash(cores[0].L1D, 0xff7a5c, 700); done(); }); });
   },
+  dir(done){
+    const home = topOf(slices[sliceAngles.indexOf(SLICE_MC)]);
+    packet(coreToSlice(1, SLICE_MC), TOK.teal, 3.4, () => { flash(slices[sliceAngles.indexOf(SLICE_MC)], 0xa98bea, 800);
+      packet([home, ringPoint(SLICE_MC), ...arc(SLICE_MC, cores[0].angle), ...fromRing(0).slice(1)], TOK.violet, 3.4, () => {
+        packet(coreToCore(0,1), TOK.copper, 3.4, () => { flash(cores[1].L1D,0x5fd3c6,700); done(); }); }); });
+  },
   read1b(done){
     packet(coreToCore(1,0), TOK.teal, 3.4, () => {
       packet(coreToSlice(0, SLICE_MC), TOK.violet, 3.4);
@@ -540,9 +647,10 @@ function resolveAt(at){
 }
 const CAMS = {
   wide:{p:[0,15,13.5], t:[0,0,-1.6]}, heat:{p:[-7.5,6.5,2], t:[-3.4,0.4,-3.4]},
-  core0:{p:[-3.4,4.6,0.6], t:[-3.4,0.2,-3.5]}, pipe:{p:[-3.4,4.3,0.2], t:[-3.4,0.3,-4.3]},
+  core0:{p:[-3.4,4.6,0.6], t:[-3.4,0.2,-3.5]}, isa:{p:[-3.4,6.8,3.4], t:[-3.4,0.9,-3.2]}, pipe:{p:[-3.4,4.3,0.2], t:[-3.4,0.3,-4.3]},
   cache:{p:[-0.8,6.5,1.8], t:[-2,0,-2.6]}, mem:{p:[8,9.5,0], t:[-0.5,0,-5.6]},
-  coh:{p:[0,11.5,5.2], t:[0,0,-2.6]}, ring:{p:[0,5.2,4.2], t:[0,0,0]}, mesh:{p:[14,7.5,5.8], t:[14,0,-2]}
+  coh:{p:[0,11.5,5.2], t:[0,0,-2.6]}, ring:{p:[0,5.2,4.2], t:[0,0,0]}, mesh:{p:[14,7.5,5.8], t:[14,0,-2]},
+  router:{p:[14,5.6,3.2], t:[14,0.2,-2.4]}, gpu:{p:[-14,7.5,5.8], t:[-14,0,-2]}, dram:{p:[4.5,4.2,-5.8], t:[0,0.3,-11]}
 };
 let camTw = null;
 function flyTo(name){
@@ -572,8 +680,9 @@ const splitSentences = t => t.match(/[^.!?]+[.!?]+(\s|$)/g)?.map(s => s.trim()) 
 
 function renderStep(){
   const lesson = LESSONS[L], step = lesson.steps[S];
-  $("lessonNum").textContent = `Lesson ${L+1} of ${LESSONS.length}`;
+  $("lessonNum").textContent = `Week ${L+1} of ${LESSONS.length}`;
   $("lessonTitle").textContent = lesson.title;
+  $("topic").textContent = step.topic || "";
   sentences = splitSentences(step.text);
   $("caption").innerHTML = sentences.map((s,i) => `<span data-i="${i}">${s} </span>`).join("");
   const dots = $("dots"); dots.innerHTML = "";
@@ -591,7 +700,7 @@ function applyVisuals(){
   focusSet = new Set(); (step.focus || []).forEach(n => (R[n]||[]).forEach(m => focusSet.add(m)));
   glowColor = new THREE.Color(step.glow || "#e39159");
   flyTo(step.cam || "wide");
-  (step.tags || []).forEach(tg => { const s = own(makeLabel(tg.t, {h:0.34, c:tg.c || "#e3e8ee"})); s.position.copy(resolveAt(tg.at)).add(V(0, tg.dy ?? 0, 0)); });
+  (step.tags || []).forEach(tg => { const s = own(makeLabel(tg.t, {h:tg.h || 0.34, c:tg.c || "#e3e8ee"})); s.position.copy(resolveAt(tg.at)).add(V(0, tg.dy ?? 0, 0)); });
   if (step.mesi){ mesiLabels.forEach(s => s.visible = true); setMesi(0, step.mesi.pre[0]); setMesi(1, step.mesi.pre[1]); }
   (ANIMS[step.anim] || ANIMS.none)(step);
 }
@@ -644,7 +753,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight") $("next").click();
   if (e.key === "ArrowLeft") $("prev").click();
 });
-$("lessonList").innerHTML = LESSONS.map((l,i) => `<li><button data-l="${i}"><span class="n">${String(i+1).padStart(2,"0")}</span><span>${l.title}</span><span class="s">${l.steps.length} steps</span></button></li>`).join("");
+$("lessonList").innerHTML = LESSONS.map((l,i) => `<li><button data-l="${i}"><span class="n">W${String(i+1).padStart(2,"0")}</span><span>${l.title}</span><span class="s">${l.steps.length} steps</span></button></li>`).join("");
 document.querySelectorAll(".lessons button").forEach(b => b.onclick = () => goTo(+b.dataset.l, 0));
 
 /* ---------------------------------------------------------------- loop */
