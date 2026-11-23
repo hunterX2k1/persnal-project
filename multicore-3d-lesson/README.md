@@ -8,6 +8,7 @@ An unofficial, ADHD-friendly study companion for the NPTEL / YouTube course
 - **XP, streaks and a progress bar**, saved in your browser.
 - **10-minute focus sprints** with a break reminder.
 - "Full lecture ↗" opens the matching YouTube video when you want the deep dive.
+- Narration is pre-recorded MP3 audio in `audio/` (generated offline with the Piper TTS voice "lessac"), so it plays on any device.
 
 Open `index.html` in a browser and press **Play bite**.
 

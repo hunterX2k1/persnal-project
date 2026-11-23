@@ -160,11 +160,10 @@ h2{margin:0;font:600 19px/1.25 var(--font-display);text-wrap:balance}
       <div class="settings">
         <label for="voiceOn">Voice</label>
         <span class="toggle"><input type="checkbox" id="voiceOn" checked> Voice-over on</span>
-        <label for="voiceSel">Narrator</label>
-        <select id="voiceSel"><option>Default voice</option></select>
+        <select id="voiceSel" hidden><option>Default voice</option></select>
         <label for="rate">Speed</label>
         <select id="rate"><option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option><option value="1.5">1.5×</option></select>
-        <p class="voice-note" id="voiceNote">Narration uses your browser's built-in speech voices.</p>
+        <p class="voice-note" id="voiceNote">Narration is pre-recorded audio, so it works without any speech engine. Check your device volume and silent switch if you hear nothing.</p>
       </div>
     </details>
 
@@ -885,8 +884,20 @@ function loadVoices(){
   voiceSel.value = String(pref >= 0 ? pref : 0);
 }
 if (synth){ loadVoices(); synth.addEventListener ? synth.addEventListener("voiceschanged", loadVoices) : (synth.onvoiceschanged = loadVoices); }
-else { voiceOn.checked = false; voiceOn.disabled = true; voiceSel.disabled = true; $("voiceNote").textContent = "This browser has no speech voices, so captions advance on a timer instead."; }
 
+
+/* recorded narration: one mp3 per scene, with sentence start times for caption sync */
+const CLIPS = {"b00h":{"s":[0.0,1.318],"d":6.177},"b00c0":{"s":[0.0,2.723,8.801],"d":11.315},"b00c1":{"s":[0.0,2.584],"d":10.891},"b00q":{"s":[0.0],"d":2.27},"b01h":{"s":[0.0,3.605],"d":7.466},"b01c0":{"s":[0.0,5.231,7.35],"d":11.803},"b01c1":{"s":[0.0,2.526,7.745],"d":11.013},"b01q":{"s":[0.0],"d":2.967},"b02h":{"s":[0.0,3.628],"d":7.315},"b02c0":{"s":[0.0,3.466,5.829,9.295],"d":13.759},"b02c1":{"s":[0.0,8.934],"d":14.664},"b02q":{"s":[0.0],"d":4.488},"b03h":{"s":[0.0,2.665],"d":7.222},"b03c0":{"s":[0.0,2.688,6.05,8.598,12.587],"d":14.276},"b03c1":{"s":[0.0,6.31],"d":12.238},"b03q":{"s":[0.0],"d":2.189},"b04h":{"s":[0.0,3.118],"d":9.045},"b04c0":{"s":[0.0,3.025,8.906],"d":14.659},"b04c1":{"s":[0.0,2.409,7.71],"d":12.139},"b04q":{"s":[0.0,4.209],"d":5.736},"b05h":{"s":[0.0,3.675],"d":6.375},"b05c0":{"s":[0.0,3.083],"d":10.31},"b05c1":{"s":[0.0,0.819,3.495,9.26],"d":11.124},"b05q":{"s":[0.0],"d":5.591},"b06h":{"s":[0.0,3.605],"d":8.151},"b06c0":{"s":[0.0],"d":7.878},"b06c1":{"s":[0.0,4.151,8.708],"d":13.741},"b06q":{"s":[0.0],"d":2.038},"b07h":{"s":[0.0,3.141],"d":8.139},"b07c0":{"s":[0.0,3.361,7.245,10.363],"d":14.073},"b07c1":{"s":[0.0,5.602],"d":10.531},"b07q":{"s":[0.0],"d":5.591},"b08h":{"s":[0.0,3.779],"d":6.897},"b08c0":{"s":[0.0,4.906],"d":7.803},"b08c1":{"s":[0.0,0.97,6.839],"d":10.735},"b08q":{"s":[0.0,2.189],"d":5.156},"b09h":{"s":[0.0,3.536],"d":6.862},"b09c0":{"s":[0.0,4.139],"d":9.649},"b09c1":{"s":[0.0,3.385,5.33],"d":13.022},"b09q":{"s":[0.0],"d":2.978},"b10h":{"s":[0.0,4.035],"d":7.907},"b10c0":{"s":[0.0,2.827,8.29],"d":12.848},"b10c1":{"s":[0.0],"d":10.06},"b10q":{"s":[0.0],"d":3.524},"b11h":{"s":[0.0,4.046],"d":7.536},"b11c0":{"s":[0.0,5.579],"d":9.533},"b11c1":{"s":[0.0,0.97],"d":8.383},"b11q":{"s":[0.0,5.103],"d":6.595},"b12h":{"s":[0.0,3.721],"d":7.083},"b12c0":{"s":[0.0,5.765],"d":7.547},"b12c1":{"s":[0.0,3.199,7.628],"d":10.363},"b12q":{"s":[0.0],"d":2.433},"b13h":{"s":[0.0,3.582],"d":7.222},"b13c0":{"s":[0.0,3.954,8.36],"d":11.628},"b13c1":{"s":[0.0,2.247],"d":9.184},"b13q":{"s":[0.0],"d":3.28},"b14h":{"s":[0.0,4.441],"d":9.533},"b14c0":{"s":[0.0,6.067],"d":10.101},"b14c1":{"s":[0.0,4.662],"d":8.43},"b14q":{"s":[0.0],"d":3.013},"b15h":{"s":[0.0,4.395],"d":7.919},"b15c0":{"s":[0.0,4.998],"d":7.977},"b15c1":{"s":[0.0,3.176],"d":9.08},"b15q":{"s":[0.0],"d":2.456},"b16h":{"s":[0.0,4.325],"d":8.964},"b16c0":{"s":[0.0,6.717],"d":9.614},"b16c1":{"s":[0.0],"d":9.016},"b16q":{"s":[0.0],"d":3.524},"b17h":{"s":[0.0,4.546],"d":7.559},"b17c0":{"s":[0.0,5.393],"d":7.803},"b17c1":{"s":[0.0,5.974,8.859],"d":13.556},"b17q":{"s":[0.0],"d":4.488},"b18h":{"s":[0.0,3.64],"d":7.826},"b18c0":{"s":[0.0,3.965,8.163],"d":10.084},"b18c1":{"s":[0.0,4.406],"d":10.589},"b18q":{"s":[0.0],"d":3.176},"b19h":{"s":[0.0,3.768],"d":8.476},"b19c0":{"s":[0.0,3.884],"d":11.541},"b19c1":{"s":[0.0,6.101],"d":9.649},"b19q":{"s":[0.0],"d":2.816},"b20h":{"s":[0.0,4.279],"d":7.361},"b20c0":{"s":[0.0,6.171,8.557],"d":11.385},"b20c1":{"s":[0.0,2.758],"d":8.29},"b20q":{"s":[0.0,3.338],"d":4.726},"b21h":{"s":[0.0,3.443],"d":6.735},"b21c0":{"s":[0.0,3.06],"d":9.544},"b21c1":{"s":[0.0,3.617,9.358],"d":13.498},"b21q":{"s":[0.0],"d":2.851},"b22h":{"s":[0.0,4.325],"d":8.012},"b22c0":{"s":[0.0,2.63,6.166],"d":8.621},"b22c1":{"s":[0.0,2.746,7.118],"d":10.746},"b22q":{"s":[0.0],"d":2.99},"b23h":{"s":[0.0,3.954],"d":7.547},"b23c0":{"s":[0.0,2.259,4.413,6.857],"d":9.754},"b23c1":{"s":[0.0,5.3],"d":10.125},"b23q":{"s":[0.0,5.149],"d":6.026},"b24h":{"s":[0.0,4.081],"d":8.859},"b24c0":{"s":[0.0,4.522],"d":9.033},"b24c1":{"s":[0.0],"d":7.808},"b24q":{"s":[0.0],"d":2.688},"b25h":{"s":[0.0,4.267],"d":7.245},"b25c0":{"s":[0.0],"d":11.639},"b25c1":{"s":[0.0,3.036,5.492],"d":11.768},"b25q":{"s":[0.0],"d":1.968},"b26h":{"s":[0.0,5.196],"d":7.988},"b26c0":{"s":[0.0,1.051],"d":10.368},"b26c1":{"s":[0.0],"d":6.194},"b26q":{"s":[0.0,3.93],"d":5.655},"b27h":{"s":[0.0,5.08],"d":8.232},"b27c0":{"s":[0.0,4.673],"d":12.992},"b27c1":{"s":[0.0,0.981],"d":7.652},"b27q":{"s":[0.0,3.524,7.211,9.597],"d":10.532},"b28h":{"s":[0.0,3.849],"d":8.65},"b28c0":{"s":[0.0,3.582,6.409],"d":10.328},"b28c1":{"s":[0.0,5.904,8.406],"d":13.312},"b28q":{"s":[0.0],"d":3.698},"b29h":{"s":[0.0,3.826],"d":7.536},"b29c0":{"s":[0.0,2.665],"d":7.199},"b29c1":{"s":[0.0,1.515],"d":5.492},"b29c2":{"s":[0.0,1.632,4.018],"d":7.6},"b29c3":{"s":[0.0,1.678],"d":5.469},"b29q":{"s":[0.0],"d":3.675},"b30h":{"s":[0.0,3.489],"d":6.862},"b30c0":{"s":[0.0,1.782,6.758],"d":11.466},"b30c1":{"s":[0.0,6.09],"d":9.834},"b30q":{"s":[0.0],"d":3.118},"b31h":{"s":[0.0,4.116],"d":8.58},"b31c0":{"s":[0.0,5.683],"d":10.101},"b31c1":{"s":[0.0,6.02],"d":8.801},"b31q":{"s":[0.0,2.897],"d":3.925},"b32h":{"s":[0.0,3.211],"d":7.687},"b32c0":{"s":[0.0,1.701,7.187],"d":11.837},"b32c1":{"s":[0.0,5.544,9.44,11.257],"d":14.804},"b32q":{"s":[0.0],"d":1.957},"b33h":{"s":[0.0,3.814],"d":6.375},"b33c0":{"s":[0.0],"d":8.76},"b33c1":{"s":[0.0,4.894],"d":11.495},"b33q":{"s":[0.0],"d":3.582},"b34h":{"s":[0.0,3.152],"d":7.64},"b34c0":{"s":[0.0,2.746],"d":10.496},"b34c1":{"s":[0.0,2.34,5.69],"d":9.504},"b34q":{"s":[0.0],"d":3.094},"b35h":{"s":[0.0,3.942],"d":7.698},"b35c0":{"s":[0.0,1.782],"d":10.299},"b35c1":{"s":[0.0,5.184],"d":12.133},"b35q":{"s":[0.0],"d":3.071},"b36h":{"s":[0.0,4.499],"d":7.478},"b36c0":{"s":[0.0,3.733],"d":9.289},"b36c1":{"s":[0.0,3.698],"d":9.985},"b36q":{"s":[0.0],"d":2.967},"b37h":{"s":[0.0,3.698],"d":8.337},"b37c0":{"s":[0.0,5.103],"d":7.745},"b37c1":{"s":[0.0,4.476],"d":10.589},"b37q":{"s":[0.0],"d":1.562},"b38h":{"s":[0.0,4.023],"d":7.919},"b38c0":{"s":[0.0,5.614],"d":8.755},"b38c1":{"s":[0.0,8.957],"d":12.354},"b38q":{"s":[0.0],"d":2.99},"b39h":{"s":[0.0,3.327],"d":6.398},"b39c0":{"s":[0.0,1.991],"d":8.685},"b39c1":{"s":[0.0,3.733],"d":10.345},"b39q":{"s":[0.0],"d":4.221},"b40h":{"s":[0.0,4.221],"d":8.221},"b40c0":{"s":[0.0,4.151],"d":10.659},"b40c1":{"s":[0.0,3.42,7.025],"d":9.806},"b40q":{"s":[0.0],"d":3.57},"b41h":{"s":[0.0,3.315],"d":6.224},"b41c0":{"s":[0.0,3.594],"d":9.451},"b41c1":{"s":[0.0],"d":7.541},"b41q":{"s":[0.0],"d":2.943},"b42h":{"s":[0.0,3.745],"d":7.118},"b42c0":{"s":[0.0,5.068],"d":10.345},"b42c1":{"s":[0.0],"d":5.556},"b42q":{"s":[0.0,1.817,2.926],"d":4.047},"b43h":{"s":[0.0,5.382],"d":8.395},"b43c0":{"s":[0.0,4.604],"d":10.45},"b43c1":{"s":[0.0],"d":9.259},"b43q":{"s":[0.0],"d":2.607},"b44h":{"s":[0.0,3.756],"d":8.372},"b44c0":{"s":[0.0],"d":10.049},"b44c1":{"s":[0.0,5.73],"d":9.033},"b44q":{"s":[0.0],"d":2.851},"b45h":{"s":[0.0,3.536],"d":7.385},"b45c0":{"s":[0.0,3.431],"d":8.139},"b45c1":{"s":[0.0,6.577],"d":10.473},"b45q":{"s":[0.0],"d":2.305},"b46h":{"s":[0.0,4.569],"d":8.383},"b46c0":{"s":[0.0],"d":6.786},"b46c1":{"s":[0.0],"d":11.012},"b46q":{"s":[0.0],"d":2.909},"b47h":{"s":[0.0,3.988],"d":6.943},"b47c0":{"s":[0.0],"d":9.329},"b47c1":{"s":[0.0,7.135],"d":10.566},"b47q":{"s":[0.0],"d":4.94},"b48h":{"s":[0.0,3.582],"d":7.361},"b48c0":{"s":[0.0],"d":10.838},"b48c1":{"s":[0.0,6.949],"d":10.949},"b48q":{"s":[0.0],"d":4.012},"ok":{"s":[0.0],"d":0.784},"got":{"s":[0.0],"d":0.923},"brk":{"s":[0.0],"d":2.409}};
+const audio = new Audio(); audio.preload = "auto";
+const sfx = new Audio();
+let audioBroken = false;
+const pad2 = n => String(n).padStart(2,"0");
+const clipFor = (l, s) => "b" + pad2(l) + (s === BITES[l].cards.length ? "q" : "c" + s);
+function playClip(el, id, from){
+  el.src = "audio/" + id + ".mp3" + (from ? "#t=" + from : "");
+  el.playbackRate = parseFloat(rateSel.value) || 1;
+  const p = el.play(); return p && p.catch ? p : Promise.resolve();
+}
 const splitSentences = t => t.match(/[^.!?]+[.!?]+(\s|$)/g)?.map(s => s.trim()) || [t];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const bite = () => BITES[L];
@@ -940,7 +951,7 @@ function answer(btn){
     toast(firstTry ? "Bite complete · +10 XP" : "Bite complete · +4 XP");
   }
   $("doneChip").hidden = false;
-  if (playing) say(firstTry ? "Correct!" : "That's it.");
+  if (playing) say(firstTry ? "ok" : "got");
   setPlayLabel();
 }
 function renderStep(){
@@ -976,14 +987,34 @@ function applyVisuals(){
   if (card.mesi){ mesiLabels.forEach(s => s.visible = true); setMesi(0, card.mesi.pre[0]); setMesi(1, card.mesi.pre[1]); }
   (ANIMS[card.anim] || ANIMS.none)(card);
 }
-function stopSpeech(){ gen++; if (synth) synth.cancel(); clearTimeout(narrTimer); narrTimer = null; }
-function say(text){ if (voiceOn.checked && synth){ const u = new SpeechSynthesisUtterance(text); u.rate = parseFloat(rateSel.value)||1; const v = voices[+voiceSel.value]; if (v) u.voice = v; synth.speak(u); } }
+function stopSpeech(){ gen++; if (synth) synth.cancel(); audio.pause(); audio.ontimeupdate = audio.onended = audio.onerror = null; clearTimeout(narrTimer); narrTimer = null; }
+function say(id){ if (voiceOn.checked && !audioBroken && CLIPS[id]) playClip(sfx, id).catch(() => {}); }
 function speakFrom(i){
   const my = gen; sentIdx = i;
   if (i >= sentences.length){
     markSentence(sentences.length);
     if (onQuiz()) return;                                   // wait for an answer: no auto-skip past the quiz
     narrTimer = setTimeout(() => { if (my===gen && playing) goTo(L, S+1); }, 900);
+    return;
+  }
+  const id = clipFor(L, S), clip = CLIPS[id];
+  if (voiceOn.checked && !audioBroken && clip && clip.s.length === sentences.length){
+    const finish = () => { if (my !== gen) return; audio.ontimeupdate = audio.onended = audio.onerror = null; sentIdx = sentences.length; speakFrom(sentences.length); };
+    const startMain = () => {
+      if (my !== gen) return;
+      markSentence(i);
+      audio.ontimeupdate = () => { if (my !== gen) return; let k = 0; while (k+1 < clip.s.length && audio.currentTime + 0.05 >= clip.s[k+1]) k++; if (k !== sentIdx){ sentIdx = k; markSentence(k); } };
+      audio.onended = finish;
+      audio.onerror = () => { audioBroken = true; if (my === gen) speakFrom(sentIdx); };
+      playClip(audio, id, clip.s[i] || 0).catch(err => { if (my !== gen) return; if (err && err.name === "NotAllowedError"){ setPlaying(false); toast("Tap Play to turn on sound"); } else { audioBroken = true; speakFrom(i); } });
+    };
+    const hook = "b" + pad2(L) + "h";
+    if (i === 0 && S === 0 && CLIPS[hook]){            // read the title and hook first
+      markSentence(-1);
+      audio.onended = startMain; audio.ontimeupdate = null;
+      audio.onerror = () => { audioBroken = true; if (my === gen) speakFrom(0); };
+      playClip(audio, hook).catch(err => { if (my !== gen) return; if (err && err.name === "NotAllowedError"){ setPlaying(false); toast("Tap Play to turn on sound"); } else startMain(); });
+    } else startMain();
     return;
   }
   markSentence(i);
@@ -1042,7 +1073,7 @@ function startSprint(){
   const tick = () => {
     const left = Math.max(0, sprintEnd - Date.now()), m = Math.floor(left/60000), s = Math.floor(left/1000) % 60;
     $("timerBtn").textContent = `Focus ${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-    if (!left){ stopSprint(); stopSpeech(); setPlaying(false); $("breakBar").hidden = false; say("Sprint done. Take a three minute break."); }
+    if (!left){ stopSprint(); stopSpeech(); setPlaying(false); $("breakBar").hidden = false; say("brk"); }
   };
   clearInterval(sprintTick); sprintTick = setInterval(tick, 1000); tick();
 }
